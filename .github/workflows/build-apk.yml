@@ -1,0 +1,49 @@
+name: Gerar APK Dyno Lite
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Baixar projeto
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Configurar Gradle 9.3.1 sem cache antigo
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
+          cache-disabled: true
+          validate-wrappers: false
+
+      - name: Mostrar versão do Gradle
+        run: gradle --version
+
+      - name: Gerar APK
+        run: gradle assembleDebug --stacktrace
+
+      - name: Verificar APK
+        run: find app/build/outputs/apk -type f -name "*.apk" -print
+
+      - name: Salvar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dyno-Lite-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 30
+          if-no-files-found: error

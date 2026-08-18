@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">Dyno Lite</string>
+    <string name="prototype_subtitle">Protótipo de sensores</string>
+    <string name="version_label">0.6.0</string>
+    <string name="btn_test_sensors">Testar sensores</string>
+    <string name="btn_settings">Configuração</string>
+    <string name="btn_start_test">Iniciar teste</string>
+    <string name="title_sensors_test">TESTE DE SENSORES</string>
+    <string name="btn_back">Voltar</string>
+    <string name="section_raw_accelerometer">ACELERÔMETRO BRUTO</string>
+    <string name="section_linear_acceleration">ACELERAÇÃO LINEAR</string>
+    <string name="section_gyroscope">GIROSCÓPIO</string>
+    <string name="section_gps">GPS</string>
+    <string name="section_sampling">AMOSTRAGEM</string>
+    <string name="sensor_unavailable">Acelerômetro indisponível</string>
+    <string name="linear_sensor_unavailable">Aceleração linear indisponível</string>
+    <string name="gyro_sensor_unavailable">indisponível</string>
+</resources>
