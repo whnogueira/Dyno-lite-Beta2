@@ -64,6 +64,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,6 +80,7 @@ import androidx.core.content.ContextCompat
 import java.util.Locale
 import kotlin.math.abs
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -219,6 +221,33 @@ fun SensorScreen(
     "Y" -> offsetY
     else -> offsetZ
   }
+
+  // Experimental Velocity Integration States
+  var isIntegrating by remember { mutableStateOf(false) }
+  var integratedVelocityMs by remember { mutableFloatStateOf(0f) }
+  var integrationElapsedSeconds by remember { mutableFloatStateOf(0f) }
+
+  val currentAceleracaoFiltrada by rememberUpdatedState(aceleracaoFiltrada)
+
+  LaunchedEffect(isIntegrating) {
+    if (isIntegrating) {
+      var lastNanoTime = System.nanoTime()
+      while (isActive) {
+        delay(20L)
+        val now = System.nanoTime()
+        val dt = (now - lastNanoTime) / 1_000_000_000f
+        lastNanoTime = now
+
+        if (dt > 0f && dt <= 0.1f) {
+          val novaVelocidade = (integratedVelocityMs + currentAceleracaoFiltrada * dt).coerceAtLeast(0f)
+          integratedVelocityMs = novaVelocidade
+          integrationElapsedSeconds += dt
+        }
+      }
+    }
+  }
+
+  val integratedVelocityKmh = integratedVelocityMs * 3.6f
 
   // GPS States
   var hasLocationPermission by remember {
@@ -587,6 +616,7 @@ fun SensorScreen(
           currentOffset = currentOffset,
           calibrationStatus = calibrationStatus,
           isCalibrating = isCalibrating,
+          isMeasuring = isIntegrating,
           onCalibrateZero = {
             scope.launch {
               isCalibrating = true
@@ -599,7 +629,31 @@ fun SensorScreen(
           }
         )
 
-        // 4. GIROSCÓPIO (Real Sensor Readings)
+        // 4. VELOCIDADE EXPERIMENTAL (Integração experimental da aceleração longitudinal filtrada)
+        ExperimentalVelocityCard(
+          isIntegrating = isIntegrating,
+          isCalibrated = isCalibrated,
+          elapsedSeconds = integrationElapsedSeconds,
+          velocityMs = integratedVelocityMs,
+          velocityKmh = integratedVelocityKmh,
+          onStart = {
+            if (isCalibrated && !isIntegrating) {
+              integratedVelocityMs = 0f
+              integrationElapsedSeconds = 0f
+              isIntegrating = true
+            }
+          },
+          onStop = {
+            isIntegrating = false
+          },
+          onReset = {
+            isIntegrating = false
+            integratedVelocityMs = 0f
+            integrationElapsedSeconds = 0f
+          }
+        )
+
+        // 5. GIROSCÓPIO (Real Sensor Readings)
         SensorCard(
           title = "GIROSCÓPIO",
           icon = Icons.Outlined.Explore,
@@ -845,10 +899,12 @@ private fun LongitudinalAxisCard(
   currentOffset: Float,
   calibrationStatus: String,
   isCalibrating: Boolean,
+  isMeasuring: Boolean,
   onCalibrateZero: () -> Unit,
   modifier: Modifier = Modifier,
   testTag: String = "longitudinal_axis_card"
 ) {
+  val isInteractionDisabled = isCalibrating || isMeasuring
   Card(
     modifier = modifier
       .fillMaxWidth()
@@ -901,7 +957,7 @@ private fun LongitudinalAxisCard(
           val isSelected = selectedAxis == axis
           Button(
             onClick = { onAxisSelected(axis) },
-            enabled = !isCalibrating,
+            enabled = !isInteractionDisabled,
             modifier = Modifier
               .weight(1f)
               .height(44.dp)
@@ -951,7 +1007,7 @@ private fun LongitudinalAxisCard(
         Switch(
           checked = invertSignal,
           onCheckedChange = onInvertSignalChanged,
-          enabled = !isCalibrating,
+          enabled = !isInteractionDisabled,
           modifier = Modifier.testTag("invert_signal_switch"),
           colors = SwitchDefaults.colors(
             checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
@@ -974,7 +1030,7 @@ private fun LongitudinalAxisCard(
       ) {
         Button(
           onClick = onCalibrateZero,
-          enabled = !isCalibrating,
+          enabled = !isInteractionDisabled,
           modifier = Modifier
             .fillMaxWidth()
             .height(44.dp)
@@ -1037,6 +1093,176 @@ private fun LongitudinalAxisCard(
           value = String.format(Locale.US, "%.3f m/s²", filteredAcceleration)
         )
         SensorValueRow(label = "Direção", value = direction)
+      }
+    }
+  }
+}
+
+@Composable
+private fun ExperimentalVelocityCard(
+  isIntegrating: Boolean,
+  isCalibrated: Boolean,
+  elapsedSeconds: Float,
+  velocityMs: Float,
+  velocityKmh: Float,
+  onStart: () -> Unit,
+  onStop: () -> Unit,
+  onReset: () -> Unit,
+  modifier: Modifier = Modifier,
+  testTag: String = "experimental_velocity_card"
+) {
+  Card(
+    modifier = modifier
+      .fillMaxWidth()
+      .then(if (testTag.isNotEmpty()) Modifier.testTag(testTag) else Modifier),
+    shape = RoundedCornerShape(18.dp),
+    colors = CardDefaults.cardColors(
+      containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+    ),
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 20.dp, vertical = 16.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      // Card Header
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        Icon(
+          imageVector = Icons.Outlined.Speed,
+          contentDescription = null,
+          tint = MaterialTheme.colorScheme.primary,
+          modifier = Modifier.size(20.dp)
+        )
+        Text(
+          text = "VELOCIDADE EXPERIMENTAL",
+          style = MaterialTheme.typography.labelLarge.copy(
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.8.sp,
+            fontSize = 13.sp,
+          ),
+          color = MaterialTheme.colorScheme.primary,
+        )
+      }
+
+      HorizontalDivider(
+        thickness = 0.8.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+      )
+
+      // Three Action Buttons: INICIAR, PARAR, ZERAR
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+      ) {
+        // INICIAR
+        Button(
+          onClick = onStart,
+          enabled = isCalibrated && !isIntegrating,
+          modifier = Modifier
+            .weight(1f)
+            .height(44.dp)
+            .testTag("btn_start_integration"),
+          shape = RoundedCornerShape(12.dp),
+          colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+            disabledContentColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f)
+          ),
+          contentPadding = PaddingValues(0.dp)
+        ) {
+          Text(
+            text = "INICIAR",
+            style = MaterialTheme.typography.labelLarge.copy(
+              fontWeight = FontWeight.Bold,
+              fontSize = 13.sp
+            )
+          )
+        }
+
+        // PARAR
+        Button(
+          onClick = onStop,
+          enabled = isIntegrating,
+          modifier = Modifier
+            .weight(1f)
+            .height(44.dp)
+            .testTag("btn_stop_integration"),
+          shape = RoundedCornerShape(12.dp),
+          colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.error,
+            contentColor = MaterialTheme.colorScheme.onError,
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+          ),
+          contentPadding = PaddingValues(0.dp)
+        ) {
+          Text(
+            text = "PARAR",
+            style = MaterialTheme.typography.labelLarge.copy(
+              fontWeight = FontWeight.Bold,
+              fontSize = 13.sp
+            )
+          )
+        }
+
+        // ZERAR
+        Button(
+          onClick = onReset,
+          enabled = !isIntegrating,
+          modifier = Modifier
+            .weight(1f)
+            .height(44.dp)
+            .testTag("btn_reset_integration"),
+          shape = RoundedCornerShape(12.dp),
+          colors = ButtonDefaults.filledTonalButtonColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f),
+            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+          ),
+          contentPadding = PaddingValues(0.dp)
+        ) {
+          Text(
+            text = "ZERAR",
+            style = MaterialTheme.typography.labelLarge.copy(
+              fontWeight = FontWeight.Bold,
+              fontSize = 13.sp
+            )
+          )
+        }
+      }
+
+      HorizontalDivider(
+        thickness = 0.8.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+      )
+
+      // Key-Value Items
+      Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+      ) {
+        SensorValueRow(
+          label = "Estado",
+          value = if (isIntegrating) "medindo" else "parado"
+        )
+        SensorValueRow(
+          label = "Tempo",
+          value = String.format(Locale.US, "%.2f s", elapsedSeconds)
+        )
+        SensorValueRow(
+          label = "Velocidade integrada",
+          value = String.format(Locale.US, "%.2f m/s", velocityMs)
+        )
+        SensorValueRow(
+          label = "Velocidade integrada",
+          value = String.format(Locale.US, "%.1f km/h", velocityKmh)
+        )
       }
     }
   }
