@@ -1,11 +1,19 @@
 package com.example
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Bundle
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,6 +54,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableFloatStateOf
@@ -62,6 +71,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -76,6 +86,10 @@ fun SensorScreen(
   val sensorManager = remember {
     context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
   }
+  val locationManager = remember {
+    context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+  }
+
   val accelerometerSensor = remember(sensorManager) {
     sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
   }
@@ -103,6 +117,104 @@ fun SensorScreen(
   var gyroZ by remember { mutableFloatStateOf(0f) }
 
   var samplingFrequencyHz by remember { mutableDoubleStateOf(0.0) }
+
+  // GPS States
+  var hasLocationPermission by remember {
+    mutableStateOf(
+      ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.ACCESS_FINE_LOCATION
+      ) == PackageManager.PERMISSION_GRANTED ||
+      ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.ACCESS_COARSE_LOCATION
+      ) == PackageManager.PERMISSION_GRANTED
+    )
+  }
+
+  val permissionLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestMultiplePermissions()
+  ) { permissions ->
+    hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+      permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+  }
+
+  LaunchedEffect(Unit) {
+    if (!hasLocationPermission) {
+      permissionLauncher.launch(
+        arrayOf(
+          Manifest.permission.ACCESS_FINE_LOCATION,
+          Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+      )
+    }
+  }
+
+  var isGpsProviderEnabled by remember {
+    mutableStateOf(
+      locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) ?: false
+    )
+  }
+  var hasGpsFix by remember { mutableStateOf(false) }
+  var gpsSpeedKmh by remember { mutableFloatStateOf(0.0f) }
+  var gpsAccuracyM by remember { mutableFloatStateOf(0.0f) }
+
+  DisposableEffect(locationManager, hasLocationPermission) {
+    if (locationManager != null && hasLocationPermission) {
+      isGpsProviderEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+
+      val locationListener = object : LocationListener {
+        override fun onLocationChanged(location: Location) {
+          hasGpsFix = true
+          val rawSpeed = if (location.hasSpeed()) location.speed else 0f
+          val speedKmh = (rawSpeed * 3.6f).coerceAtLeast(0f)
+          gpsSpeedKmh = speedKmh
+          gpsAccuracyM = location.accuracy
+        }
+
+        override fun onProviderEnabled(provider: String) {
+          if (provider == LocationManager.GPS_PROVIDER) {
+            isGpsProviderEnabled = true
+          }
+        }
+
+        override fun onProviderDisabled(provider: String) {
+          if (provider == LocationManager.GPS_PROVIDER) {
+            isGpsProviderEnabled = false
+            hasGpsFix = false
+          }
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {
+          // No-op
+        }
+      }
+
+      try {
+        locationManager.requestLocationUpdates(
+          LocationManager.GPS_PROVIDER,
+          500L,
+          0f,
+          locationListener
+        )
+      } catch (e: SecurityException) {
+        hasLocationPermission = false
+      } catch (e: IllegalArgumentException) {
+        // GPS provider might not exist in some environments
+      }
+
+      onDispose {
+        try {
+          locationManager.removeUpdates(locationListener)
+        } catch (e: Exception) {
+          // Safe cleanup
+        }
+      }
+    } else {
+      onDispose { }
+    }
+  }
 
   DisposableEffect(sensorManager, accelerometerSensor, linearAccelerationSensor, gyroscopeSensor) {
     if (sensorManager != null) {
@@ -196,6 +308,21 @@ fun SensorScreen(
       }
     } else {
       onDispose { }
+    }
+  }
+
+  val (gpsSpeedText, gpsAccuracyText) = when {
+    !hasLocationPermission -> {
+      "0.0 km/h" to "permissão negada"
+    }
+    !isGpsProviderEnabled -> {
+      "0.0 km/h" to "GPS desligado"
+    }
+    !hasGpsFix -> {
+      "0.0 km/h" to "aguardando GPS"
+    }
+    else -> {
+      String.format(Locale.US, "%.1f km/h", gpsSpeedKmh) to String.format(Locale.US, "%.1f m", gpsAccuracyM)
     }
   }
 
@@ -297,13 +424,13 @@ fun SensorScreen(
           testTag = "gyroscope_card"
         )
 
-        // 4. GPS (Fixo em zero / indisponível)
+        // 4. GPS
         SensorDataCard(
           title = "GPS",
           icon = Icons.Outlined.LocationOn,
           items = listOf(
-            "Velocidade" to "0.0 km/h",
-            "Precisão" to "indisponível"
+            "Velocidade" to gpsSpeedText,
+            "Precisão" to gpsAccuracyText
           )
         )
 
