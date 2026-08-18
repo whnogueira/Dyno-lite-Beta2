@@ -119,6 +119,10 @@ fun SensorScreen(
   var linearY by remember { mutableFloatStateOf(0f) }
   var linearZ by remember { mutableFloatStateOf(0f) }
 
+  var filteredLinearX by remember { mutableFloatStateOf(0f) }
+  var filteredLinearY by remember { mutableFloatStateOf(0f) }
+  var filteredLinearZ by remember { mutableFloatStateOf(0f) }
+
   var gyroX by remember { mutableFloatStateOf(0f) }
   var gyroY by remember { mutableFloatStateOf(0f) }
   var gyroZ by remember { mutableFloatStateOf(0f) }
@@ -176,19 +180,37 @@ fun SensorScreen(
     }
   }
 
+  // Aceleração corrigida (sem filtro)
   val corrigidoX = linearX - offsetX
   val corrigidoY = linearY - offsetY
   val corrigidoZ = linearZ - offsetZ
 
-  val rawAxisValue = when (selectedAxis) {
+  val rawCorrigido = when (selectedAxis) {
     "X" -> corrigidoX
     "Y" -> corrigidoY
     else -> corrigidoZ
   }
-  val valorLongitudinal = if (invertSignal) rawAxisValue * -1f else rawAxisValue
+  val aceleracaoCorrigida = if (invertSignal) rawCorrigido * -1f else rawCorrigido
+
+  // Aceleração filtrada corrigida
+  val filtradoX = filteredLinearX - offsetX
+  val filtradoY = filteredLinearY - offsetY
+  val filtradoZ = filteredLinearZ - offsetZ
+
+  val rawFiltrado = when (selectedAxis) {
+    "X" -> filtradoX
+    "Y" -> filtradoY
+    else -> filtradoZ
+  }
+  val filtradoInvertido = if (invertSignal) rawFiltrado * -1f else rawFiltrado
+
+  // Zona morta somente no valor filtrado: entre -0.05 e +0.05 m/s² mostra 0.000 m/s²
+  val aceleracaoFiltrada = if (filtradoInvertido in -0.05f..0.05f) 0f else filtradoInvertido
+
+  // Direção baseada SOMENTE na aceleração filtrada
   val direcao = when {
-    valorLongitudinal > 0.15f -> "frente"
-    valorLongitudinal < -0.15f -> "trás"
+    aceleracaoFiltrada > 0.15f -> "frente"
+    aceleracaoFiltrada < -0.15f -> "trás"
     else -> "parado"
   }
 
@@ -321,6 +343,11 @@ fun SensorScreen(
                 linearX = currentLinearX
                 linearY = currentLinearY
                 linearZ = currentLinearZ
+
+                val alpha = 0.18f
+                filteredLinearX = filteredLinearX + alpha * (event.values[0] - filteredLinearX)
+                filteredLinearY = filteredLinearY + alpha * (event.values[1] - filteredLinearY)
+                filteredLinearZ = filteredLinearZ + alpha * (event.values[2] - filteredLinearZ)
 
                 if (calibCollector.isCollecting) {
                   val currentCount = calibCollector.count
@@ -554,7 +581,8 @@ fun SensorScreen(
             invertSignal = inverted
             prefs.edit().putBoolean("invert_longitudinal_signal", inverted).apply()
           },
-          longitudinalAcceleration = valorLongitudinal,
+          correctedAcceleration = aceleracaoCorrigida,
+          filteredAcceleration = aceleracaoFiltrada,
           direction = direcao,
           currentOffset = currentOffset,
           calibrationStatus = calibrationStatus,
@@ -811,7 +839,8 @@ private fun LongitudinalAxisCard(
   onAxisSelected: (String) -> Unit,
   invertSignal: Boolean,
   onInvertSignalChanged: (Boolean) -> Unit,
-  longitudinalAcceleration: Float,
+  correctedAcceleration: Float,
+  filteredAcceleration: Float,
   direction: String,
   currentOffset: Float,
   calibrationStatus: String,
@@ -1000,8 +1029,12 @@ private fun LongitudinalAxisCard(
           value = String.format(Locale.US, "%.3f m/s²", currentOffset)
         )
         SensorValueRow(
-          label = "Aceleração",
-          value = String.format(Locale.US, "%.3f m/s²", longitudinalAcceleration)
+          label = "Aceleração corrigida",
+          value = String.format(Locale.US, "%.3f m/s²", correctedAcceleration)
+        )
+        SensorValueRow(
+          label = "Aceleração filtrada",
+          value = String.format(Locale.US, "%.3f m/s²", filteredAcceleration)
         )
         SensorValueRow(label = "Direção", value = direction)
       }
