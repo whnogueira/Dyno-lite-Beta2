@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">Dyno Lite</string>
     <string name="prototype_subtitle">Protótipo de sensores</string>
-    <string name="version_label">0.11.0</string>
+    <string name="version_label">0.12.0</string>
     <string name="btn_test_sensors">Testar sensores</string>
     <string name="btn_settings">Configuração</string>
     <string name="btn_start_test">Iniciar teste</string>
