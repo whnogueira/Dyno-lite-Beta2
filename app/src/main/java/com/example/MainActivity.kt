@@ -360,6 +360,10 @@ fun DynoLiteApp() {
       SensorScreen(
         onNavigateBack = {
           currentDestination = AppDestination.MAIN_TABS
+        },
+        onNavigateToResults = {
+          currentDestination = AppDestination.MAIN_TABS
+          selectedTabIndex = 2
         }
       )
     }

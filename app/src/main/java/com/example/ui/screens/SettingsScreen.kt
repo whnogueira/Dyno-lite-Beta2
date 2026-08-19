@@ -252,7 +252,7 @@ fun SettingsScreen(
             modifier = Modifier.testTag("version_badge")
           ) {
             Text(
-              text = "VERSÃO 0.13.0",
+              text = "VERSÃO 0.14.0",
               modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
               style = MaterialTheme.typography.labelSmall.copy(
                 fontWeight = FontWeight.Bold,
