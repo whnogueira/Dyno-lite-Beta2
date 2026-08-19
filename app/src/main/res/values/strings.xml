@@ -1,11 +1,11 @@
 <resources>
     <string name="app_name">Dyno Lite</string>
     <string name="prototype_subtitle">Protótipo de sensores</string>
-    <string name="version_label">0.12.0</string>
+    <string name="version_label">0.13.0</string>
     <string name="btn_test_sensors">Testar sensores</string>
     <string name="btn_settings">Configuração</string>
     <string name="btn_start_test">Iniciar teste</string>
-    <string name="title_sensors_test">TESTE DE SENSORES</string>
+    <string name="title_sensors_test">DIAGNÓSTICO DE SENSORES</string>
     <string name="btn_back">Voltar</string>
     <string name="section_raw_accelerometer">ACELERÔMETRO BRUTO</string>
     <string name="section_linear_acceleration">ACELERAÇÃO LINEAR</string>
