@@ -1,6 +1,12 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,20 +27,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Assessment
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DeleteOutline
-import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.outlined.Assessment
 import androidx.compose.material.icons.outlined.CalendarToday
-import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.DirectionsCar
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Speed
-import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.TableChart
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -68,9 +70,11 @@ import androidx.compose.ui.unit.sp
 import com.example.data.RunResultRepository
 import com.example.model.FinishReason
 import com.example.model.RunResult
+import com.example.model.RunSample
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -222,7 +226,7 @@ fun ResultsScreen(
               )
 
               Text(
-                text = "• Início automático ao ultrapassar 30 km/h no GPS.\n• Coleta da aceleração longitudinal Z e comparação contínua com GPS.\n• Detecção automática de fim por desaceleração (Z < -0.15 m/s² ou queda no GPS).\n• Armazenamento permanente da velocidade máxima e qualidade do teste.",
+                text = "• Início oficial aos 30 km/h calculados com buffer de preparação preliminar.\n• Coleta contínua da aceleração longitudinal Z e série temporal gravada a ~20 Hz.\n• Detecção automática de fim por desaceleração (Z < -0.15 m/s² ou queda no GPS).\n• Armazenamento permanente da velocidade máxima e série temporal dos pontos.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 lineHeight = 20.sp
@@ -278,12 +282,17 @@ fun ResultsScreen(
     }
   }
 
-  // DETAILS DIALOG
+  // DETAILS DIALOG WITH TIME SERIES
   if (selectedResultForDetail != null) {
     val run = selectedResultForDetail!!
     val dateFormat = SimpleDateFormat("dd/MM/yyyy 'às' HH:mm:ss", Locale.getDefault())
     val formattedDate = dateFormat.format(Date(run.timestamp))
     val finishReasonEnum = FinishReason.fromCode(run.finishReason)
+    var isSamplesTableExpanded by remember { mutableStateOf(false) }
+
+    val orderedSamples = remember(run.id) {
+      runResultRepository.getOrderedRunSamples(run.id)
+    }
 
     AlertDialog(
       onDismissRequest = { selectedResultForDetail = null },
@@ -335,7 +344,12 @@ fun ResultsScreen(
 
           HorizontalDivider(thickness = 0.8.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-          DetailRow("Velocidade inicial GPS", String.format(Locale.US, "%.1f km/h", run.runStartGpsSpeedKmh))
+          DetailRow("Início calculado", String.format(Locale.US, "%.1f km/h", run.runStartCalculatedSpeedKmh))
+          DetailRow("Primeira leitura GPS", String.format(Locale.US, "%.1f km/h", run.runStartGpsSpeedKmh))
+          DetailRow("Diferença no início", String.format(Locale.US, "%.1f km/h", abs(run.runStartGpsSpeedKmh - run.runStartCalculatedSpeedKmh)))
+
+          HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
           DetailRow("Velocidade máxima GPS", String.format(Locale.US, "%.1f km/h", run.maximumGpsSpeedKmh))
           DetailRow("Velocidade máxima calculada", String.format(Locale.US, "%.1f km/h", run.maximumCalculatedSpeedKmh))
           DetailRow("Velocidade final GPS", String.format(Locale.US, "%.1f km/h", run.finalGpsSpeedKmh))
@@ -347,8 +361,107 @@ fun ResultsScreen(
           DetailRow("Motivo do término", finishReasonEnum.displayName)
           DetailRow("Precisão GPS", String.format(Locale.US, "%.1f m", run.gpsAccuracyMeters))
 
-          val rejectionPercent = if (run.totalSamples > 0) (run.rejectedSamples * 100) / run.totalSamples else 0
-          DetailRow("Amostras", "${run.totalSamples} (${run.rejectedSamples} rejeitadas / $rejectionPercent%)")
+          val totalCount = if (run.totalSamples > 0) run.totalSamples else orderedSamples.size
+          val rejCount = run.rejectedSamples
+          val validCount = if (run.validSamplesCount > 0) run.validSamplesCount else (totalCount - rejCount).coerceAtLeast(0)
+          val rejectionPercent = if (totalCount > 0) (rejCount * 100) / totalCount else 0
+
+          DetailRow("Amostras totais", "$totalCount")
+          DetailRow("Amostras válidas", "$validCount")
+          DetailRow("Amostras rejeitadas", "$rejCount ($rejectionPercent%)")
+          if (run.averageSamplingRateHz > 0f) {
+            DetailRow("Frequência média gravada", String.format(Locale.US, "%.1f Hz", run.averageSamplingRateHz))
+          }
+
+          // Collapsible Technical Section: "Dados da passagem"
+          if (orderedSamples.isNotEmpty()) {
+            HorizontalDivider(thickness = 0.8.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+            Card(
+              modifier = Modifier.fillMaxWidth(),
+              shape = RoundedCornerShape(12.dp),
+              colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+              ),
+              border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            ) {
+              Column(modifier = Modifier.fillMaxWidth().padding(10.dp)) {
+                Row(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { isSamplesTableExpanded = !isSamplesTableExpanded }
+                    .padding(vertical = 4.dp),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                  ) {
+                    Icon(
+                      imageVector = Icons.Outlined.TableChart,
+                      contentDescription = null,
+                      modifier = Modifier.size(16.dp),
+                      tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                      text = "Dados da passagem (${orderedSamples.size} pts)",
+                      style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                      color = MaterialTheme.colorScheme.primary
+                    )
+                  }
+
+                  Icon(
+                    imageVector = if (isSamplesTableExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                  )
+                }
+
+                AnimatedVisibility(
+                  visible = isSamplesTableExpanded,
+                  enter = expandVertically() + fadeIn(),
+                  exit = shrinkVertically() + fadeOut()
+                ) {
+                  Column(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .padding(top = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                  ) {
+                    // Table Header
+                    Row(
+                      modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(6.dp))
+                        .padding(horizontal = 6.dp, vertical = 6.dp),
+                      horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                      Text("Tempo", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp), modifier = Modifier.weight(1.1f))
+                      Text("Acel. Z", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp), modifier = Modifier.weight(1.1f), textAlign = TextAlign.End)
+                      Text("GPS", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp), modifier = Modifier.weight(1.1f), textAlign = TextAlign.End)
+                      Text("Calc", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp), modifier = Modifier.weight(1.1f), textAlign = TextAlign.End)
+                      Text("Dif", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp), modifier = Modifier.weight(1.0f), textAlign = TextAlign.End)
+                    }
+
+                    // Table Rows
+                    Box(
+                      modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 240.dp)
+                        .verticalScroll(rememberScrollState())
+                    ) {
+                      Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        orderedSamples.forEach { sample ->
+                          SampleTableRow(sample = sample)
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       },
       confirmButton = {
@@ -399,6 +512,68 @@ fun ResultsScreen(
           Text("CANCELAR")
         }
       }
+    )
+  }
+}
+
+@Composable
+private fun SampleTableRow(sample: RunSample) {
+  val timeSec = sample.elapsedTimeMs / 1000.0
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(horizontal = 6.dp, vertical = 3.dp),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    Text(
+      text = String.format(Locale.US, "%.2fs", timeSec),
+      style = MaterialTheme.typography.bodySmall.copy(
+        fontSize = 10.sp,
+        fontFamily = FontFamily.Monospace
+      ),
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      modifier = Modifier.weight(1.1f)
+    )
+    Text(
+      text = String.format(Locale.US, "%+.2f", sample.filteredAccelerationZ),
+      style = MaterialTheme.typography.bodySmall.copy(
+        fontSize = 10.sp,
+        fontFamily = FontFamily.Monospace
+      ),
+      color = MaterialTheme.colorScheme.onSurface,
+      modifier = Modifier.weight(1.1f),
+      textAlign = TextAlign.End
+    )
+    Text(
+      text = String.format(Locale.US, "%.1f", sample.gpsSpeedKmh),
+      style = MaterialTheme.typography.bodySmall.copy(
+        fontSize = 10.sp,
+        fontFamily = FontFamily.Monospace
+      ),
+      color = MaterialTheme.colorScheme.primary,
+      modifier = Modifier.weight(1.1f),
+      textAlign = TextAlign.End
+    )
+    Text(
+      text = String.format(Locale.US, "%.1f", sample.calculatedSpeedKmh),
+      style = MaterialTheme.typography.bodySmall.copy(
+        fontSize = 10.sp,
+        fontFamily = FontFamily.Monospace
+      ),
+      color = MaterialTheme.colorScheme.onSurface,
+      modifier = Modifier.weight(1.1f),
+      textAlign = TextAlign.End
+    )
+    Text(
+      text = String.format(Locale.US, "%.1f", sample.speedDifferenceKmh),
+      style = MaterialTheme.typography.bodySmall.copy(
+        fontSize = 10.sp,
+        fontFamily = FontFamily.Monospace
+      ),
+      color = if (sample.isValid) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+      modifier = Modifier.weight(1.0f),
+      textAlign = TextAlign.End
     )
   }
 }
