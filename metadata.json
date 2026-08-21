@@ -1,6 +1,6 @@
 {
   "name": "Dyno Lite",
-  "description": "Protótipo de sensores para testes de dinamômetro veicular",
+  "description": "Dinamômetro veicular com banco de dados de veículos e transmissões do mercado brasileiro (v0.18.0)",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

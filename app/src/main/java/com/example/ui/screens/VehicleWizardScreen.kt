@@ -55,15 +55,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.VehicleCatalogRepository
 import com.example.data.VehicleDatabase
 import com.example.model.AudioWeightPreset
+import com.example.model.DynoCompatibility
+import com.example.model.TransmissionCatalogEntry
 import com.example.model.VehicleCalculations
+import com.example.model.VehicleCatalogEntry
 import com.example.model.VehicleProfile
+import com.example.model.VerificationStatus
 import com.example.model.WeightConfidence
 import java.util.Locale
 import java.util.UUID
@@ -349,7 +355,7 @@ fun VehicleWizardScreen(
                 version = cv.version
                 engine = cv.engine
                 displacement = cv.displacement
-                curbWeightText = cv.curbWeightKg.toInt().toString()
+                curbWeightText = if (cv.curbWeightKg > 0) cv.curbWeightKg.toInt().toString() else ""
                 factoryPowerText = cv.factoryPowerCv?.toInt()?.toString() ?: ""
                 factoryTorqueText = cv.factoryTorqueKgf?.toString() ?: ""
                 drivetrain = cv.drivetrain
@@ -357,7 +363,7 @@ fun VehicleWizardScreen(
                 tireAspectText = cv.tireAspectRatio.toString()
                 wheelDiameterText = cv.wheelDiameterInches.toString()
                 selectedTransmissionId = cv.transmissionId ?: "gm_f17_ccw"
-                transmissionOption = "ORIGINAL"
+                transmissionOption = if (cv.transmissionId != null) "KNOWN" else "UNKNOWN"
                 isCustom = false
                 currentStep = 2
               }
@@ -551,6 +557,14 @@ private fun Step1Identification(
   onEngineChanged: (String) -> Unit,
   onCatalogVehicleSelected: (VehicleProfile) -> Unit
 ) {
+  val context = LocalContext.current
+  val catalogRepo = remember { VehicleCatalogRepository.getInstance(context) }
+  val manufacturers = remember { catalogRepo.getManufacturers() }
+
+  var selectedBrandFilter by remember { mutableStateOf<String?>(null) }
+  var selectedModelFilter by remember { mutableStateOf<String?>(null) }
+  var selectedGenerationFilter by remember { mutableStateOf<String?>(null) }
+
   Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
     Text(
       text = "Identificação do Veículo",
@@ -570,7 +584,7 @@ private fun Step1Identification(
         colors = if (isSearchMode) ButtonDefaults.buttonColors() else ButtonDefaults.outlinedButtonColors(),
         border = if (!isSearchMode) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant) else null
       ) {
-        Text("BUSCAR NO BANCO", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+        Text("BANCO DE DADOS (BR)", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
       }
 
       Button(
@@ -585,21 +599,86 @@ private fun Step1Identification(
     }
 
     if (isSearchMode) {
+      // Search Bar
       OutlinedTextField(
         value = searchQuery,
         onValueChange = onSearchQueryChanged,
-        label = { Text("Buscar modelo (ex: Gol, Corsa, Onix, Ka...)") },
+        label = { Text("Buscar modelo, motor ou geração (ex: Gol AP, Corsa, Vectra, Jetta TSI...)") },
         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
         modifier = Modifier.fillMaxWidth().testTag("input_search_catalog"),
         shape = RoundedCornerShape(12.dp),
         singleLine = true
       )
 
-      val searchResults = remember(searchQuery) {
-        VehicleDatabase.searchVehicles(searchQuery)
+      // Brand Filter Chips
+      Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+          text = "Filtrar por montadora:",
+          style = MaterialTheme.typography.labelSmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          Surface(
+            modifier = Modifier.weight(1f).clickable {
+              selectedBrandFilter = null
+              selectedModelFilter = null
+              selectedGenerationFilter = null
+            },
+            shape = RoundedCornerShape(8.dp),
+            color = if (selectedBrandFilter == null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+            border = BorderStroke(1.dp, if (selectedBrandFilter == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+          ) {
+            Box(modifier = Modifier.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+              Text(
+                text = "Todas",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (selectedBrandFilter == null) FontWeight.Bold else FontWeight.Normal)
+              )
+            }
+          }
+
+          manufacturers.forEach { mfg ->
+            val isSel = selectedBrandFilter == mfg.id
+            Surface(
+              modifier = Modifier.weight(1.2f).clickable {
+                selectedBrandFilter = if (isSel) null else mfg.id
+                selectedModelFilter = null
+                selectedGenerationFilter = null
+              },
+              shape = RoundedCornerShape(8.dp),
+              color = if (isSel) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+              border = BorderStroke(1.dp, if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            ) {
+              Box(modifier = Modifier.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                Text(
+                  text = mfg.name,
+                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal)
+                )
+              }
+            }
+          }
+        }
       }
 
-      if (searchResults.isEmpty()) {
+      // Query or Filter computation
+      val matchingEntries = remember(searchQuery, selectedBrandFilter, selectedModelFilter, selectedGenerationFilter) {
+        if (searchQuery.isNotBlank()) {
+          catalogRepo.searchCatalog(searchQuery)
+        } else if (selectedBrandFilter != null) {
+          catalogRepo.getVehicles(
+            manufacturerId = selectedBrandFilter!!,
+            model = selectedModelFilter,
+            generation = selectedGenerationFilter
+          )
+        } else {
+          // Default list from all brands
+          manufacturers.flatMap { catalogRepo.getVehiclesForManufacturer(it.id) }
+        }
+      }
+
+      if (matchingEntries.isEmpty()) {
         Card(
           modifier = Modifier.fillMaxWidth(),
           shape = RoundedCornerShape(14.dp),
@@ -608,70 +687,76 @@ private fun Step1Identification(
         ) {
           Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
           ) {
             Text(
-              text = "Veículo ainda não disponível no banco. Continue com o cadastro personalizado.",
-              style = MaterialTheme.typography.bodyMedium,
+              text = "Veículo não encontrado no catálogo nacional.",
+              style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+              color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+              text = "Você pode continuar com o cadastro personalizado e preencher os dados do veículo manualmente.",
+              style = MaterialTheme.typography.bodySmall,
               color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Button(
-              onClick = { onSearchModeChanged(false) },
+              onClick = {
+                onSearchModeChanged(false)
+                if (searchQuery.isNotBlank()) {
+                  onModelChanged(searchQuery)
+                }
+              },
               shape = RoundedCornerShape(8.dp)
             ) {
-              Text("Preencher manualmente")
+              Text("CADASTRAR PERSONALIZADO")
             }
           }
         }
       } else {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
           Text(
-            text = "Modelos encontrados:",
-            style = MaterialTheme.typography.labelSmall,
+            text = "${matchingEntries.size} veículos encontrados no catálogo:",
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
             color = MaterialTheme.colorScheme.onSurfaceVariant
           )
-          searchResults.forEach { cv ->
-            Card(
-              modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onCatalogVehicleSelected(cv) },
-              shape = RoundedCornerShape(14.dp),
-              colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
-              border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-            ) {
-              Row(
-                modifier = Modifier.padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-              ) {
-                Icon(
-                  imageVector = Icons.Outlined.DirectionsCar,
-                  contentDescription = null,
-                  tint = MaterialTheme.colorScheme.primary,
-                  modifier = Modifier.size(24.dp)
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                  Text(
-                    text = "${cv.manufacturer} ${cv.model} ${cv.engine}",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
-                  )
-                  Text(
-                    text = "${cv.year} • ${cv.version} • ${cv.factoryPowerCv?.toInt() ?: 0} cv • ${cv.curbWeightKg.toInt()} kg",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                  )
-                }
+
+          matchingEntries.forEach { entry ->
+            VehicleCatalogCard(
+              entry = entry,
+              onSelect = {
+                val profile = entry.toVehicleProfile()
+                onCatalogVehicleSelected(profile)
               }
-            }
+            )
           }
         }
       }
     } else {
-      // Manual Fields
+      // Manual Custom Fields
+      Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+      ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+          Text(
+            text = "Cadastro Personalizado",
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.primary
+          )
+          Text(
+            text = "Preencha as informações do seu veículo para calibração do dinamômetro.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+          )
+        }
+      }
+
       OutlinedTextField(
         value = manufacturer,
         onValueChange = onManufacturerChanged,
-        label = { Text("Marca * (ex: Chevrolet, Volkswagen)") },
+        label = { Text("Marca * (ex: Volkswagen, Chevrolet, Fiat, Ford)") },
         modifier = Modifier.fillMaxWidth().testTag("input_manufacturer"),
         shape = RoundedCornerShape(12.dp),
         singleLine = true
@@ -680,7 +765,7 @@ private fun Step1Identification(
       OutlinedTextField(
         value = model,
         onValueChange = onModelChanged,
-        label = { Text("Modelo * (ex: Corsa, Gol, Civic)") },
+        label = { Text("Modelo * (ex: Gol, Corsa, Vectra, Jetta)") },
         modifier = Modifier.fillMaxWidth().testTag("input_model"),
         shape = RoundedCornerShape(12.dp),
         singleLine = true
@@ -703,7 +788,7 @@ private fun Step1Identification(
         OutlinedTextField(
           value = engine,
           onValueChange = onEngineChanged,
-          label = { Text("Motor (ex: 1.0 8V)") },
+          label = { Text("Motor (ex: AP 2.0, 2.0 8V)") },
           modifier = Modifier.weight(1.5f).testTag("input_engine"),
           shape = RoundedCornerShape(12.dp),
           singleLine = true
@@ -713,11 +798,145 @@ private fun Step1Identification(
       OutlinedTextField(
         value = version,
         onValueChange = onVersionChanged,
-        label = { Text("Versão / Acabamento (opcional)") },
+        label = { Text("Versão / Acabamento (ex: GTI, GTS, GLS, CD)") },
         modifier = Modifier.fillMaxWidth().testTag("input_version"),
         shape = RoundedCornerShape(12.dp),
         singleLine = true
       )
+    }
+  }
+}
+
+@Composable
+private fun VehicleCatalogCard(
+  entry: VehicleCatalogEntry,
+  onSelect: () -> Unit
+) {
+  var showDetails by remember { mutableStateOf(false) }
+
+  Card(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clickable { onSelect() },
+    shape = RoundedCornerShape(14.dp),
+    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+  ) {
+    Column(
+      modifier = Modifier.padding(14.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Column(modifier = Modifier.weight(1f)) {
+          Text(
+            text = "${entry.manufacturerName} ${entry.model} ${entry.engineDescription}",
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+          )
+          val sub = listOfNotNull(
+            entry.generation,
+            entry.trim,
+            if (entry.startYear == entry.endYear) "${entry.startYear}" else "${entry.startYear} - ${entry.endYear}"
+          ).joinToString(" • ")
+          Text(
+            text = sub,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+          )
+        }
+
+        // Status Badge
+        Surface(
+          shape = RoundedCornerShape(6.dp),
+          color = when (entry.verificationStatus) {
+            VerificationStatus.VERIFIED -> MaterialTheme.colorScheme.primaryContainer
+            VerificationStatus.PARTIAL -> MaterialTheme.colorScheme.secondaryContainer
+            VerificationStatus.UNVERIFIED -> MaterialTheme.colorScheme.surfaceVariant
+          }
+        ) {
+          Text(
+            text = entry.verificationStatus.label,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+            color = when (entry.verificationStatus) {
+              VerificationStatus.VERIFIED -> MaterialTheme.colorScheme.onPrimaryContainer
+              VerificationStatus.PARTIAL -> MaterialTheme.colorScheme.onSecondaryContainer
+              VerificationStatus.UNVERIFIED -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+          )
+        }
+      }
+
+      // Specs Summary Row
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+      ) {
+        val powerStr = entry.factoryPowerCv?.let { "${it.toInt()} cv" } ?: "Potência N/D"
+        val torqueStr = entry.factoryTorqueKgf?.let { "$it kgfm" } ?: "Torque N/D"
+        val weightStr = entry.curbWeightKg?.let { "${it.toInt()} kg" } ?: "Peso N/D"
+
+        Text(
+          text = "$powerStr • $torqueStr • $weightStr • Tração ${entry.drivetrain ?: "Dianteira"}",
+          style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+          color = MaterialTheme.colorScheme.primary
+        )
+      }
+
+      if (entry.notes != null || entry.sourceName != null) {
+        AnimatedVisibility(visible = showDetails) {
+          Column(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+          ) {
+            if (entry.notes != null) {
+              Text(
+                text = "Nota: ${entry.notes}",
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+              )
+            }
+            if (entry.sourceName != null) {
+              Text(
+                text = "Fonte: ${entry.sourceName} ${entry.sourceReference ?: ""}",
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+              )
+            }
+          }
+        }
+      }
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        if (entry.notes != null || entry.sourceName != null) {
+          Text(
+            text = if (showDetails) "Menos detalhes" else "Mais detalhes",
+            style = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.primary),
+            modifier = Modifier.clickable { showDetails = !showDetails }
+          )
+        } else {
+          Spacer(modifier = Modifier.width(1.dp))
+        }
+
+        Button(
+          onClick = onSelect,
+          shape = RoundedCornerShape(8.dp),
+          modifier = Modifier.height(34.dp),
+          colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+          )
+        ) {
+          Text("SELECIONAR", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+        }
+      }
     }
   }
 }
@@ -743,10 +962,31 @@ private fun Step2OriginalData(
     )
 
     Text(
-      text = "Essas informações são usadas como referência técnica para estimar a potência e torque.",
+      text = "Essas informações são usadas como referência técnica para cálculos de potência, torque e estimativas.",
       style = MaterialTheme.typography.bodySmall,
       color = MaterialTheme.colorScheme.onSurfaceVariant
     )
+
+    if (curbWeightText.isBlank() || factoryPowerText.isBlank() || factoryTorqueText.isBlank()) {
+      Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f))
+      ) {
+        Row(
+          modifier = Modifier.padding(10.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          Icon(Icons.Outlined.Info, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
+          Text(
+            text = "Algum dado não confirmado pelo catálogo? Você pode preenchê-lo manualmente abaixo.",
+            style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+            color = MaterialTheme.colorScheme.onSecondaryContainer
+          )
+        }
+      }
+    }
 
     OutlinedTextField(
       value = curbWeightText,
@@ -786,7 +1026,7 @@ private fun Step2OriginalData(
     OutlinedTextField(
       value = displacement,
       onValueChange = onDisplacementChanged,
-      label = { Text("Cilindrada (ex: 1.0, 1.4, 1.6, 2.0) [opc]") },
+      label = { Text("Cilindrada (ex: 1.0, 1.4, 1.6, 1.8, 2.0) [opc]") },
       modifier = Modifier.fillMaxWidth(),
       shape = RoundedCornerShape(12.dp),
       singleLine = true
@@ -841,22 +1081,28 @@ private fun Step3Transmission(
   showTechnicalDetails: Boolean,
   onToggleTechnicalDetails: () -> Unit
 ) {
-  val currentTransmission = VehicleDatabase.getTransmission(selectedTransmissionId)
+  val context = LocalContext.current
+  val catalogRepo = remember { VehicleCatalogRepository.getInstance(context) }
+  val catalogTransmissions = remember { catalogRepo.getAllTransmissions() }
+  val fallbackTransmissions = remember { VehicleDatabase.transmissions }
+
+  val currentTransmission = catalogTransmissions.firstOrNull { it.id == selectedTransmissionId }
+  val fallbackTransmission = fallbackTransmissions.firstOrNull { it.id == selectedTransmissionId }
 
   Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
     Text(
-      text = "Câmbio e Relações",
+      text = "Câmbio e Relações de Marcha",
       style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
       color = MaterialTheme.colorScheme.onSurface
     )
 
     Text(
-      text = "O câmbio permite converter a velocidade das rodas na rotação (RPM) do motor.",
+      text = "O câmbio permite converter a velocidade das rodas na rotação (RPM) exata do motor para gerar a curva de potência.",
       style = MaterialTheme.typography.bodySmall,
       color = MaterialTheme.colorScheme.onSurfaceVariant
     )
 
-    // Option 1: Original / Catalog
+    // Option 1: Known / Catalog Transmission
     Card(
       modifier = Modifier.fillMaxWidth().clickable { onTransmissionOptionChanged("KNOWN") },
       shape = RoundedCornerShape(14.dp),
@@ -880,70 +1126,132 @@ private fun Step3Transmission(
           )
           Spacer(modifier = Modifier.width(8.dp))
           Text(
-            text = "Selecionar câmbio conhecido",
+            text = "Selecionar câmbio conhecido do banco",
             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
           )
         }
 
         if (transmissionOption == "KNOWN" || transmissionOption == "ORIGINAL") {
           Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            VehicleDatabase.transmissions.forEach { trans ->
-              val isSelected = trans.id == selectedTransmissionId
-              Surface(
-                modifier = Modifier.fillMaxWidth().clickable { onSelectedTransmissionIdChanged(trans.id) },
-                shape = RoundedCornerShape(10.dp),
-                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                border = BorderStroke(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-              ) {
-                Row(
-                  modifier = Modifier.padding(12.dp),
-                  verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.SpaceBetween
+            // Display transmissions
+            if (catalogTransmissions.isNotEmpty()) {
+              catalogTransmissions.forEach { trans ->
+                val isSelected = trans.id == selectedTransmissionId
+                Surface(
+                  modifier = Modifier.fillMaxWidth().clickable { onSelectedTransmissionIdChanged(trans.id) },
+                  shape = RoundedCornerShape(10.dp),
+                  color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                  border = BorderStroke(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                 ) {
-                  Column {
-                    Text(
-                      text = trans.displayName,
-                      style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
-                    )
-                    Text(
-                      text = "Fabricante: ${trans.manufacturer} • Família: ${trans.family} • Código: ${trans.code}",
-                      style = MaterialTheme.typography.bodySmall,
-                      color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                  Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                  ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                      Text(
+                        text = trans.displayName,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                      )
+                      Text(
+                        text = "${trans.manufacturer} • ${trans.numberOfGears} marchas • Dif: ${trans.finalDrive?.let { "$it:1" } ?: "N/D"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                      )
+                      // Dyno compatibility note
+                      if (trans.dynoCompatibility == DynoCompatibility.MANUAL_MODE_REQUIRED) {
+                        Text(
+                          text = "⚠️ ${trans.dynoCompatibility.label}: ${trans.dynoCompatibility.note}",
+                          style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+                          color = MaterialTheme.colorScheme.tertiary
+                        )
+                      }
+                    }
+                    if (isSelected) {
+                      Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    }
                   }
-                  if (isSelected) {
-                    Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                }
+              }
+            } else {
+              // Fallback list
+              fallbackTransmissions.forEach { trans ->
+                val isSelected = trans.id == selectedTransmissionId
+                Surface(
+                  modifier = Modifier.fillMaxWidth().clickable { onSelectedTransmissionIdChanged(trans.id) },
+                  shape = RoundedCornerShape(10.dp),
+                  color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                  border = BorderStroke(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                ) {
+                  Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                  ) {
+                    Column {
+                      Text(
+                        text = trans.displayName,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                      )
+                      Text(
+                        text = "Fabricante: ${trans.manufacturer} • Código: ${trans.code}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                      )
+                    }
+                    if (isSelected) {
+                      Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    }
                   }
                 }
               }
             }
 
-            if (currentTransmission != null) {
-              OutlinedButton(
-                onClick = onToggleTechnicalDetails,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp)
-              ) {
-                Text(if (showTechnicalDetails) "Ocultar dados técnicos" else "Ver dados técnicos")
-                Spacer(modifier = Modifier.width(4.dp))
-                Icon(
-                  if (showTechnicalDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                  contentDescription = null
-                )
-              }
+            // Technical details accordion
+            OutlinedButton(
+              onClick = onToggleTechnicalDetails,
+              modifier = Modifier.fillMaxWidth(),
+              shape = RoundedCornerShape(10.dp)
+            ) {
+              Text(if (showTechnicalDetails) "Ocultar dados técnicos de relações" else "Ver relações de marcha e diferencial")
+              Spacer(modifier = Modifier.width(4.dp))
+              Icon(
+                if (showTechnicalDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = null
+              )
+            }
 
-              AnimatedVisibility(visible = showTechnicalDetails) {
-                Card(
-                  modifier = Modifier.fillMaxWidth(),
-                  shape = RoundedCornerShape(10.dp),
-                  colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
-                ) {
-                  Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Dados Técnicos do Câmbio:", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+            AnimatedVisibility(visible = showTechnicalDetails) {
+              Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+              ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                  Text("Relações de Transmissão:", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+                  if (currentTransmission != null) {
                     currentTransmission.gearRatios.forEachIndexed { idx, ratio ->
+                      val rStr = ratio?.let { "$it : 1" } ?: "Não informado"
+                      Text("${idx + 1}ª marcha: $rStr", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text(
+                      "Diferencial final: ${currentTransmission.finalDrive?.let { "$it : 1" } ?: "Não informado"}",
+                      style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                    )
+                    if (currentTransmission.dynoCompatibility.note.isNotBlank()) {
+                      Text(
+                        "Dinamômetro: ${currentTransmission.dynoCompatibility.note}",
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                      )
+                    }
+                  } else if (fallbackTransmission != null) {
+                    fallbackTransmission.gearRatios.forEachIndexed { idx, ratio ->
                       Text("${idx + 1}ª marcha: $ratio : 1", style = MaterialTheme.typography.bodySmall)
                     }
-                    Text("Diferencial final: ${currentTransmission.finalDrive} : 1", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
+                    Text(
+                      "Diferencial final: ${fallbackTransmission.finalDrive} : 1",
+                      style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                    )
                   }
                 }
               }
