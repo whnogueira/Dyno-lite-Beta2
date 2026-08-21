@@ -21,10 +21,10 @@ data class RunResult(
   val timestamp: Long = System.currentTimeMillis(),
   val vehicleId: String? = null,
   val vehicleName: String = "",
-  val runStartCalculatedSpeedKmh: Float = 30.0f,
+  val runStartCalculatedSpeedKmh: Float = 40.0f,
   val runStartGpsSpeedKmh: Float = 0f,
   val maximumGpsSpeedKmh: Float = 0f,
-  val maximumCalculatedSpeedKmh: Float = 30.0f,
+  val maximumCalculatedSpeedKmh: Float = 40.0f,
   val finalGpsSpeedKmh: Float = 0f,
   val finalCalculatedSpeedKmh: Float = 0f,
   val elapsedSeconds: Float = 0f,
@@ -37,6 +37,6 @@ data class RunResult(
   val finishReason: String = FinishReason.SENSOR_DECELERATION.code,
   val averageSpeedDifferenceKmh: Float = 0f,
   val maximumSpeedDifferenceKmh: Float = 0f,
-  val appVersion: String = "0.15.0",
+  val appVersion: String = "0.17.0",
   val samples: List<RunSample> = emptyList()
 )

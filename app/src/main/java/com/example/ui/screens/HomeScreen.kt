@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DirectionsCar
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Sensors
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Speed
@@ -52,7 +54,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -70,6 +74,7 @@ fun HomeScreen(
   onNavigateToGarage: () -> Unit,
   onNavigateToTestPrep: () -> Unit,
   onNavigateToSettings: () -> Unit,
+  onNavigateToGuide: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   var showHowItWorksDialog by remember { mutableStateOf(false) }
@@ -95,22 +100,25 @@ fun HomeScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.fillMaxWidth()
       ) {
-        // App Icon Container
+        // App Icon Container with official Dyno Lite logo
         Surface(
-          modifier = Modifier.size(80.dp),
+          modifier = Modifier.size(84.dp),
           shape = RoundedCornerShape(24.dp),
           color = MaterialTheme.colorScheme.surfaceVariant,
           tonalElevation = 2.dp,
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
         ) {
           Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
           ) {
-            Icon(
-              imageVector = Icons.Default.DirectionsCar,
+            Image(
+              painter = painterResource(id = R.drawable.ic_dyno_logo),
               contentDescription = stringResource(R.string.app_name),
-              modifier = Modifier.size(44.dp),
-              tint = MaterialTheme.colorScheme.primary,
+              modifier = Modifier
+                .size(72.dp)
+                .clip(RoundedCornerShape(18.dp)),
+              contentScale = ContentScale.Fit
             )
           }
         }
@@ -129,7 +137,7 @@ fun HomeScreen(
         )
 
         Text(
-          text = "Descubra a potência estimada do seu carro.",
+          text = "Descubra o desempenho estimado do seu carro",
           style = MaterialTheme.typography.bodyMedium.copy(
             fontSize = 15.sp,
             lineHeight = 20.sp
@@ -448,10 +456,29 @@ fun HomeScreen(
       Row(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(top = 10.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+          .padding(top = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
+        TextButton(
+          onClick = onNavigateToGuide,
+          modifier = Modifier.testTag("btn_accuracy_guide_home")
+        ) {
+          Icon(
+            imageVector = Icons.Outlined.MenuBook,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp)
+          )
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(
+            text = "Guia do teste",
+            style = MaterialTheme.typography.bodyMedium.copy(
+              fontWeight = FontWeight.Medium,
+              fontSize = 12.5.sp
+            )
+          )
+        }
+
         TextButton(
           onClick = { showHowItWorksDialog = true },
           modifier = Modifier.testTag("btn_how_it_works")
@@ -466,7 +493,7 @@ fun HomeScreen(
             text = "Como funciona",
             style = MaterialTheme.typography.bodyMedium.copy(
               fontWeight = FontWeight.Medium,
-              fontSize = 13.sp
+              fontSize = 12.5.sp
             )
           )
         }
@@ -485,7 +512,7 @@ fun HomeScreen(
             text = "Configurações",
             style = MaterialTheme.typography.bodyMedium.copy(
               fontWeight = FontWeight.Medium,
-              fontSize = 13.sp
+              fontSize = 12.5.sp
             )
           )
         }

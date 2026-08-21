@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -46,9 +47,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.VehicleRepository
 import com.example.model.VehicleProfile
+import com.example.ui.screens.AccuracyGuideScreen
 import com.example.ui.screens.GarageScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.HowItWorksScreen
+import com.example.ui.screens.OnboardingPresentationDialog
 import com.example.ui.screens.ResultsScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.TestPreparationScreen
@@ -61,6 +64,7 @@ enum class AppDestination {
   TEST_PREPARATION,
   SETTINGS,
   HOW_IT_WORKS,
+  ACCURACY_GUIDE,
   SENSORS
 }
 
@@ -81,11 +85,20 @@ class MainActivity : ComponentActivity() {
 fun DynoLiteApp() {
   val context = LocalContext.current
   val repository = remember { VehicleRepository(context) }
+  val prefs = remember(context) {
+    context.getSharedPreferences("dyno_lite_prefs", Context.MODE_PRIVATE)
+  }
 
   var vehicles by remember { mutableStateOf(repository.getVehicles()) }
   var currentDestination by remember { mutableStateOf(AppDestination.MAIN_TABS) }
+  var previousDestination by remember { mutableStateOf<AppDestination?>(null) }
   var selectedTabIndex by remember { mutableIntStateOf(0) }
   var vehicleToEdit by remember { mutableStateOf<VehicleProfile?>(null) }
+
+  // Onboarding presentation dialog state for version 0.16.0
+  var showOnboardingDialog by remember {
+    mutableStateOf(!prefs.getBoolean("has_seen_accuracy_guide_v16", false))
+  }
 
   val primaryVehicle = repository.getPrimaryVehicle()
 
@@ -94,12 +107,30 @@ fun DynoLiteApp() {
     if (currentDestination != AppDestination.MAIN_TABS) {
       if (currentDestination == AppDestination.HOW_IT_WORKS) {
         currentDestination = AppDestination.SETTINGS
+      } else if (currentDestination == AppDestination.ACCURACY_GUIDE) {
+        currentDestination = previousDestination ?: AppDestination.MAIN_TABS
       } else {
         currentDestination = AppDestination.MAIN_TABS
       }
     } else if (selectedTabIndex != 0) {
       selectedTabIndex = 0
     }
+  }
+
+  if (showOnboardingDialog) {
+    OnboardingPresentationDialog(
+      onDismiss = { dontShowAgain ->
+        if (dontShowAgain) {
+          prefs.edit().putBoolean("has_seen_accuracy_guide_v16", true).apply()
+        }
+        showOnboardingDialog = false
+      },
+      onOpenFullGuide = {
+        showOnboardingDialog = false
+        previousDestination = currentDestination
+        currentDestination = AppDestination.ACCURACY_GUIDE
+      }
+    )
   }
 
   when (currentDestination) {
@@ -262,7 +293,11 @@ fun DynoLiteApp() {
                   currentDestination = AppDestination.VEHICLE_WIZARD
                 }
               },
-              onNavigateToSettings = { currentDestination = AppDestination.SETTINGS }
+              onNavigateToSettings = { currentDestination = AppDestination.SETTINGS },
+              onNavigateToGuide = {
+                previousDestination = AppDestination.MAIN_TABS
+                currentDestination = AppDestination.ACCURACY_GUIDE
+              }
             )
             1 -> GarageScreen(
               vehicles = vehicles,
@@ -342,6 +377,10 @@ fun DynoLiteApp() {
         onNavigateToHowItWorks = {
           currentDestination = AppDestination.HOW_IT_WORKS
         },
+        onNavigateToGuide = {
+          previousDestination = AppDestination.SETTINGS
+          currentDestination = AppDestination.ACCURACY_GUIDE
+        },
         onNavigateBack = {
           currentDestination = AppDestination.MAIN_TABS
         }
@@ -352,6 +391,14 @@ fun DynoLiteApp() {
       HowItWorksScreen(
         onNavigateBack = {
           currentDestination = AppDestination.SETTINGS
+        }
+      )
+    }
+
+    AppDestination.ACCURACY_GUIDE -> {
+      AccuracyGuideScreen(
+        onNavigateBack = {
+          currentDestination = previousDestination ?: AppDestination.MAIN_TABS
         }
       )
     }

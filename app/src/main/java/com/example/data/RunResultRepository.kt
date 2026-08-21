@@ -207,10 +207,10 @@ class RunResultRepository(context: Context) {
       timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
       vehicleId = if (obj.has("vehicleId")) obj.getString("vehicleId") else null,
       vehicleName = obj.optString("vehicleName", ""),
-      runStartCalculatedSpeedKmh = obj.optDouble("runStartCalculatedSpeedKmh", 30.0).toFloat(),
+      runStartCalculatedSpeedKmh = obj.optDouble("runStartCalculatedSpeedKmh", 40.0).toFloat(),
       runStartGpsSpeedKmh = obj.optDouble("runStartGpsSpeedKmh", 0.0).toFloat(),
       maximumGpsSpeedKmh = obj.optDouble("maximumGpsSpeedKmh", 0.0).toFloat(),
-      maximumCalculatedSpeedKmh = obj.optDouble("maximumCalculatedSpeedKmh", 30.0).toFloat(),
+      maximumCalculatedSpeedKmh = obj.optDouble("maximumCalculatedSpeedKmh", 40.0).toFloat(),
       finalGpsSpeedKmh = obj.optDouble("finalGpsSpeedKmh", 0.0).toFloat(),
       finalCalculatedSpeedKmh = obj.optDouble("finalCalculatedSpeedKmh", 0.0).toFloat(),
       elapsedSeconds = obj.optDouble("elapsedSeconds", 0.0).toFloat(),
@@ -223,7 +223,7 @@ class RunResultRepository(context: Context) {
       finishReason = obj.optString("finishReason", "SENSOR_DECELERATION"),
       averageSpeedDifferenceKmh = obj.optDouble("averageSpeedDifferenceKmh", 0.0).toFloat(),
       maximumSpeedDifferenceKmh = obj.optDouble("maximumSpeedDifferenceKmh", 0.0).toFloat(),
-      appVersion = obj.optString("appVersion", "0.15.0"),
+      appVersion = obj.optString("appVersion", "0.17.0"),
       samples = samplesList
     )
   }

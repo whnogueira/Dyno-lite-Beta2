@@ -366,10 +366,11 @@ fun TestPreparationScreen(
               style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
             )
             Text(
-              text = "1. Fixe o celular firmemente no suporte em posição vertical.\n" +
-                "2. Calibre o zero com o veículo totalmente parado.\n" +
-                "3. Toque em 'PREPARAR TESTE' no cartão de passagem.\n" +
-                "4. Acelere em 3ª marcha; o teste iniciará automaticamente ao atingir 30 km/h pelo GPS.",
+              text = "1. Fixe o celular firmemente no suporte na vertical.\n" +
+                "2. Calibre o zero com o carro parado e motor funcionando.\n" +
+                "3. Inicie o procedimento com o carro totalmente parado.\n" +
+                "4. Acelere em 3ª marcha; o teste começará automaticamente na velocidade selecionada (40, 50 ou 60 km/h) pelo GPS real.\n" +
+                "5. Ao atingir o limite ou pisar na embreagem, o teste encerra e salva os dados.",
               style = MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp),
               color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -402,11 +403,11 @@ fun TestPreparationScreen(
             )
             Spacer(modifier = Modifier.width(10.dp))
             Text(
-              text = "PREPARAR TESTE",
+              text = "INICIAR COM O CARRO PARADO",
               style = MaterialTheme.typography.labelLarge.copy(
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.5.sp,
-                fontSize = 15.sp
+                fontSize = 14.sp
               )
             )
           }

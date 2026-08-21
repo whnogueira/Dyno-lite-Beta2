@@ -21,7 +21,7 @@ class GreetingScreenshotTest {
 
   @Test
   fun greeting_screenshot() {
-    composeTestRule.setContent { DynoLiteTheme { DynoLiteHomeScreen() } }
+    composeTestRule.setContent { DynoLiteTheme { DynoLiteApp() } }
 
     composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/greeting.png")
   }

@@ -55,6 +55,7 @@ import com.example.R
 fun SettingsScreen(
   onNavigateToSensorDiagnostic: () -> Unit,
   onNavigateToHowItWorks: () -> Unit,
+  onNavigateToGuide: () -> Unit = {},
   onNavigateBack: () -> Unit,
   modifier: Modifier = Modifier
 ) {
@@ -172,13 +173,71 @@ fun SettingsScreen(
 
         // Information Section
         Text(
-          text = "INFORMAÇÕES",
+          text = "INFORMAÇÕES & AJUDA",
           style = MaterialTheme.typography.labelSmall.copy(
             fontWeight = FontWeight.Bold,
             letterSpacing = 0.8.sp
           ),
           color = MaterialTheme.colorScheme.primary
         )
+
+        Card(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onNavigateToGuide() }
+            .testTag("card_accuracy_guide"),
+          shape = RoundedCornerShape(16.dp),
+          colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+          ),
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+        ) {
+          Row(
+            modifier = Modifier.padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+          ) {
+            Surface(
+              modifier = Modifier.size(44.dp),
+              shape = RoundedCornerShape(12.dp),
+              color = MaterialTheme.colorScheme.primaryContainer
+            ) {
+              Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+              ) {
+                Icon(
+                  imageVector = Icons.Outlined.Speed,
+                  contentDescription = null,
+                  tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                  modifier = Modifier.size(24.dp)
+                )
+              }
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+              Text(
+                text = "Guia de precisão do teste",
+                style = MaterialTheme.typography.titleSmall.copy(
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 16.sp
+                )
+              )
+              Text(
+                text = "Posicionamento do celular, calibração no suporte, início com carro parado e disparo aos 30 km/h.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+              )
+            }
+
+            Icon(
+              imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+              contentDescription = null,
+              tint = MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.size(20.dp)
+            )
+          }
+        }
 
         Card(
           modifier = Modifier
@@ -252,7 +311,7 @@ fun SettingsScreen(
             modifier = Modifier.testTag("version_badge")
           ) {
             Text(
-              text = "VERSÃO 0.15.0",
+              text = "VERSÃO 0.16.0",
               modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
               style = MaterialTheme.typography.labelSmall.copy(
                 fontWeight = FontWeight.Bold,
