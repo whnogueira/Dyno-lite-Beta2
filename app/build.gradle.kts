@@ -17,8 +17,8 @@ android {
     applicationId = "com.dynolite.app"
     minSdk = 24
     targetSdk = 36
-    versionCode = 19
-    versionName = "0.19.0"
+    versionCode = 20
+    versionName = "0.19.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

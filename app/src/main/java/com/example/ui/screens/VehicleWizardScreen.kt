@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -97,6 +99,7 @@ fun VehicleWizardScreen(
   var engine by remember { mutableStateOf(existingVehicle?.engine ?: "") }
   var searchQuery by remember { mutableStateOf("") }
   var isSearchMode by remember { mutableStateOf(existingVehicle == null || !existingVehicle.isCustom) }
+  var selectedCatalogEntry by remember { mutableStateOf<VehicleCatalogEntry?>(null) }
 
   // Step 2: Factory Data
   var curbWeightText by remember { mutableStateOf(existingVehicle?.curbWeightKg?.toInt()?.toString() ?: "1000") }
@@ -338,6 +341,8 @@ fun VehicleWizardScreen(
                 onSearchModeChanged = { isSearchMode = it },
                 searchQuery = searchQuery,
                 onSearchQueryChanged = { searchQuery = it },
+                selectedCatalogEntry = selectedCatalogEntry,
+                onCatalogEntrySelected = { selectedCatalogEntry = it },
                 manufacturer = manufacturer,
                 onManufacturerChanged = { manufacturer = it },
                 model = model,
@@ -347,26 +352,7 @@ fun VehicleWizardScreen(
                 version = version,
                 onVersionChanged = { version = it },
                 engine = engine,
-                onEngineChanged = { engine = it },
-                onCatalogVehicleSelected = { cv ->
-                  manufacturer = cv.manufacturer
-                  model = cv.model
-                  yearText = cv.year.toString()
-                  version = cv.version
-                  engine = cv.engine
-                  displacement = cv.displacement
-                  curbWeightText = if (cv.curbWeightKg > 0) cv.curbWeightKg.toInt().toString() else ""
-                  factoryPowerText = cv.factoryPowerCv?.toInt()?.toString() ?: ""
-                  factoryTorqueText = cv.factoryTorqueKgf?.toString() ?: ""
-                  drivetrain = cv.drivetrain
-                  tireWidthText = cv.tireWidthMm.toString()
-                  tireAspectText = cv.tireAspectRatio.toString()
-                  wheelDiameterText = cv.wheelDiameterInches.toString()
-                  selectedTransmissionId = cv.transmissionId ?: "gm_f17_ccw"
-                  transmissionOption = if (cv.transmissionId != null) "KNOWN" else "UNKNOWN"
-                  isCustom = false
-                  currentStep = 2
-                }
+                onEngineChanged = { engine = it }
               )
 
               if (!isSearchMode || manufacturer.isNotBlank()) {
@@ -464,6 +450,8 @@ fun VehicleWizardScreen(
       Row(
         modifier = Modifier
           .fillMaxWidth()
+          .navigationBarsPadding()
+          .imePadding()
           .padding(horizontal = 20.dp, vertical = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -494,7 +482,7 @@ fun VehicleWizardScreen(
 
         if (currentStep < totalSteps) {
           val canAdvance = when (currentStep) {
-            1 -> manufacturer.isNotBlank() && model.isNotBlank() && curbWeightVal > 200f
+            1 -> if (isSearchMode) selectedCatalogEntry != null else (manufacturer.isNotBlank() && model.isNotBlank() && curbWeightVal > 200f)
             2 -> true
             3 -> widthInt in 125..355 && aspectInt in 25..90 && rimInt in 10..24
             4 -> totalWeightKg > 200f
@@ -503,8 +491,27 @@ fun VehicleWizardScreen(
 
           Button(
             onClick = {
-              if (currentStep == 1 && isSearchMode && manufacturer.isBlank()) {
-                isSearchMode = false
+              if (currentStep == 1 && isSearchMode) {
+                selectedCatalogEntry?.let { cv ->
+                  val prof = cv.toVehicleProfile()
+                  manufacturer = prof.manufacturer
+                  model = prof.model
+                  yearText = prof.year.toString()
+                  version = prof.version
+                  engine = prof.engine
+                  displacement = prof.displacement
+                  curbWeightText = if (prof.curbWeightKg > 0) prof.curbWeightKg.toInt().toString() else ""
+                  factoryPowerText = prof.factoryPowerCv?.toInt()?.toString() ?: ""
+                  factoryTorqueText = prof.factoryTorqueKgf?.toString() ?: ""
+                  drivetrain = prof.drivetrain
+                  tireWidthText = prof.tireWidthMm.toString()
+                  tireAspectText = prof.tireAspectRatio.toString()
+                  wheelDiameterText = prof.wheelDiameterInches.toString()
+                  selectedTransmissionId = prof.transmissionId ?: "gm_f17_ccw"
+                  transmissionOption = if (prof.transmissionId != null) "KNOWN" else "UNKNOWN"
+                  isCustom = false
+                  currentStep++
+                }
               } else {
                 currentStep++
               }
@@ -516,7 +523,10 @@ fun VehicleWizardScreen(
               .testTag("btn_wizard_next"),
             shape = RoundedCornerShape(12.dp)
           ) {
-            Text("AVANÇAR")
+            Text(
+              if (currentStep == 1 && isSearchMode && selectedCatalogEntry != null) "USAR VEÍCULO SELECIONADO"
+              else "AVANÇAR"
+            )
           }
         } else {
           Button(
@@ -554,6 +564,8 @@ private fun Step1Identification(
   onSearchModeChanged: (Boolean) -> Unit,
   searchQuery: String,
   onSearchQueryChanged: (String) -> Unit,
+  selectedCatalogEntry: VehicleCatalogEntry?,
+  onCatalogEntrySelected: (VehicleCatalogEntry?) -> Unit,
   manufacturer: String,
   onManufacturerChanged: (String) -> Unit,
   model: String,
@@ -563,8 +575,7 @@ private fun Step1Identification(
   version: String,
   onVersionChanged: (String) -> Unit,
   engine: String,
-  onEngineChanged: (String) -> Unit,
-  onCatalogVehicleSelected: (VehicleProfile) -> Unit
+  onEngineChanged: (String) -> Unit
 ) {
   val context = LocalContext.current
   val catalogRepo = remember { VehicleCatalogRepository.getInstance(context) }
@@ -612,8 +623,8 @@ private fun Step1Identification(
       OutlinedTextField(
         value = searchQuery,
         onValueChange = onSearchQueryChanged,
-        label = { Text("Buscar modelo, motor ou geração (ex: Gol AP, Corsa, Vectra, Jetta TSI...)") },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+        label = { Text("Buscar modelo, motor ou geração") },
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(20.dp)) },
         modifier = Modifier.fillMaxWidth().testTag("input_search_catalog"),
         shape = RoundedCornerShape(12.dp),
         singleLine = true
@@ -724,17 +735,18 @@ private fun Step1Identification(
       } else {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
           Text(
-            text = "${matchingEntries.size} veículos encontrados no catálogo:",
+            text = "${matchingEntries.size} veículos encontrados no catálogo (toque para selecionar):",
             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
             color = MaterialTheme.colorScheme.onSurfaceVariant
           )
 
           matchingEntries.forEach { entry ->
+            val isSelected = selectedCatalogEntry?.id == entry.id
             VehicleCatalogCard(
               entry = entry,
-              onSelect = {
-                val profile = entry.toVehicleProfile()
-                onCatalogVehicleSelected(profile)
+              isSelected = isSelected,
+              onClick = {
+                onCatalogEntrySelected(if (isSelected) null else entry)
               }
             )
           }
@@ -819,17 +831,31 @@ private fun Step1Identification(
 @Composable
 private fun VehicleCatalogCard(
   entry: VehicleCatalogEntry,
-  onSelect: () -> Unit
+  isSelected: Boolean,
+  onClick: () -> Unit
 ) {
   var showDetails by remember { mutableStateOf(false) }
+  val isVerified = !entry.sourceName.isNullOrBlank() && !entry.sourceReference.isNullOrBlank()
+  val drivetrainLabel = when (entry.drivetrain?.uppercase()) {
+    "RWD" -> "Traseira"
+    "AWD", "4WD" -> "Integral"
+    else -> "Dianteira"
+  }
 
   Card(
     modifier = Modifier
       .fillMaxWidth()
-      .clickable { onSelect() },
+      .clickable { onClick() }
+      .testTag("catalog_card_${entry.id}"),
     shape = RoundedCornerShape(14.dp),
-    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
-    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+    colors = CardDefaults.cardColors(
+      containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+      else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+    ),
+    border = BorderStroke(
+      width = if (isSelected) 2.dp else 1.dp,
+      color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+    )
   ) {
     Column(
       modifier = Modifier.padding(14.dp),
@@ -857,25 +883,31 @@ private fun VehicleCatalogCard(
           )
         }
 
-        // Status Badge
-        Surface(
-          shape = RoundedCornerShape(6.dp),
-          color = when (entry.verificationStatus) {
-            VerificationStatus.VERIFIED -> MaterialTheme.colorScheme.primaryContainer
-            VerificationStatus.PARTIAL -> MaterialTheme.colorScheme.secondaryContainer
-            VerificationStatus.UNVERIFIED -> MaterialTheme.colorScheme.surfaceVariant
-          }
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-          Text(
-            text = entry.verificationStatus.label,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
-            color = when (entry.verificationStatus) {
-              VerificationStatus.VERIFIED -> MaterialTheme.colorScheme.onPrimaryContainer
-              VerificationStatus.PARTIAL -> MaterialTheme.colorScheme.onSecondaryContainer
-              VerificationStatus.UNVERIFIED -> MaterialTheme.colorScheme.onSurfaceVariant
-            }
-          )
+          // Status Badge
+          Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = if (isVerified) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+          ) {
+            Text(
+              text = if (isVerified) "Verificado" else "Dados parciais",
+              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+              style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+              color = if (isVerified) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+          }
+
+          if (isSelected) {
+            Icon(
+              imageVector = Icons.Default.Check,
+              contentDescription = "Selecionado",
+              tint = MaterialTheme.colorScheme.primary,
+              modifier = Modifier.size(20.dp)
+            )
+          }
         }
       }
 
@@ -889,32 +921,36 @@ private fun VehicleCatalogCard(
         val weightStr = entry.curbWeightKg?.let { "${it.toInt()} kg" } ?: "Peso N/D"
 
         Text(
-          text = "$powerStr • $torqueStr • $weightStr • Tração ${entry.drivetrain ?: "Dianteira"}",
+          text = "$powerStr • $torqueStr • $weightStr • Tração $drivetrainLabel",
           style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
           color = MaterialTheme.colorScheme.primary
         )
       }
 
-      if (entry.notes != null || entry.sourceName != null) {
-        AnimatedVisibility(visible = showDetails) {
-          Column(
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-          ) {
-            if (entry.notes != null) {
-              Text(
-                text = "Nota: ${entry.notes}",
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-              )
-            }
-            if (entry.sourceName != null) {
-              Text(
-                text = "Fonte: ${entry.sourceName} ${entry.sourceReference ?: ""}",
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-              )
-            }
+      AnimatedVisibility(visible = showDetails) {
+        Column(
+          modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+          verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+          if (!entry.notes.isNullOrBlank()) {
+            Text(
+              text = "Nota: ${entry.notes}",
+              style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+              color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+          }
+          if (!entry.sourceName.isNullOrBlank()) {
+            Text(
+              text = "Fonte: ${entry.sourceName} ${entry.sourceReference ?: ""}",
+              style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+              color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+            )
+          } else {
+            Text(
+              text = "Fonte ainda não registrada. Confirme os dados antes do teste.",
+              style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+              color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+            )
           }
         }
       }
@@ -924,27 +960,11 @@ private fun VehicleCatalogCard(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        if (entry.notes != null || entry.sourceName != null) {
-          Text(
-            text = if (showDetails) "Menos detalhes" else "Mais detalhes",
-            style = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.primary),
-            modifier = Modifier.clickable { showDetails = !showDetails }
-          )
-        } else {
-          Spacer(modifier = Modifier.width(1.dp))
-        }
-
-        Button(
-          onClick = onSelect,
-          shape = RoundedCornerShape(8.dp),
-          modifier = Modifier.height(34.dp),
-          colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-          )
-        ) {
-          Text("SELECIONAR", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
-        }
+        Text(
+          text = if (showDetails) "Menos detalhes" else "Mais detalhes",
+          style = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.primary),
+          modifier = Modifier.clickable { showDetails = !showDetails }
+        )
       }
     }
   }

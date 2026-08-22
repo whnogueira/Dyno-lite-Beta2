@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -297,11 +298,12 @@ private fun VehicleGarageCard(
   Card(
     modifier = modifier
       .fillMaxWidth()
-      .testTag("vehicle_card_${vehicle.id}"),
-    shape = RoundedCornerShape(18.dp),
+      .testTag("vehicle_card_${vehicle.id}")
+      .clickable { onEdit() },
+    shape = RoundedCornerShape(16.dp),
     colors = CardDefaults.cardColors(
       containerColor = if (vehicle.isPrimary)
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
       else
         MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
     ),
@@ -316,8 +318,8 @@ private fun VehicleGarageCard(
     Column(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(16.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp)
+        .padding(14.dp),
+      verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
       Row(
         modifier = Modifier.fillMaxWidth(),
@@ -329,7 +331,7 @@ private fun VehicleGarageCard(
             text = "${vehicle.manufacturer} ${vehicle.model}",
             style = MaterialTheme.typography.titleMedium.copy(
               fontWeight = FontWeight.Bold,
-              fontSize = 18.sp
+              fontSize = 17.sp
             ),
             color = MaterialTheme.colorScheme.onSurface
           )
@@ -478,7 +480,7 @@ private fun VehicleGarageCard(
           ) {
             Icon(
               imageVector = Icons.Outlined.StarOutline,
-              contentDescription = null,
+              contentDescription = "Tornar veículo principal",
               modifier = Modifier.size(16.dp)
             )
             Spacer(modifier = Modifier.width(4.dp))
@@ -498,7 +500,7 @@ private fun VehicleGarageCard(
           ) {
             Icon(
               imageVector = Icons.Outlined.ContentCopy,
-              contentDescription = "Duplicar",
+              contentDescription = "Duplicar veículo",
               tint = MaterialTheme.colorScheme.onSurfaceVariant,
               modifier = Modifier.size(18.dp)
             )
@@ -510,7 +512,7 @@ private fun VehicleGarageCard(
           ) {
             Icon(
               imageVector = Icons.Outlined.Edit,
-              contentDescription = "Editar",
+              contentDescription = "Editar veículo",
               tint = MaterialTheme.colorScheme.onSurfaceVariant,
               modifier = Modifier.size(18.dp)
             )
@@ -522,7 +524,7 @@ private fun VehicleGarageCard(
           ) {
             Icon(
               imageVector = Icons.Outlined.DeleteOutline,
-              contentDescription = "Excluir",
+              contentDescription = "Excluir veículo",
               tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
               modifier = Modifier.size(18.dp)
             )

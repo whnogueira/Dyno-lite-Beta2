@@ -92,10 +92,10 @@ fun HomeScreen(
       modifier = Modifier
         .fillMaxSize()
         .verticalScroll(rememberScrollState())
-        .padding(vertical = 16.dp)
+        .padding(vertical = 10.dp)
         .widthIn(max = 500.dp),
       horizontalAlignment = Alignment.CenterHorizontally,
-      verticalArrangement = Arrangement.spacedBy(18.dp)
+      verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
 
       // Hero Header
@@ -105,8 +105,8 @@ fun HomeScreen(
       ) {
         // App Icon Container with official Dyno Lite logo
         Surface(
-          modifier = Modifier.size(80.dp),
-          shape = RoundedCornerShape(22.dp),
+          modifier = Modifier.size(72.dp),
+          shape = RoundedCornerShape(20.dp),
           color = MaterialTheme.colorScheme.surfaceVariant,
           tonalElevation = 2.dp,
           border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
@@ -119,21 +119,21 @@ fun HomeScreen(
               painter = painterResource(id = R.drawable.ic_dyno_logo),
               contentDescription = stringResource(R.string.app_name),
               modifier = Modifier
-                .size(68.dp)
-                .clip(RoundedCornerShape(16.dp)),
+                .size(60.dp)
+                .clip(RoundedCornerShape(14.dp)),
               contentScale = ContentScale.Fit
             )
           }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         Text(
           text = "DYNO LITE",
           style = MaterialTheme.typography.headlineMedium.copy(
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.sp,
-            fontSize = 24.sp
+            fontSize = 22.sp
           ),
           color = MaterialTheme.colorScheme.onSurface,
           modifier = Modifier.testTag("home_title")
@@ -142,12 +142,12 @@ fun HomeScreen(
         Text(
           text = "Descubra o desempenho estimado do seu carro",
           style = MaterialTheme.typography.bodyMedium.copy(
-            fontSize = 15.sp,
-            lineHeight = 20.sp
+            fontSize = 14.sp,
+            lineHeight = 18.sp
           ),
           color = MaterialTheme.colorScheme.onSurfaceVariant,
           textAlign = TextAlign.Center,
-          modifier = Modifier.padding(top = 4.dp).testTag("home_subtitle")
+          modifier = Modifier.padding(top = 2.dp).testTag("home_subtitle")
         )
       }
 
@@ -617,7 +617,7 @@ fun HomeScreen(
         modifier = Modifier
           .fillMaxWidth()
           .padding(top = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
       ) {
         TextButton(
@@ -634,7 +634,7 @@ fun HomeScreen(
             text = "Guia do teste",
             style = MaterialTheme.typography.bodyMedium.copy(
               fontWeight = FontWeight.Medium,
-              fontSize = 12.5.sp
+              fontSize = 13.sp
             )
           )
         }
@@ -653,26 +653,7 @@ fun HomeScreen(
             text = "Como funciona",
             style = MaterialTheme.typography.bodyMedium.copy(
               fontWeight = FontWeight.Medium,
-              fontSize = 12.5.sp
-            )
-          )
-        }
-
-        TextButton(
-          onClick = onNavigateToSettings,
-          modifier = Modifier.testTag("btn_quick_settings")
-        ) {
-          Icon(
-            imageVector = Icons.Outlined.Settings,
-            contentDescription = null,
-            modifier = Modifier.size(16.dp)
-          )
-          Spacer(modifier = Modifier.width(6.dp))
-          Text(
-            text = "Configurações",
-            style = MaterialTheme.typography.bodyMedium.copy(
-              fontWeight = FontWeight.Medium,
-              fontSize = 12.5.sp
+              fontSize = 13.sp
             )
           )
         }
