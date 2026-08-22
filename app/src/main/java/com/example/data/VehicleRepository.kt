@@ -76,6 +76,16 @@ class VehicleRepository(context: Context) {
     saveAll(currentVehicles)
   }
 
+  fun duplicateVehicle(vehicleId: String) {
+    val vehicle = getVehicles().firstOrNull { it.id == vehicleId } ?: return
+    val duplicate = vehicle.copy(
+      id = java.util.UUID.randomUUID().toString(),
+      model = "${vehicle.model} (Cópia)",
+      isPrimary = false
+    )
+    saveVehicle(duplicate)
+  }
+
   fun deleteVehicle(vehicleId: String) {
     val currentVehicles = getVehicles().toMutableList()
     val removed = currentVehicles.removeAll { it.id == vehicleId }

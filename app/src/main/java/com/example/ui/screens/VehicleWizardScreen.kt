@@ -83,7 +83,7 @@ fun VehicleWizardScreen(
   modifier: Modifier = Modifier
 ) {
   var currentStep by remember { mutableIntStateOf(1) }
-  val totalSteps = 6
+  val totalSteps = 5
 
   // Form State
   var vehicleId by remember { mutableStateOf(existingVehicle?.id ?: UUID.randomUUID().toString()) }
@@ -289,12 +289,11 @@ fun VehicleWizardScreen(
           )
           Text(
             text = when (currentStep) {
-              1 -> "Identificação"
-              2 -> "Dados Originais"
-              3 -> "Câmbio"
-              4 -> "Pneus"
-              5 -> "Peso Adicional"
-              6 -> "Confirmação"
+              1 -> "Veículo"
+              2 -> "Câmbio"
+              3 -> "Pneus"
+              4 -> "Peso do Veículo"
+              5 -> "Confirmação"
               else -> ""
             },
             style = MaterialTheme.typography.labelSmall.copy(
@@ -333,54 +332,65 @@ fun VehicleWizardScreen(
           verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
           when (currentStep) {
-            1 -> Step1Identification(
-              isSearchMode = isSearchMode,
-              onSearchModeChanged = { isSearchMode = it },
-              searchQuery = searchQuery,
-              onSearchQueryChanged = { searchQuery = it },
-              manufacturer = manufacturer,
-              onManufacturerChanged = { manufacturer = it },
-              model = model,
-              onModelChanged = { model = it },
-              yearText = yearText,
-              onYearTextChanged = { yearText = it },
-              version = version,
-              onVersionChanged = { version = it },
-              engine = engine,
-              onEngineChanged = { engine = it },
-              onCatalogVehicleSelected = { cv ->
-                manufacturer = cv.manufacturer
-                model = cv.model
-                yearText = cv.year.toString()
-                version = cv.version
-                engine = cv.engine
-                displacement = cv.displacement
-                curbWeightText = if (cv.curbWeightKg > 0) cv.curbWeightKg.toInt().toString() else ""
-                factoryPowerText = cv.factoryPowerCv?.toInt()?.toString() ?: ""
-                factoryTorqueText = cv.factoryTorqueKgf?.toString() ?: ""
-                drivetrain = cv.drivetrain
-                tireWidthText = cv.tireWidthMm.toString()
-                tireAspectText = cv.tireAspectRatio.toString()
-                wheelDiameterText = cv.wheelDiameterInches.toString()
-                selectedTransmissionId = cv.transmissionId ?: "gm_f17_ccw"
-                transmissionOption = if (cv.transmissionId != null) "KNOWN" else "UNKNOWN"
-                isCustom = false
-                currentStep = 2
+            1 -> {
+              Step1Identification(
+                isSearchMode = isSearchMode,
+                onSearchModeChanged = { isSearchMode = it },
+                searchQuery = searchQuery,
+                onSearchQueryChanged = { searchQuery = it },
+                manufacturer = manufacturer,
+                onManufacturerChanged = { manufacturer = it },
+                model = model,
+                onModelChanged = { model = it },
+                yearText = yearText,
+                onYearTextChanged = { yearText = it },
+                version = version,
+                onVersionChanged = { version = it },
+                engine = engine,
+                onEngineChanged = { engine = it },
+                onCatalogVehicleSelected = { cv ->
+                  manufacturer = cv.manufacturer
+                  model = cv.model
+                  yearText = cv.year.toString()
+                  version = cv.version
+                  engine = cv.engine
+                  displacement = cv.displacement
+                  curbWeightText = if (cv.curbWeightKg > 0) cv.curbWeightKg.toInt().toString() else ""
+                  factoryPowerText = cv.factoryPowerCv?.toInt()?.toString() ?: ""
+                  factoryTorqueText = cv.factoryTorqueKgf?.toString() ?: ""
+                  drivetrain = cv.drivetrain
+                  tireWidthText = cv.tireWidthMm.toString()
+                  tireAspectText = cv.tireAspectRatio.toString()
+                  wheelDiameterText = cv.wheelDiameterInches.toString()
+                  selectedTransmissionId = cv.transmissionId ?: "gm_f17_ccw"
+                  transmissionOption = if (cv.transmissionId != null) "KNOWN" else "UNKNOWN"
+                  isCustom = false
+                  currentStep = 2
+                }
+              )
+
+              if (!isSearchMode || manufacturer.isNotBlank()) {
+                HorizontalDivider(
+                  thickness = 0.8.dp,
+                  color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                  modifier = Modifier.padding(vertical = 8.dp)
+                )
+
+                Step2OriginalData(
+                  curbWeightText = curbWeightText,
+                  onCurbWeightChanged = { curbWeightText = it },
+                  factoryPowerText = factoryPowerText,
+                  onFactoryPowerChanged = { factoryPowerText = it },
+                  factoryTorqueText = factoryTorqueText,
+                  onFactoryTorqueChanged = { factoryTorqueText = it },
+                  displacement = displacement,
+                  onDisplacementChanged = { displacement = it },
+                  drivetrain = drivetrain,
+                  onDrivetrainChanged = { drivetrain = it }
+                )
               }
-            )
-            2 -> Step2OriginalData(
-              curbWeightText = curbWeightText,
-              onCurbWeightChanged = { curbWeightText = it },
-              factoryPowerText = factoryPowerText,
-              onFactoryPowerChanged = { factoryPowerText = it },
-              factoryTorqueText = factoryTorqueText,
-              onFactoryTorqueChanged = { factoryTorqueText = it },
-              displacement = displacement,
-              onDisplacementChanged = { displacement = it },
-              drivetrain = drivetrain,
-              onDrivetrainChanged = { drivetrain = it }
-            )
-            3 -> Step3Transmission(
+            }
+            2 -> Step3Transmission(
               transmissionOption = transmissionOption,
               onTransmissionOptionChanged = { transmissionOption = it },
               selectedTransmissionId = selectedTransmissionId,
@@ -390,7 +400,7 @@ fun VehicleWizardScreen(
               showTechnicalDetails = showTransmissionTechnicalDetails,
               onToggleTechnicalDetails = { showTransmissionTechnicalDetails = !showTransmissionTechnicalDetails }
             )
-            4 -> Step4Tires(
+            3 -> Step4Tires(
               tireWidthText = tireWidthText,
               onTireWidthChanged = { tireWidthText = it },
               tireAspectText = tireAspectText,
@@ -399,7 +409,7 @@ fun VehicleWizardScreen(
               onWheelDiameterChanged = { wheelDiameterText = it },
               tireCalc = tireCalc
             )
-            5 -> Step5AdditionalWeight(
+            4 -> Step5AdditionalWeight(
               curbWeightVal = curbWeightVal,
               driverWeightText = driverWeightText,
               onDriverWeightChanged = { driverWeightText = it },
@@ -428,7 +438,7 @@ fun VehicleWizardScreen(
               totalWeightKg = totalWeightKg,
               confidence = confidence
             )
-            6 -> Step6Confirmation(
+            5 -> Step6Confirmation(
               manufacturer = manufacturer,
               model = model,
               yearText = yearText,
@@ -484,11 +494,10 @@ fun VehicleWizardScreen(
 
         if (currentStep < totalSteps) {
           val canAdvance = when (currentStep) {
-            1 -> manufacturer.isNotBlank() && model.isNotBlank()
-            2 -> curbWeightVal > 200f
-            3 -> true
-            4 -> widthInt in 125..355 && aspectInt in 25..90 && rimInt in 10..24
-            5 -> totalWeightKg > 200f
+            1 -> manufacturer.isNotBlank() && model.isNotBlank() && curbWeightVal > 200f
+            2 -> true
+            3 -> widthInt in 125..355 && aspectInt in 25..90 && rimInt in 10..24
+            4 -> totalWeightKg > 200f
             else -> true
           }
 

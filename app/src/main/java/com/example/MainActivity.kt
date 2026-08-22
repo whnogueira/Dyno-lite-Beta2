@@ -50,7 +50,6 @@ import com.example.model.VehicleProfile
 import com.example.ui.screens.AccuracyGuideScreen
 import com.example.ui.screens.GarageScreen
 import com.example.ui.screens.HomeScreen
-import com.example.ui.screens.HowItWorksScreen
 import com.example.ui.screens.OnboardingPresentationDialog
 import com.example.ui.screens.ResultsScreen
 import com.example.ui.screens.SettingsScreen
@@ -63,7 +62,6 @@ enum class AppDestination {
   VEHICLE_WIZARD,
   TEST_PREPARATION,
   SETTINGS,
-  HOW_IT_WORKS,
   ACCURACY_GUIDE,
   SENSORS
 }
@@ -105,9 +103,7 @@ fun DynoLiteApp() {
   // Hardware / gesture back navigation handler
   BackHandler(enabled = currentDestination != AppDestination.MAIN_TABS || selectedTabIndex != 0) {
     if (currentDestination != AppDestination.MAIN_TABS) {
-      if (currentDestination == AppDestination.HOW_IT_WORKS) {
-        currentDestination = AppDestination.SETTINGS
-      } else if (currentDestination == AppDestination.ACCURACY_GUIDE) {
+      if (currentDestination == AppDestination.ACCURACY_GUIDE) {
         currentDestination = previousDestination ?: AppDestination.MAIN_TABS
       } else {
         currentDestination = AppDestination.MAIN_TABS
@@ -375,7 +371,8 @@ fun DynoLiteApp() {
           currentDestination = AppDestination.SENSORS
         },
         onNavigateToHowItWorks = {
-          currentDestination = AppDestination.HOW_IT_WORKS
+          previousDestination = AppDestination.SETTINGS
+          currentDestination = AppDestination.ACCURACY_GUIDE
         },
         onNavigateToGuide = {
           previousDestination = AppDestination.SETTINGS
@@ -383,14 +380,6 @@ fun DynoLiteApp() {
         },
         onNavigateBack = {
           currentDestination = AppDestination.MAIN_TABS
-        }
-      )
-    }
-
-    AppDestination.HOW_IT_WORKS -> {
-      HowItWorksScreen(
-        onNavigateBack = {
-          currentDestination = AppDestination.SETTINGS
         }
       )
     }

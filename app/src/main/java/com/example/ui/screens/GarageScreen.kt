@@ -20,11 +20,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.DirectionsCar
 import androidx.compose.material.icons.outlined.Edit
@@ -34,12 +32,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -55,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.VehicleDatabase
 import com.example.model.VehicleCalculations
 import com.example.model.VehicleProfile
 import java.util.Locale
@@ -64,6 +61,7 @@ fun GarageScreen(
   vehicles: List<VehicleProfile>,
   onAddVehicle: () -> Unit,
   onEditVehicle: (VehicleProfile) -> Unit,
+  onDuplicateVehicle: (String) -> Unit = {},
   onSetPrimaryVehicle: (String) -> Unit,
   onDeleteVehicle: (String) -> Unit,
   modifier: Modifier = Modifier
@@ -199,6 +197,7 @@ fun GarageScreen(
               vehicle = vehicle,
               onSelectPrimary = { onSetPrimaryVehicle(vehicle.id) },
               onEdit = { onEditVehicle(vehicle) },
+              onDuplicate = { onDuplicateVehicle(vehicle.id) },
               onDelete = { vehicleToDelete = vehicle }
             )
           }
@@ -217,10 +216,17 @@ fun GarageScreen(
         )
       },
       text = {
-        Text(
-          text = "Tem certeza que deseja remover ${vehicle.manufacturer} ${vehicle.model} da sua garagem? Esta ação não pode ser desfeita.",
-          style = MaterialTheme.typography.bodyMedium
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+          Text(
+            text = "Tem certeza que deseja remover ${vehicle.manufacturer} ${vehicle.model} da sua garagem?",
+            style = MaterialTheme.typography.bodyMedium
+          )
+          Text(
+            text = "Aviso: Os resultados permanecerão no histórico, mas o perfil do veículo será removido.",
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+            color = MaterialTheme.colorScheme.error
+          )
+        }
       },
       confirmButton = {
         Button(
@@ -250,6 +256,7 @@ private fun VehicleGarageCard(
   vehicle: VehicleProfile,
   onSelectPrimary: () -> Unit,
   onEdit: () -> Unit,
+  onDuplicate: () -> Unit,
   onDelete: () -> Unit,
   modifier: Modifier = Modifier
 ) {
@@ -265,6 +272,27 @@ private fun VehicleGarageCard(
     measuredTotalWeightKg = vehicle.measuredTotalWeightKg,
     useMeasuredWeight = vehicle.useMeasuredWeight
   )
+
+  val transmissionLabel = when {
+    vehicle.transmissionId != null ->
+      VehicleDatabase.getTransmission(vehicle.transmissionId)?.displayName ?: "Original"
+    !vehicle.customTransmissionName.isNullOrBlank() ->
+      vehicle.customTransmissionName
+    else -> "Original"
+  }
+
+  val isDataComplete = vehicle.tireWidthMm > 0 &&
+    vehicle.tireAspectRatio > 0 &&
+    vehicle.wheelDiameterInches > 0 &&
+    totalWeight > 300f
+
+  val dataStatusLabel = if (vehicle.useMeasuredWeight) {
+    "Dados verificados"
+  } else if (isDataComplete) {
+    "Dados conferidos"
+  } else {
+    "Dados parciais"
+  }
 
   Card(
     modifier = modifier
@@ -305,37 +333,62 @@ private fun VehicleGarageCard(
             ),
             color = MaterialTheme.colorScheme.onSurface
           )
+          val sub = listOfNotNull(
+            vehicle.year.toString(),
+            vehicle.engine.ifBlank { null },
+            vehicle.version.ifBlank { null }
+          ).joinToString(" • ")
           Text(
-            text = "${vehicle.year} • ${vehicle.engine} ${vehicle.version}".trim(),
+            text = sub,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
           )
         }
 
-        if (vehicle.isPrimary) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
           Surface(
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer
+            color = MaterialTheme.colorScheme.surfaceContainerHigh
           ) {
-            Row(
-              modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(4.dp)
+            Text(
+              text = dataStatusLabel,
+              style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Medium,
+                fontSize = 10.5.sp
+              ),
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+            )
+          }
+
+          if (vehicle.isPrimary) {
+            Surface(
+              shape = CircleShape,
+              color = MaterialTheme.colorScheme.primaryContainer
             ) {
-              Icon(
-                imageVector = Icons.Default.Star,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.size(14.dp)
-              )
-              Text(
-                text = "Veículo principal",
-                style = MaterialTheme.typography.labelSmall.copy(
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 11.sp
-                ),
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-              )
+              Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Star,
+                  contentDescription = null,
+                  tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                  modifier = Modifier.size(14.dp)
+                )
+                Text(
+                  text = "Principal",
+                  style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp
+                  ),
+                  color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+              }
             }
           }
         }
@@ -353,7 +406,7 @@ private fun VehicleGarageCard(
       ) {
         Column {
           Text(
-            text = "Peso total est.",
+            text = "Peso Total",
             style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
           )
@@ -377,10 +430,23 @@ private fun VehicleGarageCard(
           )
         }
 
-        if (vehicle.factoryPowerCv != null) {
+        Column {
+          Text(
+            text = "Câmbio",
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+          )
+          Text(
+            text = transmissionLabel.take(12),
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface
+          )
+        }
+
+        if (vehicle.factoryPowerCv != null && vehicle.factoryPowerCv > 0f) {
           Column {
             Text(
-              text = "Potência de fábrica",
+              text = "Potência Orig.",
               style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
               color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             )
@@ -407,7 +473,8 @@ private fun VehicleGarageCard(
         if (!vehicle.isPrimary) {
           TextButton(
             onClick = onSelectPrimary,
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.testTag("btn_set_primary_${vehicle.id}")
           ) {
             Icon(
               imageVector = Icons.Outlined.StarOutline,
@@ -426,8 +493,20 @@ private fun VehicleGarageCard(
 
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
           IconButton(
+            onClick = onDuplicate,
+            modifier = Modifier.size(36.dp).testTag("btn_duplicate_${vehicle.id}")
+          ) {
+            Icon(
+              imageVector = Icons.Outlined.ContentCopy,
+              contentDescription = "Duplicar",
+              tint = MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.size(18.dp)
+            )
+          }
+
+          IconButton(
             onClick = onEdit,
-            modifier = Modifier.size(36.dp)
+            modifier = Modifier.size(36.dp).testTag("btn_edit_${vehicle.id}")
           ) {
             Icon(
               imageVector = Icons.Outlined.Edit,
@@ -439,7 +518,7 @@ private fun VehicleGarageCard(
 
           IconButton(
             onClick = onDelete,
-            modifier = Modifier.size(36.dp)
+            modifier = Modifier.size(36.dp).testTag("btn_delete_${vehicle.id}")
           ) {
             Icon(
               imageVector = Icons.Outlined.DeleteOutline,
