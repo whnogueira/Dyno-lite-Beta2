@@ -1,6 +1,14 @@
 package com.example.ui.screens
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Bundle
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -64,9 +72,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -81,9 +92,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.example.data.VehicleDatabase
 import com.example.model.VehicleCalculations
 import com.example.model.VehicleProfile
+import kotlinx.coroutines.delay
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -98,6 +111,89 @@ fun TestPreparationScreen(
   val context = LocalContext.current
   val prefs = remember(context) {
     context.getSharedPreferences("dyno_lite_prefs", Context.MODE_PRIVATE)
+  }
+
+  // Location Manager & GPS Speed check for vehicle stopped verification (< 3 km/h for 2s)
+  val locationManager = remember {
+    context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+  }
+  var hasLocationPermission by remember {
+    mutableStateOf(
+      ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    )
+  }
+  val permissionLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestMultiplePermissions()
+  ) { permissions ->
+    hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+      permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+  }
+  LaunchedEffect(Unit) {
+    if (!hasLocationPermission) {
+      permissionLauncher.launch(
+        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+      )
+    }
+  }
+
+  var currentGpsSpeedKmh by remember { mutableFloatStateOf(0f) }
+  var hasGpsFix by remember { mutableStateOf(false) }
+  var stoppedStartTimeMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+  var isStoppedForTwoSeconds by remember { mutableStateOf(true) }
+
+  DisposableEffect(locationManager, hasLocationPermission) {
+    if (locationManager != null && hasLocationPermission) {
+      val locationListener = object : LocationListener {
+        override fun onLocationChanged(location: Location) {
+          hasGpsFix = true
+          val rawSpeed = if (location.hasSpeed()) location.speed else 0f
+          val speedKmh = (rawSpeed * 3.6f).coerceAtLeast(0f)
+          currentGpsSpeedKmh = speedKmh
+        }
+        override fun onProviderEnabled(provider: String) {}
+        override fun onProviderDisabled(provider: String) {}
+        @Deprecated("Deprecated in Java")
+        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+      }
+
+      try {
+        locationManager.requestLocationUpdates(
+          LocationManager.GPS_PROVIDER,
+          300L,
+          0f,
+          locationListener
+        )
+      } catch (e: Exception) {
+        // Fallback safely
+      }
+
+      onDispose {
+        try {
+          locationManager.removeUpdates(locationListener)
+        } catch (e: Exception) {}
+      }
+    } else {
+      onDispose {}
+    }
+  }
+
+  // Periodic check of 2s stopped condition
+  LaunchedEffect(currentGpsSpeedKmh, hasGpsFix) {
+    if (currentGpsSpeedKmh >= 3.0f) {
+      isStoppedForTwoSeconds = false
+      stoppedStartTimeMs = System.currentTimeMillis()
+    } else {
+      val now = System.currentTimeMillis()
+      if (now - stoppedStartTimeMs >= 2000L) {
+        isStoppedForTwoSeconds = true
+      } else {
+        delay(2000L - (now - stoppedStartTimeMs).coerceAtLeast(0L))
+        if (currentGpsSpeedKmh < 3.0f) {
+          isStoppedForTwoSeconds = true
+        }
+      }
+    }
   }
 
   val defaultSavedDriverWeight = remember {
@@ -685,35 +781,70 @@ fun TestPreparationScreen(
                   }
                 }
 
-                // Safety Alert Card (Soft Amber/Neutral tone)
-                Card(
-                  modifier = Modifier.fillMaxWidth(),
-                  shape = RoundedCornerShape(16.dp),
-                  colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                  border = BorderStroke(1.dp, Color(0xFFE5A93C).copy(alpha = 0.5f))
-                ) {
-                  Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                // Movement Warning or Safety Alert Card
+                if (currentGpsSpeedKmh >= 3.0f) {
+                  Card(
+                    modifier = Modifier.fillMaxWidth().testTag("card_vehicle_moving_warning"),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
                   ) {
-                    Icon(
-                      imageVector = Icons.Outlined.Warning,
-                      contentDescription = null,
-                      tint = Color(0xFFE5A93C),
-                      modifier = Modifier.size(24.dp)
-                    )
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                      Text(
-                        text = "AVISO DE SEGURANÇA",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp),
-                        color = Color(0xFFE5A93C)
+                    Row(
+                      modifier = Modifier.padding(16.dp),
+                      verticalAlignment = Alignment.Top,
+                      horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                      Icon(
+                        imageVector = Icons.Outlined.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(24.dp)
                       )
-                      Text(
-                        text = "Inicie o procedimento antes de movimentar o veículo. Realize o teste em local seguro e fechado.",
-                        style = MaterialTheme.typography.bodySmall.copy(lineHeight = 18.sp),
-                        color = MaterialTheme.colorScheme.onSurface
+                      Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                          text = "VEÍCULO EM MOVIMENTO (${String.format(Locale.US, "%.1f", currentGpsSpeedKmh)} km/h)",
+                          style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp),
+                          color = MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                          text = "Pare completamente o veículo antes de preparar uma nova passagem.",
+                          style = MaterialTheme.typography.bodySmall.copy(lineHeight = 18.sp),
+                          color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                      }
+                    }
+                  }
+                } else {
+                  // Safety Alert Card (Soft Amber/Neutral tone)
+                  Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    border = BorderStroke(1.dp, Color(0xFFE5A93C).copy(alpha = 0.5f))
+                  ) {
+                    Row(
+                      modifier = Modifier.padding(16.dp),
+                      verticalAlignment = Alignment.Top,
+                      horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                      Icon(
+                        imageVector = Icons.Outlined.Warning,
+                        contentDescription = null,
+                        tint = Color(0xFFE5A93C),
+                        modifier = Modifier.size(24.dp)
                       )
+                      Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                          text = "AVISO DE SEGURANÇA",
+                          style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp),
+                          color = Color(0xFFE5A93C)
+                        )
+                        Text(
+                          text = "Inicie o procedimento antes de movimentar o veículo. Realize o teste em local seguro e fechado.",
+                          style = MaterialTheme.typography.bodySmall.copy(lineHeight = 18.sp),
+                          color = MaterialTheme.colorScheme.onSurface
+                        )
+                      }
                     }
                   }
                 }
@@ -764,18 +895,27 @@ fun TestPreparationScreen(
               Text("AVANÇAR")
             }
           } else {
+            val isVehicleMoving = currentGpsSpeedKmh >= 3.0f
+            val canProceed = !isVehicleMoving && isStoppedForTwoSeconds
+
             Button(
               onClick = onProceedToSensorScreen,
+              enabled = canProceed,
               modifier = Modifier.weight(1.5f).height(50.dp).testTag("btn_preparar_teste_proceed"),
               shape = RoundedCornerShape(12.dp),
               colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
               )
             ) {
               Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
               Spacer(modifier = Modifier.width(6.dp))
-              Text("INICIAR COM O CARRO PARADO", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+              Text(
+                text = if (isVehicleMoving) "PARE O VEÍCULO (< 3 km/h)" else "INICIAR COM O CARRO PARADO",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+              )
             }
           }
         }

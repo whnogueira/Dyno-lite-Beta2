@@ -45,6 +45,7 @@ import androidx.compose.material.icons.outlined.Sensors
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Straighten
 import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -71,6 +72,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -484,6 +486,27 @@ fun SensorScreen(
   var hasGpsFix by remember { mutableStateOf(false) }
   var gpsAccuracyM by remember { mutableFloatStateOf(0.0f) }
 
+  // Vehicle Stopped Check (< 3 km/h for >= 2 seconds)
+  var isStoppedForTwoSeconds by remember { mutableStateOf(true) }
+  var stoppedStartTimeMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+  LaunchedEffect(currentGpsSpeedKmh) {
+    if (currentGpsSpeedKmh >= 3.0f) {
+      isStoppedForTwoSeconds = false
+      stoppedStartTimeMs = System.currentTimeMillis()
+    } else {
+      val now = System.currentTimeMillis()
+      if (now - stoppedStartTimeMs >= 2000L) {
+        isStoppedForTwoSeconds = true
+      } else {
+        kotlinx.coroutines.delay(2000L - (now - stoppedStartTimeMs).coerceAtLeast(0L))
+        if (currentGpsSpeedKmh < 3.0f) {
+          isStoppedForTwoSeconds = true
+        }
+      }
+    }
+  }
+
   // Official Start of Dyno Run using real GPS speed at the trigger instant
   fun triggerOfficialRunStart(nowNs: Long, availableGpsKmh: Float) {
     val actualGpsSpeed = availableGpsKmh.coerceAtLeast(0f)
@@ -562,22 +585,61 @@ fun SensorScreen(
       val avgDiff = if (dynoTracker.diffCount > 0) (dynoTracker.diffSum / dynoTracker.diffCount).toFloat() else 0f
       averageSpeedDifferenceKmh = avgDiff
       maximumSpeedDifferenceKmh = dynoTracker.maxDiff
+      val peakDiff = abs(dynoTracker.maxGpsKmh - dynoTracker.maxCalcSpeedKmh)
 
-      // Evaluate Quality: strictly invalidate passes with excessive difference or insufficient GPS fixes
+      // Evaluate Quality & Invalidation reason
       val rejectionRatio = if (dynoTracker.total > 0) dynoTracker.rejected.toFloat() / dynoTracker.total.toFloat() else 0f
-      val runQualityStr = when {
-        reason == FinishReason.TIMEOUT || dynoTracker.elapsedSec > 25f || dynoTracker.elapsedSec < 1.5f ||
-          gpsAccuracyM > 12f || rejectionRatio > 0.25f || dynoTracker.validGpsUpdatesCount < 2 ||
-          avgDiff > 12.0f || dynoTracker.maxDiff > 20.0f || dynoTracker.maxGpsKmh < (dynoTracker.startTriggerSpeedKmh + 5f) -> "INVÁLIDA"
+      var invalidReasonText: String? = null
 
-        avgDiff <= 6.0f && dynoTracker.maxDiff <= 12.0f && dynoTracker.validGpsUpdatesCount >= 2 &&
+      val runQualityStr = when {
+        reason == FinishReason.TIMEOUT -> {
+          invalidReasonText = "Tempo de passagem excessivo (> 25s)."
+          "INVÁLIDA"
+        }
+        dynoTracker.elapsedSec < 1.5f -> {
+          invalidReasonText = "Duração muito curta (${String.format(Locale.US, "%.2f", dynoTracker.elapsedSec)}s) para registrar curva completa."
+          "INVÁLIDA"
+        }
+        gpsAccuracyM > 12f -> {
+          invalidReasonText = "Precisão do GPS insuficiente (${String.format(Locale.US, "%.1f", gpsAccuracyM)}m > 12m)."
+          "INVÁLIDA"
+        }
+        rejectionRatio > 0.25f -> {
+          invalidReasonText = "Mais de 25% das amostras rejeitadas por vibração excessiva."
+          "INVÁLIDA"
+        }
+        dynoTracker.validGpsUpdatesCount < 2 -> {
+          invalidReasonText = "Poucas leituras de GPS válidas (< 2) durante a medição."
+          "INVÁLIDA"
+        }
+        peakDiff > 15.0f -> {
+          invalidReasonText = "Divergência entre velocidade máxima GPS (${String.format(Locale.US, "%.1f", dynoTracker.maxGpsKmh)} km/h) e calculada (${String.format(Locale.US, "%.1f", dynoTracker.maxCalcSpeedKmh)} km/h)."
+          "INVÁLIDA"
+        }
+        avgDiff > 12.0f -> {
+          invalidReasonText = "Diferença média sincronizada entre GPS e acelerômetro elevada (±${String.format(Locale.US, "%.1f", avgDiff)} km/h)."
+          "INVÁLIDA"
+        }
+        dynoTracker.maxDiff > 20.0f -> {
+          invalidReasonText = "Pico de divergência momentânea excessivo (${String.format(Locale.US, "%.1f", dynoTracker.maxDiff)} km/h)."
+          "INVÁLIDA"
+        }
+        dynoTracker.maxGpsKmh < (dynoTracker.startTriggerSpeedKmh + 5f) -> {
+          invalidReasonText = "Velocidade máxima atingida insuficiente para teste de aceleração."
+          "INVÁLIDA"
+        }
+
+        avgDiff <= 6.0f && dynoTracker.maxDiff <= 12.0f && peakDiff <= 10.0f && dynoTracker.validGpsUpdatesCount >= 2 &&
           gpsAccuracyM <= 6f && dynoTracker.elapsedSec in 2f..20f && rejectionRatio <= 0.10f &&
           dynoTracker.maxGpsKmh >= (dynoTracker.startTriggerSpeedKmh + 10f) -> "BOA"
 
-        avgDiff <= 12.0f && dynoTracker.maxDiff <= 20.0f && dynoTracker.validGpsUpdatesCount >= 2 &&
+        avgDiff <= 12.0f && dynoTracker.maxDiff <= 20.0f && peakDiff <= 15.0f && dynoTracker.validGpsUpdatesCount >= 2 &&
           gpsAccuracyM <= 10f && dynoTracker.elapsedSec <= 25f && rejectionRatio <= 0.25f -> "REGULAR"
 
-        else -> "INVÁLIDA"
+        else -> {
+          invalidReasonText = "Inconsistência na detecção inercial ou divergência de velocidade."
+          "INVÁLIDA"
+        }
       }
 
       // Freeze immutable samples list (max 500 samples)
@@ -607,7 +669,8 @@ fun SensorScreen(
           finishReason = reason.code,
           averageSpeedDifferenceKmh = avgDiff,
           maximumSpeedDifferenceKmh = dynoTracker.maxDiff,
-          appVersion = "0.17.0",
+          invalidationReason = invalidReasonText,
+          appVersion = "0.19.1",
           samples = finalSamples
         )
         runResultRepository.saveResult(result)
@@ -658,8 +721,9 @@ fun SensorScreen(
               runMaximumGpsSpeedKmh = speedKmh
             }
 
-            // Accumulate GPS x Calculated speed differences ONLY once per NEW GPS update
-            if (isNewGpsFix && location.hasSpeed() && location.hasAccuracy() && location.accuracy <= 12f) {
+            // Accumulate GPS x Calculated speed differences ONLY once per NEW GPS update during MEDINDO and BEFORE deceleration
+            val isBeforeDeceleration = dynoTracker.decelerationStartNs == null && dynoTracker.gpsSpeedDropStartNs == null
+            if (isNewGpsFix && location.hasSpeed() && location.hasAccuracy() && location.accuracy <= 12f && isBeforeDeceleration) {
               dynoTracker.validGpsUpdatesCount++
               val currentCalcKmh = dynoTracker.velocityMs * 3.6f
               val diff = abs(currentCalcKmh - speedKmh)
@@ -1155,12 +1219,12 @@ fun SensorScreen(
           maximumSpeedDifferenceKmh = maximumSpeedDifferenceKmh,
           recordedSamplesCount = dynoTracker.recordedSamples.size,
           onPrepare = {
-            if (isCalibrated) {
+            if (isCalibrated && currentGpsSpeedKmh < 3.0f && isStoppedForTwoSeconds) {
               dynoTracker.reset()
               dynoTracker.state = DynoRunState.AGUARDANDO_INICIO
-              dynoTracker.armedEstimatedSpeedMs = (currentGpsSpeedKmh / 3.6f).coerceAtLeast(0f)
+              dynoTracker.armedEstimatedSpeedMs = 0f
               dynoTracker.armedLastNanoTime = System.nanoTime()
-              armedEstimatedSpeedKmh = currentGpsSpeedKmh
+              armedEstimatedSpeedKmh = 0f
               runElapsedSeconds = 0f
               runVelocityMs = 0f
               runStartCalculatedSpeedKmh = startSpeedTriggerKmh
@@ -1186,13 +1250,11 @@ fun SensorScreen(
           },
           onRepeat = {
             // Repetir teste: limpa temporários, preserva resultado salvo, veículo e calibração
+            // Exige que o veículo esteja completamente parado (< 3 km/h por 2s)
             dynoTracker.reset()
-            dynoTracker.state = DynoRunState.AGUARDANDO_INICIO
-            dynoTracker.armedEstimatedSpeedMs = (currentGpsSpeedKmh / 3.6f).coerceAtLeast(0f)
-            dynoTracker.armedLastNanoTime = System.nanoTime()
-            armedEstimatedSpeedKmh = currentGpsSpeedKmh
             runElapsedSeconds = 0f
             runVelocityMs = 0f
+            armedEstimatedSpeedKmh = 0f
             runStartCalculatedSpeedKmh = startSpeedTriggerKmh
             runStartGpsSpeedKmh = 0f
             runMaximumGpsSpeedKmh = 0f
@@ -1203,7 +1265,16 @@ fun SensorScreen(
             totalSamples = 0
             resultSaved = false
             runFinishReason = null
-            runState = DynoRunState.AGUARDANDO_INICIO
+
+            if (currentGpsSpeedKmh < 3.0f && isStoppedForTwoSeconds) {
+              dynoTracker.state = DynoRunState.AGUARDANDO_INICIO
+              dynoTracker.armedEstimatedSpeedMs = 0f
+              dynoTracker.armedLastNanoTime = System.nanoTime()
+              runState = DynoRunState.AGUARDANDO_INICIO
+            } else {
+              dynoTracker.state = DynoRunState.PARADO
+              runState = DynoRunState.PARADO
+            }
           },
           onReset = {
             // Zerar: retorna a PARADO sem apagar histórico ou calibração
@@ -2180,9 +2251,40 @@ private fun DynoRunCard(
               }
             }
 
+            val isVehicleMoving = currentGpsSpeedKmh >= 3.0f
+
+            if (isVehicleMoving) {
+              Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+              ) {
+                Row(
+                  modifier = Modifier.padding(10.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                  Icon(
+                    imageVector = Icons.Outlined.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(20.dp)
+                  )
+                  Text(
+                    text = "Pare completamente o veículo antes de preparar uma nova passagem (${String.format(Locale.US, "%.1f", currentGpsSpeedKmh)} km/h).",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                      fontSize = 12.sp,
+                      fontWeight = FontWeight.SemiBold
+                    ),
+                    color = MaterialTheme.colorScheme.error
+                  )
+                }
+              }
+            }
+
             Button(
               onClick = onPrepare,
-              enabled = isCalibrated,
+              enabled = isCalibrated && !isVehicleMoving,
               modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp)
@@ -2196,7 +2298,7 @@ private fun DynoRunCard(
               )
             ) {
               Text(
-                text = "INICIAR COM O CARRO PARADO",
+                text = if (isVehicleMoving) "PARE O VEÍCULO (< 3 km/h)" else "INICIAR COM O CARRO PARADO",
                 style = MaterialTheme.typography.labelLarge.copy(
                   fontWeight = FontWeight.Bold,
                   letterSpacing = 0.5.sp,

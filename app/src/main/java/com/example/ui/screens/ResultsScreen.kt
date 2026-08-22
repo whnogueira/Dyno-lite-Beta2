@@ -173,165 +173,573 @@ fun ResultsScreen(
       ) {
         val run = currentDisplayedResult
 
-        // 1. TÍTULO E SUBTÍTULO DA PASSAGEM
         if (run != null) {
           val dateFormat = SimpleDateFormat("dd/MM/yyyy 'às' HH:mm", Locale.getDefault())
           val formattedDate = dateFormat.format(Date(run.timestamp))
+          val isInvalid = run.quality == "INVÁLIDA" || run.quality == "INVALID"
 
-          Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-          ) {
-            Row(
+          if (isInvalid) {
+            // -------------------------------------------------------------
+            // FLUXO DE PASSAGEM INVÁLIDA
+            // 1. BANNER "PASSAGEM INVÁLIDA" NO TOPO
+            // -------------------------------------------------------------
+            Surface(
               modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
+                .testTag("banner_invalid_run"),
+              shape = RoundedCornerShape(14.dp),
+              color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f),
+              border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.6f))
             ) {
               Row(
+                modifier = Modifier.padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
               ) {
-                Icon(
-                  imageVector = Icons.Outlined.DirectionsCar,
-                  contentDescription = null,
-                  modifier = Modifier.size(18.dp),
-                  tint = MaterialTheme.colorScheme.primary
-                )
+                Surface(
+                  shape = CircleShape,
+                  color = MaterialTheme.colorScheme.error,
+                  modifier = Modifier.size(38.dp)
+                ) {
+                  Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                      imageVector = Icons.Default.Close,
+                      contentDescription = null,
+                      tint = MaterialTheme.colorScheme.onError,
+                      modifier = Modifier.size(24.dp)
+                    )
+                  }
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                  Text(
+                    text = "PASSAGEM INVÁLIDA",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                      fontWeight = FontWeight.Black,
+                      letterSpacing = 0.5.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                  )
+                  Text(
+                    text = "Esta passagem não pode ser utilizada para calcular potência e torque.",
+                    style = MaterialTheme.typography.bodySmall.copy(lineHeight = 18.sp),
+                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.95f)
+                  )
+                }
+              }
+            }
+
+            // 2. VEÍCULO E DATA
+            Surface(
+              modifier = Modifier.fillMaxWidth(),
+              shape = RoundedCornerShape(12.dp),
+              color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+            ) {
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                  Icon(
+                    imageVector = Icons.Outlined.DirectionsCar,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                  )
+                  Text(
+                    text = if (run.vehicleName.isNotEmpty()) run.vehicleName else "Veículo Principal",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                  )
+                }
+
                 Text(
-                  text = if (run.vehicleName.isNotEmpty()) run.vehicleName else "Veículo Principal",
-                  style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                  text = formattedDate,
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+              }
+            }
+
+            // 3. MOTIVO DA INVALIDAÇÃO
+            Card(
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("card_invalidation_reason"),
+              shape = RoundedCornerShape(14.dp),
+              colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+              ),
+              border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f))
+            ) {
+              Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                  Icon(
+                    imageVector = Icons.Outlined.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp)
+                  )
+                  Text(
+                    text = "MOTIVO DA INVALIDAÇÃO",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontWeight = FontWeight.Bold,
+                      letterSpacing = 0.5.sp
+                    ),
+                    color = MaterialTheme.colorScheme.error
+                  )
+                }
+                Text(
+                  text = run.getEffectiveInvalidationReason(),
+                  style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.Medium,
+                    lineHeight = 20.sp
+                  ),
                   color = MaterialTheme.colorScheme.onSurface
                 )
               }
-
-              Text(
-                text = formattedDate,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-              )
             }
-          }
-        }
 
-        // 2. RESUMO COM POTÊNCIA MÁXIMA E TORQUE MÁXIMO
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-          // Card Potência Máxima
-          Card(
-            modifier = Modifier
-              .weight(1f)
-              .testTag("card_max_power"),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-              containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-            ),
-            border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.4f))
-          ) {
-            Column(
+            // 4. RESUMO DAS VELOCIDADES
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+              // Velocidade Máxima GPS
+              Card(
+                modifier = Modifier
+                  .weight(1f)
+                  .testTag("card_speed_max_gps"),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(
+                  containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+              ) {
+                Column(
+                  modifier = Modifier.padding(12.dp),
+                  verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                  Text(
+                    text = "MÁXIMA GPS",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontWeight = FontWeight.Bold,
+                      fontSize = 10.sp
+                    ),
+                    color = MaterialTheme.colorScheme.primary
+                  )
+                  Text(
+                    text = String.format(Locale.US, "%.1f km/h", run.maximumGpsSpeedKmh),
+                    style = MaterialTheme.typography.titleMedium.copy(
+                      fontWeight = FontWeight.Black,
+                      fontFamily = FontFamily.Monospace
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                  )
+                }
+              }
+
+              // Velocidade Máxima Calculada
+              Card(
+                modifier = Modifier
+                  .weight(1f)
+                  .testTag("card_speed_max_calc"),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(
+                  containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+              ) {
+                Column(
+                  modifier = Modifier.padding(12.dp),
+                  verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                  Text(
+                    text = "MÁX. CALCULADA",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontWeight = FontWeight.Bold,
+                      fontSize = 10.sp
+                    ),
+                    color = Color(0xFF38BDF8)
+                  )
+                  Text(
+                    text = String.format(Locale.US, "%.1f km/h", run.maximumCalculatedSpeedKmh),
+                    style = MaterialTheme.typography.titleMedium.copy(
+                      fontWeight = FontWeight.Black,
+                      fontFamily = FontFamily.Monospace
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                  )
+                }
+              }
+
+              // Duração
+              Card(
+                modifier = Modifier
+                  .weight(0.9f)
+                  .testTag("card_speed_duration"),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(
+                  containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+              ) {
+                Column(
+                  modifier = Modifier.padding(12.dp),
+                  verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                  Text(
+                    text = "DURAÇÃO",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontWeight = FontWeight.Bold,
+                      fontSize = 10.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                  )
+                  Text(
+                    text = String.format(Locale.US, "%.2f s", run.elapsedSeconds),
+                    style = MaterialTheme.typography.titleMedium.copy(
+                      fontWeight = FontWeight.Black,
+                      fontFamily = FontFamily.Monospace
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                  )
+                }
+              }
+            }
+
+            // 5. QUALIDADE E DIFERENÇAS (Diferença no pico, Média e Máxima)
+            Card(
               modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
-              verticalArrangement = Arrangement.spacedBy(4.dp)
+                .testTag("card_quality_differences"),
+              shape = RoundedCornerShape(14.dp),
+              colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+              ),
+              border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             ) {
-              Text(
-                text = "POTÊNCIA MÁXIMA",
-                style = MaterialTheme.typography.labelSmall.copy(
-                  fontWeight = FontWeight.Bold,
-                  letterSpacing = 0.5.sp,
-                  fontSize = 11.sp
-                ),
-                color = Color(0xFF38BDF8)
-              )
-              Text(
-                text = "-- cv",
-                style = MaterialTheme.typography.headlineMedium.copy(
-                  fontWeight = FontWeight.Black,
-                  fontFamily = FontFamily.Monospace
-                ),
-                color = MaterialTheme.colorScheme.onSurface
-              )
-              // 3. RPM do pico de potência
-              Text(
-                text = "Pico: -- RPM",
-                style = MaterialTheme.typography.bodySmall.copy(
-                  fontSize = 12.sp,
-                  fontWeight = FontWeight.Medium
-                ),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-              )
-            }
-          }
+              Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+              ) {
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Text(
+                    text = "QUALIDADE E DIFERENÇAS",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                      fontWeight = FontWeight.Bold,
+                      letterSpacing = 0.5.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                  )
 
-          // Card Torque Máximo
-          Card(
-            modifier = Modifier
-              .weight(1f)
-              .testTag("card_max_torque"),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-              containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-            ),
-            border = BorderStroke(1.dp, Color(0xFFFB923C).copy(alpha = 0.4f))
-          ) {
-            Column(
+                  Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.errorContainer
+                  ) {
+                    Text(
+                      text = "INVÁLIDA",
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                      style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp
+                      ),
+                      color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                  }
+                }
+
+                HorizontalDivider(
+                  thickness = 0.6.dp,
+                  color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                )
+
+                DetailRow(
+                  label = "Diferença no pico",
+                  value = String.format(Locale.US, "%.1f km/h", run.peakSpeedDifferenceKmh)
+                )
+                DetailRow(
+                  label = "Diferença média sincronizada",
+                  value = String.format(Locale.US, "±%.1f km/h", run.averageSpeedDifferenceKmh)
+                )
+                DetailRow(
+                  label = "Maior diferença sincronizada",
+                  value = String.format(Locale.US, "%.1f km/h", run.maximumSpeedDifferenceKmh)
+                )
+
+                Text(
+                  text = "Diferenças sincronizadas calculadas estritamente durante a aceleração plena antes da confirmação de desaceleração.",
+                  style = MaterialTheme.typography.bodySmall.copy(
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp
+                  ),
+                  color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+              }
+            }
+
+            // 6. DETALHES RECOLHÍVEIS [ VER DETALHES ]
+            MeasurementDetailsCard(
+              run = run,
+              isExpanded = isMeasurementDetailsExpanded,
+              onToggleExpand = { isMeasurementDetailsExpanded = !isMeasurementDetailsExpanded },
+              orderedSamples = remember(run.id) { runResultRepository.getOrderedRunSamples(run.id) },
+              modifier = Modifier.fillMaxWidth()
+            )
+
+            // 7. BOTÃO REPETIR QUANDO ESTIVER PARADO
+            Button(
+              onClick = onStartNewTest,
               modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
-              verticalArrangement = Arrangement.spacedBy(4.dp)
+                .height(52.dp)
+                .testTag("btn_repeat_test"),
+              shape = RoundedCornerShape(14.dp),
+              colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+              )
             ) {
+              Icon(
+                imageVector = Icons.Default.Refresh,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+              )
+              Spacer(modifier = Modifier.width(8.dp))
               Text(
-                text = "TORQUE MÁXIMO",
-                style = MaterialTheme.typography.labelSmall.copy(
+                text = "REPETIR QUANDO ESTIVER PARADO",
+                style = MaterialTheme.typography.titleSmall.copy(
                   fontWeight = FontWeight.Bold,
-                  letterSpacing = 0.5.sp,
-                  fontSize = 11.sp
-                ),
-                color = Color(0xFFFB923C)
+                  letterSpacing = 0.5.sp
+                )
               )
-              Text(
-                text = "-- kgfm",
-                style = MaterialTheme.typography.headlineMedium.copy(
-                  fontWeight = FontWeight.Black,
-                  fontFamily = FontFamily.Monospace
-                ),
-                color = MaterialTheme.colorScheme.onSurface
+            }
+
+            // 8. BOTÕES: [ COMPARAR RESULTADOS ] e [ VER HISTÓRICO ]
+            ComparisonAndHistoryButtons(
+              canCompare = canCompare,
+              onCompareClick = { showComparisonDialog = true },
+              onHistoryClick = { showHistoryDialog = true },
+              modifier = Modifier.fillMaxWidth()
+            )
+
+          } else {
+            // -------------------------------------------------------------
+            // FLUXO DE PASSAGEM VÁLIDA (SEM POTÊNCIA OU COM POTÊNCIA)
+            // -------------------------------------------------------------
+            // 1. VEÍCULO E DATA
+            Surface(
+              modifier = Modifier.fillMaxWidth(),
+              shape = RoundedCornerShape(12.dp),
+              color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+            ) {
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                  Icon(
+                    imageVector = Icons.Outlined.DirectionsCar,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                  )
+                  Text(
+                    text = if (run.vehicleName.isNotEmpty()) run.vehicleName else "Veículo Principal",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                  )
+                }
+
+                Text(
+                  text = formattedDate,
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+              }
+            }
+
+            // 2. RESUMO DAS VELOCIDADES
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+              Card(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+              ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                  Text("MÁXIMA GPS", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp), color = MaterialTheme.colorScheme.primary)
+                  Text(String.format(Locale.US, "%.1f km/h", run.maximumGpsSpeedKmh), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace))
+                }
+              }
+
+              Card(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+              ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                  Text("MÁX. CALCULADA", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp), color = Color(0xFF38BDF8))
+                  Text(String.format(Locale.US, "%.1f km/h", run.maximumCalculatedSpeedKmh), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace))
+                }
+              }
+
+              Card(
+                modifier = Modifier.weight(0.9f),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+              ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                  Text("DURAÇÃO", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                  Text(String.format(Locale.US, "%.2f s", run.elapsedSeconds), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace))
+                }
+              }
+            }
+
+            // 3. CARTÃO COMPACTO: "Passagem salva. Cálculo de potência ainda não disponível."
+            Card(
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("card_valid_power_pending"),
+              shape = RoundedCornerShape(14.dp),
+              colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+              ),
+              border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+            ) {
+              Row(
+                modifier = Modifier.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+              ) {
+                Icon(
+                  imageVector = Icons.Outlined.ShowChart,
+                  contentDescription = null,
+                  tint = MaterialTheme.colorScheme.primary,
+                  modifier = Modifier.size(24.dp)
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                  Text(
+                    text = "Passagem salva. Cálculo de potência ainda não disponível.",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                  )
+                  Text(
+                    text = "Curva disponível após implementar o cálculo de potência e torque.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                  )
+                }
+              }
+            }
+
+            // 4. QUALIDADE E DIFERENÇAS
+            Card(
+              modifier = Modifier.fillMaxWidth(),
+              shape = RoundedCornerShape(14.dp),
+              colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+              border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            ) {
+              Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+              ) {
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Text("QUALIDADE E DIFERENÇAS", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp))
+                  Surface(
+                    shape = CircleShape,
+                    color = if (run.quality == "BOA") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.tertiaryContainer
+                  ) {
+                    Text(
+                      text = run.quality,
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                      style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
+                      color = if (run.quality == "BOA") MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                  }
+                }
+                HorizontalDivider(thickness = 0.6.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                DetailRow("Diferença no pico", String.format(Locale.US, "%.1f km/h", run.peakSpeedDifferenceKmh))
+                DetailRow("Diferença média sincronizada", String.format(Locale.US, "±%.1f km/h", run.averageSpeedDifferenceKmh))
+                DetailRow("Maior diferença sincronizada", String.format(Locale.US, "%.1f km/h", run.maximumSpeedDifferenceKmh))
+              }
+            }
+
+            // 5. DETALHES DA MEDIÇÃO RECOLHÍVEIS
+            MeasurementDetailsCard(
+              run = run,
+              isExpanded = isMeasurementDetailsExpanded,
+              onToggleExpand = { isMeasurementDetailsExpanded = !isMeasurementDetailsExpanded },
+              orderedSamples = remember(run.id) { runResultRepository.getOrderedRunSamples(run.id) },
+              modifier = Modifier.fillMaxWidth()
+            )
+
+            // 6. BOTÕES COMPARAR E HISTÓRICO
+            ComparisonAndHistoryButtons(
+              canCompare = canCompare,
+              onCompareClick = { showComparisonDialog = true },
+              onHistoryClick = { showHistoryDialog = true },
+              modifier = Modifier.fillMaxWidth()
+            )
+
+            // 7. BOTÃO REPETIR TESTE
+            Button(
+              onClick = onStartNewTest,
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .testTag("btn_repeat_test"),
+              shape = RoundedCornerShape(14.dp),
+              colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
               )
-              // 3. RPM do pico de torque
+            ) {
+              Icon(
+                imageVector = Icons.Default.Refresh,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+              )
+              Spacer(modifier = Modifier.width(8.dp))
               Text(
-                text = "Pico: -- RPM",
-                style = MaterialTheme.typography.bodySmall.copy(
-                  fontSize = 12.sp,
-                  fontWeight = FontWeight.Medium
-                ),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                text = "REPETIR TESTE",
+                style = MaterialTheme.typography.titleSmall.copy(
+                  fontWeight = FontWeight.Bold,
+                  letterSpacing = 0.5.sp
+                )
               )
             }
           }
-        }
-
-        // 4. GRÁFICO GRANDE OCUPANDO TODA A LARGURA ÚTIL DA TELA (260 a 320 dp)
-        DynoPowerTorqueGraphCard(
-          hasVehicleConfig = false,
-          modifier = Modifier.fillMaxWidth()
-        )
-
-        // 5. LEGENDA DAS CURVAS IMEDIATAMENTE ABAIXO DO GRÁFICO
-        DynoGraphLegend(modifier = Modifier.fillMaxWidth())
-
-        // 6. INFORMAÇÕES DE QUALIDADE E DETALHES TÉCNICOS EM CARTÃO RECOLHÍVEL ("DETALHES DA MEDIÇÃO")
-        if (run != null) {
-          MeasurementDetailsCard(
-            run = run,
-            isExpanded = isMeasurementDetailsExpanded,
-            onToggleExpand = { isMeasurementDetailsExpanded = !isMeasurementDetailsExpanded },
-            orderedSamples = remember(run.id) { runResultRepository.getOrderedRunSamples(run.id) },
-            modifier = Modifier.fillMaxWidth()
-          )
         } else {
           // Empty State Prompt Card when no run is recorded
           Card(
@@ -361,41 +769,13 @@ fun ResultsScreen(
               )
             }
           }
-        }
 
-        // 7. BOTÕES: [ COMPARAR RESULTADOS ] e [ VER HISTÓRICO ]
-        ComparisonAndHistoryButtons(
-          canCompare = canCompare,
-          onCompareClick = { showComparisonDialog = true },
-          onHistoryClick = { showHistoryDialog = true },
-          modifier = Modifier.fillMaxWidth()
-        )
-
-        // 8. BOTÃO REPETIR TESTE NO FINAL DA TELA
-        Button(
-          onClick = onStartNewTest,
-          modifier = Modifier
-            .fillMaxWidth()
-            .height(52.dp)
-            .testTag("btn_repeat_test"),
-          shape = RoundedCornerShape(14.dp),
-          colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary
-          )
-        ) {
-          Icon(
-            imageVector = Icons.Default.Refresh,
-            contentDescription = null,
-            modifier = Modifier.size(20.dp)
-          )
-          Spacer(modifier = Modifier.width(8.dp))
-          Text(
-            text = "REPETIR TESTE",
-            style = MaterialTheme.typography.titleSmall.copy(
-              fontWeight = FontWeight.Bold,
-              letterSpacing = 0.5.sp
-            )
+          // Botões de navegação
+          ComparisonAndHistoryButtons(
+            canCompare = canCompare,
+            onCompareClick = { showComparisonDialog = true },
+            onHistoryClick = { showHistoryDialog = true },
+            modifier = Modifier.fillMaxWidth()
           )
         }
 
@@ -597,7 +977,7 @@ private fun DynoPowerTorqueGraphCard(
         }
 
         Text(
-          text = "Curva de potência e torque disponível após concluir a configuração do veículo.",
+          text = "Curva disponível após implementar o cálculo de potência e torque.",
           style = MaterialTheme.typography.bodySmall.copy(
             fontSize = 12.sp,
             lineHeight = 18.sp,
@@ -727,24 +1107,15 @@ private fun MeasurementDetailsCard(
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-          // Quality badge preview
           Surface(
-            shape = CircleShape,
-            color = when (run.quality) {
-              "BOA" -> MaterialTheme.colorScheme.primaryContainer
-              "REGULAR" -> MaterialTheme.colorScheme.tertiaryContainer
-              else -> MaterialTheme.colorScheme.errorContainer
-            }
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
           ) {
             Text(
-              text = run.quality,
-              modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+              text = if (isExpanded) "OCULTAR DETALHES" else "VER DETALHES",
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
               style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
-              color = when (run.quality) {
-                "BOA" -> MaterialTheme.colorScheme.onPrimaryContainer
-                "REGULAR" -> MaterialTheme.colorScheme.onTertiaryContainer
-                else -> MaterialTheme.colorScheme.onErrorContainer
-              }
+              color = MaterialTheme.colorScheme.onPrimaryContainer
             )
           }
 

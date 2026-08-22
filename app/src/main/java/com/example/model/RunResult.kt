@@ -37,6 +37,24 @@ data class RunResult(
   val finishReason: String = FinishReason.SENSOR_DECELERATION.code,
   val averageSpeedDifferenceKmh: Float = 0f,
   val maximumSpeedDifferenceKmh: Float = 0f,
-  val appVersion: String = "0.17.0",
+  val invalidationReason: String? = null,
+  val appVersion: String = "0.19.1",
   val samples: List<RunSample> = emptyList()
-)
+) {
+  val peakSpeedDifferenceKmh: Float
+    get() = kotlin.math.abs(maximumGpsSpeedKmh - maximumCalculatedSpeedKmh)
+
+  fun getEffectiveInvalidationReason(): String {
+    if (!invalidationReason.isNullOrBlank()) return invalidationReason
+    if (quality != "INVÁLIDA" && quality != "INVALID") return ""
+    return when {
+      elapsedSeconds < 1.5f -> "Duração do teste muito curta (${String.format(java.util.Locale.US, "%.2f", elapsedSeconds)} s) para validação."
+      finishReason == FinishReason.TIMEOUT.code -> "Tempo limite de medição atingido (> 25 s)."
+      peakSpeedDifferenceKmh > 10.0f -> "Divergência entre velocidade máxima GPS (${String.format(java.util.Locale.US, "%.1f", maximumGpsSpeedKmh)} km/h) e calculada (${String.format(java.util.Locale.US, "%.1f", maximumCalculatedSpeedKmh)} km/h)."
+      averageSpeedDifferenceKmh > 10.0f -> "Diferença média entre GPS e aceleração inercial elevada (±${String.format(java.util.Locale.US, "%.1f", averageSpeedDifferenceKmh)} km/h)."
+      maximumSpeedDifferenceKmh > 18.0f -> "Pico de divergência momentânea excessivo (${String.format(java.util.Locale.US, "%.1f", maximumSpeedDifferenceKmh)} km/h)."
+      maximumGpsSpeedKmh < (runStartGpsSpeedKmh + 5f) -> "Velocidade máxima atingida insuficiente para teste de aceleração."
+      else -> "Inconsistência na detecção inercial ou dados insuficientes de GPS."
+    }
+  }
+}

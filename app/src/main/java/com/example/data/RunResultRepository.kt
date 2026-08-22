@@ -149,6 +149,7 @@ class RunResultRepository(context: Context) {
     obj.put("finishReason", r.finishReason)
     obj.put("averageSpeedDifferenceKmh", r.averageSpeedDifferenceKmh.toDouble())
     obj.put("maximumSpeedDifferenceKmh", r.maximumSpeedDifferenceKmh.toDouble())
+    if (r.invalidationReason != null) obj.put("invalidationReason", r.invalidationReason)
     obj.put("appVersion", r.appVersion)
 
     if (includeSamples && r.samples.isNotEmpty()) {
@@ -223,7 +224,8 @@ class RunResultRepository(context: Context) {
       finishReason = obj.optString("finishReason", "SENSOR_DECELERATION"),
       averageSpeedDifferenceKmh = obj.optDouble("averageSpeedDifferenceKmh", 0.0).toFloat(),
       maximumSpeedDifferenceKmh = obj.optDouble("maximumSpeedDifferenceKmh", 0.0).toFloat(),
-      appVersion = obj.optString("appVersion", "0.17.0"),
+      invalidationReason = if (obj.has("invalidationReason")) obj.getString("invalidationReason") else null,
+      appVersion = obj.optString("appVersion", "0.19.1"),
       samples = samplesList
     )
   }
