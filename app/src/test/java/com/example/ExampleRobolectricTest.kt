@@ -64,4 +64,30 @@ class ExampleRobolectricTest {
     assertEquals(firstVw.model, profile.model)
     assertTrue(profile.curbWeightKg > 0)
   }
+
+  @Test
+  fun `run result repository save retrieve and filter comparison`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val runRepo = com.example.data.RunResultRepository(context)
+    runRepo.clearAllResults()
+
+    val run1 = com.example.model.RunResult(
+      vehicleName = "Gol 1.6 AP",
+      maximumGpsSpeedKmh = 105.0f,
+      quality = "BOA"
+    )
+    val run2 = com.example.model.RunResult(
+      vehicleName = "Gol 1.6 AP",
+      maximumGpsSpeedKmh = 108.5f,
+      quality = "BOA"
+    )
+    runRepo.saveResult(run1)
+    runRepo.saveResult(run2)
+
+    val results = runRepo.getResults()
+    assertEquals(2, results.size)
+
+    val validForGol = results.filter { it.vehicleName == "Gol 1.6 AP" && it.quality != "INVÁLIDA" }
+    assertTrue(validForGol.size >= 2)
+  }
 }
