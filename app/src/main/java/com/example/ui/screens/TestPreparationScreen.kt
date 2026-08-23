@@ -17,6 +17,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -98,10 +99,20 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -120,7 +131,9 @@ import com.example.model.VehicleCalculations
 import com.example.model.VehicleProfile
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlinx.coroutines.delay
 
@@ -985,6 +998,8 @@ fun TestPreparationScreen(
         MeasuringHud(
           currentSpeedKmh = runVelocityMs * 3.6f,
           elapsedSeconds = runElapsedSeconds,
+          targetTriggerSpeedKmh = startSpeedTriggerKmh,
+          maxSpeedKmh = max(dynoTracker.maxCalcSpeedKmh, runVelocityMs * 3.6f),
           onEmergencyStop = {
             finalizeRun(FinishReason.USER_STOP)
           }
@@ -1767,6 +1782,203 @@ private fun CheckItemRow(
 }
 
 // -----------------------------------------------------------------------------------------
+// COMPONENT 6: VELOCÍMETRO DIGITAL SEMICIRCULAR
+// -----------------------------------------------------------------------------------------
+@Composable
+private fun SemicircularSpeedometer(
+  currentSpeedKmh: Float,
+  targetTriggerSpeedKmh: Float,
+  isMeasuring: Boolean = false,
+  modifier: Modifier = Modifier
+) {
+  val density = LocalDensity.current
+  val visualSpeed = currentSpeedKmh.coerceAtLeast(0f)
+  val progressFraction = (visualSpeed / 200f).coerceIn(0f, 1f)
+  val progressSweep = progressFraction * 220f
+
+  val primaryColor = if (isMeasuring) Color(0xFF10B981) else Color(0xFF38BDF8)
+  val triggerHighlightColor = Color(0xFF38BDF8)
+  val trackColor = Color(0xFF222834)
+  val normalTickColor = Color(0xFF4B5563)
+  val normalTextColor = Color(0xFF9CA3AF).toArgb()
+  val highlightTextColor = triggerHighlightColor.toArgb()
+
+  val tickSteps = remember { listOf(0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200) }
+
+  val textPaint = remember {
+    android.graphics.Paint().apply {
+      isAntiAlias = true
+      textAlign = android.graphics.Paint.Align.CENTER
+    }
+  }
+
+  val accessibleDescription = "Velocidade GPS: ${String.format(Locale.US, "%.0f", visualSpeed)} km/h"
+
+  Box(
+    modifier = modifier
+      .size(300.dp, 250.dp)
+      .semantics { contentDescription = accessibleDescription }
+      .testTag("semicircular_speedometer"),
+    contentAlignment = Alignment.Center
+  ) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+      val canvasWidth = size.width
+      val canvasHeight = size.height
+      val centerX = canvasWidth / 2f
+      val centerY = canvasHeight * 0.52f
+
+      val arcRadius = with(density) { 98.dp.toPx() }
+      val strokeWidthPx = with(density) { 14.dp.toPx() }
+      val labelRadius = arcRadius + with(density) { 20.dp.toPx() }
+      val tickInnerRadius = arcRadius - with(density) { 9.dp.toPx() }
+      val tickOuterRadius = arcRadius - with(density) { 3.dp.toPx() }
+
+      val arcRect = Rect(
+        left = centerX - arcRadius,
+        top = centerY - arcRadius,
+        right = centerX + arcRadius,
+        bottom = centerY + arcRadius
+      )
+
+      // 1. Background Arc (220 degrees starting at 160 degrees)
+      drawArc(
+        color = trackColor,
+        startAngle = 160f,
+        sweepAngle = 220f,
+        useCenter = false,
+        topLeft = arcRect.topLeft,
+        size = arcRect.size,
+        style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round)
+      )
+
+      // 2. Dynamic Progress Arc
+      if (progressSweep > 0.5f) {
+        drawArc(
+          color = primaryColor,
+          startAngle = 160f,
+          sweepAngle = progressSweep,
+          useCenter = false,
+          topLeft = arcRect.topLeft,
+          size = arcRect.size,
+          style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round)
+        )
+      }
+
+      // 3. Ticks and Labels
+      val labelTextSizePx = with(density) { 10.5.sp.toPx() }
+      textPaint.textSize = labelTextSizePx
+
+      tickSteps.forEach { step ->
+        val stepFraction = step / 200f
+        val stepAngleDeg = 160f + stepFraction * 220f
+        val stepAngleRad = Math.toRadians(stepAngleDeg.toDouble())
+
+        val cosA = cos(stepAngleRad).toFloat()
+        val sinA = sin(stepAngleRad).toFloat()
+
+        val isTrigger = step == targetTriggerSpeedKmh.toInt()
+
+        // Tick line
+        val tOuter = if (isTrigger) arcRadius - with(density) { 1.dp.toPx() } else tickOuterRadius
+        val tInner = if (isTrigger) arcRadius - with(density) { 13.dp.toPx() } else tickInnerRadius
+        val tColor = if (isTrigger) triggerHighlightColor else normalTickColor
+        val tStroke = with(density) { (if (isTrigger) 2.5.dp else 1.2.dp).toPx() }
+
+        drawLine(
+          color = tColor,
+          start = Offset(centerX + tInner * cosA, centerY + tInner * sinA),
+          end = Offset(centerX + tOuter * cosA, centerY + tOuter * sinA),
+          strokeWidth = tStroke,
+          cap = StrokeCap.Round
+        )
+
+        // Numbers along the arc perimeter
+        val lx = centerX + labelRadius * cosA
+        val ly = centerY + labelRadius * sinA + (labelTextSizePx * 0.35f)
+
+        drawIntoCanvas { canvas ->
+          textPaint.color = if (isTrigger) highlightTextColor else normalTextColor
+          textPaint.typeface = if (isTrigger) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
+          canvas.nativeCanvas.drawText(step.toString(), lx, ly, textPaint)
+        }
+      }
+
+      // 4. Dot indicator at initial trigger speed during measurement
+      if (isMeasuring && targetTriggerSpeedKmh > 0f) {
+        val trigFraction = (targetTriggerSpeedKmh / 200f).coerceIn(0f, 1f)
+        val trigAngleDeg = 160f + trigFraction * 220f
+        val trigAngleRad = Math.toRadians(trigAngleDeg.toDouble())
+        val tx = centerX + arcRadius * cos(trigAngleRad).toFloat()
+        val ty = centerY + arcRadius * sin(trigAngleRad).toFloat()
+        drawCircle(
+          color = Color.White,
+          radius = with(density) { 4.dp.toPx() },
+          center = Offset(tx, ty)
+        )
+      }
+    }
+
+    // Center Display Content
+    Column(
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.Center,
+      modifier = Modifier
+        .padding(top = 18.dp)
+        .align(Alignment.Center)
+    ) {
+      Text(
+        text = "VELOCIDADE GPS",
+        style = MaterialTheme.typography.labelSmall.copy(
+          fontWeight = FontWeight.Bold,
+          letterSpacing = 1.1.sp,
+          fontSize = 11.sp
+        ),
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+      )
+
+      val formattedSpeed = if (visualSpeed < 10f && visualSpeed > 0f && (visualSpeed % 1.0f != 0f)) {
+        String.format(Locale.US, "%.1f", visualSpeed)
+      } else {
+        String.format(Locale.US, "%.0f", visualSpeed)
+      }
+
+      Text(
+        text = formattedSpeed,
+        style = MaterialTheme.typography.displayLarge.copy(
+          fontWeight = FontWeight.Black,
+          fontSize = 54.sp,
+          letterSpacing = (-1).sp
+        ),
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.padding(vertical = 0.dp)
+      )
+
+      Text(
+        text = "km/h",
+        style = MaterialTheme.typography.titleMedium.copy(
+          fontWeight = FontWeight.Bold,
+          fontSize = 15.sp,
+          letterSpacing = 0.5.sp
+        ),
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+      )
+
+      if (!isMeasuring) {
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+          text = "Início automático: ${targetTriggerSpeedKmh.toInt()} km/h",
+          style = MaterialTheme.typography.labelSmall.copy(
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 11.sp
+          ),
+          color = Color(0xFF38BDF8)
+        )
+      }
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------------------
 // COMPONENT 7: TELA ENQUANTO AGUARDA (DRIVING HUD)
 // -----------------------------------------------------------------------------------------
 @Composable
@@ -1777,7 +1989,8 @@ private fun ArmedDrivingHud(
   onCancel: () -> Unit,
   modifier: Modifier = Modifier
 ) {
-  val progress = (currentSpeedKmh / targetTriggerSpeedKmh).coerceIn(0f, 1f)
+  val remainingKmh = (targetTriggerSpeedKmh - currentSpeedKmh).coerceAtLeast(0f)
+  val isCloseToTrigger = currentSpeedKmh >= (targetTriggerSpeedKmh - 3.0f) && currentSpeedKmh < targetTriggerSpeedKmh
 
   Column(
     modifier = modifier
@@ -1814,7 +2027,7 @@ private fun ArmedDrivingHud(
       }
 
       Text(
-        text = "Dirija normalmente até atingir ${targetTriggerSpeedKmh.toInt()} km/h.",
+        text = "Acelere na marcha selecionada",
         style = MaterialTheme.typography.bodyLarge.copy(
           fontWeight = FontWeight.Medium,
           textAlign = TextAlign.Center
@@ -1823,70 +2036,68 @@ private fun ArmedDrivingHud(
       )
     }
 
-    // Center Speed HUD
+    // Center Speed HUD with Semicircular Speedometer
     Card(
       shape = RoundedCornerShape(24.dp),
       colors = CardDefaults.cardColors(
-        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
       ),
-      border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
-      modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)
+      border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+      modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
     ) {
       Column(
-        modifier = Modifier.padding(vertical = 36.dp, horizontal = 20.dp),
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(vertical = 20.dp, horizontal = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
       ) {
-        Text(
-          text = "VELOCIDADE ATUAL",
-          style = MaterialTheme.typography.labelSmall.copy(
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.2.sp,
-            fontSize = 12.sp
-          ),
-          color = MaterialTheme.colorScheme.onSurfaceVariant
+        SemicircularSpeedometer(
+          currentSpeedKmh = currentSpeedKmh,
+          targetTriggerSpeedKmh = targetTriggerSpeedKmh,
+          isMeasuring = false
         )
 
-        Row(verticalAlignment = Alignment.Bottom) {
-          Text(
-            text = String.format(Locale.US, "%.0f", currentSpeedKmh),
-            style = MaterialTheme.typography.displayLarge.copy(
-              fontWeight = FontWeight.Black,
-              fontSize = 64.sp
-            ),
-            color = MaterialTheme.colorScheme.onSurface
-          )
-          Spacer(modifier = Modifier.width(6.dp))
-          Text(
-            text = "km/h",
-            style = MaterialTheme.typography.titleMedium.copy(
-              fontWeight = FontWeight.Bold,
-              fontSize = 18.sp
-            ),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 12.dp)
-          )
-        }
-
-        Column(
-          modifier = Modifier.fillMaxWidth(),
-          verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-          LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier.fillMaxWidth().height(10.dp),
-            color = MaterialTheme.colorScheme.primary,
-            trackColor = MaterialTheme.colorScheme.surfaceContainer
-          )
-          Text(
-            text = "O teste começará aos ${targetTriggerSpeedKmh.toInt()} km/h",
-            style = MaterialTheme.typography.bodySmall.copy(
-              textAlign = TextAlign.Center,
-              fontWeight = FontWeight.SemiBold
-            ),
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.fillMaxWidth()
-          )
+        // Remaining speed indicator or "PREPARE-SE"
+        if (isCloseToTrigger) {
+          Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = Color(0xFFF59E0B).copy(alpha = 0.2f),
+            border = BorderStroke(1.dp, Color(0xFFF59E0B))
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              Surface(shape = CircleShape, color = Color(0xFFF59E0B), modifier = Modifier.size(8.dp)) {}
+              Text(
+                text = "PREPARE-SE",
+                style = MaterialTheme.typography.labelMedium.copy(
+                  fontWeight = FontWeight.Black,
+                  letterSpacing = 1.sp,
+                  fontSize = 13.sp
+                ),
+                color = Color(0xFFF59E0B)
+              )
+            }
+          }
+        } else {
+          Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceContainer
+          ) {
+            Text(
+              text = if (remainingKmh > 0f) "FALTAM ${remainingKmh.toInt()} km/h PARA INICIAR" else "INICIANDO MEDIÇÃO...",
+              style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.6.sp,
+                fontSize = 12.sp
+              ),
+              color = MaterialTheme.colorScheme.primary,
+              modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+            )
+          }
         }
       }
     }
@@ -1960,6 +2171,8 @@ private fun ArmedDrivingHud(
 private fun MeasuringHud(
   currentSpeedKmh: Float,
   elapsedSeconds: Float,
+  targetTriggerSpeedKmh: Float,
+  maxSpeedKmh: Float,
   onEmergencyStop: () -> Unit,
   modifier: Modifier = Modifier
 ) {
@@ -1994,84 +2207,115 @@ private fun MeasuringHud(
       }
     }
 
-    // Center Speed & Time HUD
+    // Center Speed & Stats HUD with Semicircular Speedometer
     Card(
       shape = RoundedCornerShape(24.dp),
       colors = CardDefaults.cardColors(
-        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
       ),
       border = BorderStroke(2.dp, Color(0xFF10B981)),
-      modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)
+      modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
     ) {
       Column(
-        modifier = Modifier.padding(vertical = 36.dp, horizontal = 20.dp),
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(vertical = 16.dp, horizontal = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
       ) {
-        Text(
-          text = "VELOCIDADE",
-          style = MaterialTheme.typography.labelSmall.copy(
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.2.sp,
-            fontSize = 12.sp
-          ),
-          color = MaterialTheme.colorScheme.onSurfaceVariant
+        SemicircularSpeedometer(
+          currentSpeedKmh = currentSpeedKmh,
+          targetTriggerSpeedKmh = targetTriggerSpeedKmh,
+          isMeasuring = true
         )
 
-        Row(verticalAlignment = Alignment.Bottom) {
-          Text(
-            text = String.format(Locale.US, "%.0f", currentSpeedKmh),
-            style = MaterialTheme.typography.displayLarge.copy(
-              fontWeight = FontWeight.Black,
-              fontSize = 72.sp
-            ),
-            color = MaterialTheme.colorScheme.onSurface
-          )
-          Spacer(modifier = Modifier.width(6.dp))
-          Text(
-            text = "km/h",
-            style = MaterialTheme.typography.titleMedium.copy(
-              fontWeight = FontWeight.Bold,
-              fontSize = 20.sp
-            ),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 14.dp)
-          )
-        }
-
-        Surface(
-          shape = RoundedCornerShape(12.dp),
-          color = MaterialTheme.colorScheme.surfaceContainer
+        // Stats card: Tempo, Início, Velocidade máxima
+        Card(
+          shape = RoundedCornerShape(14.dp),
+          colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+          ),
+          modifier = Modifier.fillMaxWidth()
         ) {
           Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically
           ) {
-            Icon(
-              imageVector = Icons.Outlined.Timer,
-              contentDescription = null,
-              tint = MaterialTheme.colorScheme.primary,
-              modifier = Modifier.size(16.dp)
-            )
-            Text(
-              text = "Tempo: ${String.format(Locale.US, "%.1f", elapsedSeconds)}s",
-              style = MaterialTheme.typography.labelMedium.copy(
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp
-              ),
-              color = MaterialTheme.colorScheme.onSurface
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              Text(
+                text = "Tempo",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+              )
+              Text(
+                text = String.format(Locale.US, "%.2f s", elapsedSeconds),
+                style = MaterialTheme.typography.bodyMedium.copy(
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 13.5.sp
+                ),
+                color = MaterialTheme.colorScheme.onSurface
+              )
+            }
+
+            Surface(
+              modifier = Modifier
+                .height(24.dp)
+                .width(1.dp),
+              color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+            ) {}
+
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              Text(
+                text = "Início",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+              )
+              Text(
+                text = "${targetTriggerSpeedKmh.toInt()} km/h",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 13.5.sp
+                ),
+                color = MaterialTheme.colorScheme.onSurface
+              )
+            }
+
+            Surface(
+              modifier = Modifier
+                .height(24.dp)
+                .width(1.dp),
+              color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+            ) {}
+
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              Text(
+                text = "Vel. máxima",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+              )
+              Text(
+                text = String.format(Locale.US, "%.1f km/h", max(maxSpeedKmh, currentSpeedKmh)),
+                style = MaterialTheme.typography.bodyMedium.copy(
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 13.5.sp
+                ),
+                color = Color(0xFF10B981)
+              )
+            }
           }
         }
 
         Text(
-          text = "Mantenha a aceleração na mesma marcha",
+          text = "Mantenha a aceleração na mesma marcha.",
           style = MaterialTheme.typography.bodyMedium.copy(
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+            fontSize = 13.sp
           ),
-          color = MaterialTheme.colorScheme.primary
+          color = Color(0xFF10B981)
         )
       }
     }
@@ -2096,7 +2340,7 @@ private fun MeasuringHud(
       )
       Spacer(modifier = Modifier.width(8.dp))
       Text(
-        text = "ENCERRAR",
+        text = "ENCERRAR TESTE",
         style = MaterialTheme.typography.labelLarge.copy(
           fontWeight = FontWeight.Bold,
           letterSpacing = 0.5.sp,
