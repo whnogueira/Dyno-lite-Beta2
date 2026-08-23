@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.GpsFixed
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Speed
@@ -249,6 +250,16 @@ fun TestPreparationScreen(
   var hasPhoneMovedAfterCalib by remember { mutableStateOf(false) }
   var calibrationStatusText by remember {
     mutableStateOf(if (isCalibrated) "Calibração concluída" else "Não calibrado")
+  }
+
+  // Estabilização de rotação inicial: ignorar primeiras amostras de transição
+  var screenStabilizedTimestampMs by remember { mutableLongStateOf(0L) }
+  var persistentMovementCount by remember { mutableIntStateOf(0) }
+
+  LaunchedEffect(Unit) {
+    // Aguarda rotação estabilizar (1.5s) antes de permitir qualquer checagem de movimento pós-calibração
+    delay(1500L)
+    screenStabilizedTimestampMs = System.currentTimeMillis()
   }
 
   // Coletor de Calibração: Coleta 150 amostras (~3s) com veículo parado no suporte
@@ -702,14 +713,20 @@ fun TestPreparationScreen(
 
                 val nowNs = System.nanoTime()
 
-                // Detecção de alteração física da posição do celular no suporte (após calibrar)
-                if (isCalibrated && !isCalibrating && dynoTracker.state == DynoRunState.PARADO && currentGpsSpeedKmh < 3f) {
+                // Detecção de alteração física da posição do celular no suporte (apenas após estabilização inicial e persistência)
+                val isScreenStableAfterRotation = (System.currentTimeMillis() - screenStabilizedTimestampMs) > 1500L
+                if (isCalibrated && !isCalibrating && dynoTracker.state == DynoRunState.PARADO && currentGpsSpeedKmh < 3f && isScreenStableAfterRotation) {
                   val gMag = sqrt(gyroX * gyroX + gyroY * gyroY + gyroZ * gyroZ)
-                  if (gMag > 2.2f) {
-                    isCalibrated = false
-                    hasPhoneMovedAfterCalib = true
-                    calibrationStatusText = "O celular mudou de posição. Calibre novamente."
-                    prefs.edit().putBoolean("is_calibrated", false).apply()
+                  if (gMag > 3.2f) {
+                    persistentMovementCount++
+                    if (persistentMovementCount >= 25) { // Movimento contínuo por mais de ~500ms
+                      isCalibrated = false
+                      hasPhoneMovedAfterCalib = true
+                      persistentMovementCount = 0
+                      prefs.edit().putBoolean("is_calibrated", false).apply()
+                    }
+                  } else {
+                    if (persistentMovementCount > 0) persistentMovementCount--
                   }
                 }
 
@@ -938,25 +955,27 @@ fun TestPreparationScreen(
     runState == DynoRunState.MEDINDO -> Pair("MEDINDO", DynoSuccessGreen)
     runState == DynoRunState.AGUARDANDO_INICIO -> Pair("TESTE ARMADO", DynoBlueLight)
     isCalibrating -> Pair("CALIBRANDO", DynoPowerCyan)
-    hasPhoneMovedAfterCalib -> Pair("TESTE INVÁLIDO", DynoErrorRed)
-    isReadyToArm -> Pair("PRONTO", DynoSuccessGreen)
+    isReadyToArm -> Pair("PRONTO PARA INICIAR", DynoSuccessGreen)
     runState == DynoRunState.FINALIZADO -> Pair("FINALIZADO", DynoBlueLight)
+    !isCalibrated -> Pair("PREPARE O TESTE", DynoTextSecondary)
     else -> Pair("PREPARE O TESTE", DynoTextSecondary)
   }
 
-  // Instrução única dinâmica para a área direita
+  // Instrução única dinâmica para baixo do velocímetro / cartão
   val singleDynamicInstruction = when {
     hasPhoneMovedAfterCalib -> "O celular mudou de posição. Calibre novamente."
-    !isCalibrated -> "Pare o veículo e calibre o celular no suporte."
+    !isCalibrated -> "Calibre o celular para continuar."
     isCalibrating -> "Mantenha o veículo parado com o celular no suporte."
-    runState == DynoRunState.PARADO -> "Tudo pronto. Toque em iniciar."
+    runState == DynoRunState.PARADO && isReadyToArm -> "Tudo pronto. Toque em iniciar."
+    runState == DynoRunState.PARADO && isVehicleMoving -> "Aguarde o veículo parar completamente."
+    runState == DynoRunState.PARADO && !isGpsReady -> "Aguardando sinal GPS..."
     runState == DynoRunState.AGUARDANDO_INICIO -> {
       if (currentGpsSpeedKmh >= startSpeedTriggerKmh - 8f) "Prepare-se."
       else "Acelere na marcha selecionada até ${startSpeedTriggerKmh.toInt()} km/h."
     }
     runState == DynoRunState.MEDINDO -> "Mantenha a aceleração na mesma marcha."
     runState == DynoRunState.FINALIZADO -> "Passagem finalizada. Salvando resultado."
-    else -> "Pare o veículo e calibre o celular no suporte."
+    else -> "Calibre o celular para continuar."
   }
 
   val totalWeight = remember(vehicle) {
@@ -1086,57 +1105,67 @@ fun TestPreparationScreen(
     Column(
       modifier = Modifier
         .fillMaxSize()
-        .padding(horizontal = 14.dp, vertical = 8.dp),
+        .padding(horizontal = 14.dp, vertical = 6.dp),
       verticalArrangement = Arrangement.SpaceBetween
     ) {
-      // LINHA SUPERIOR: 3 ÁREAS PRINCIPAIS
+      // LINHA SUPERIOR: 3 ÁREAS PRINCIPAIS (25% ESQUERDA, 50% CENTRO, 25% DIREITA)
       Row(
         modifier = Modifier
           .fillMaxWidth()
           .weight(1f),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
       ) {
         // =========================================================================
-        // 1. ÁREA ESQUERDA: RESUMO DO VEÍCULO E GATILHO
+        // 1. ÁREA ESQUERDA: RESUMO COMPACTO DO VEÍCULO E GATILHO (25%)
         // =========================================================================
         Card(
           modifier = Modifier
-            .weight(1.05f)
+            .weight(0.25f)
             .fillMaxHeight(),
-          shape = RoundedCornerShape(14.dp),
+          shape = RoundedCornerShape(12.dp),
           colors = CardDefaults.cardColors(containerColor = DynoSurfaceContainer),
           border = BorderStroke(1.dp, DynoBorder)
         ) {
           Column(
             modifier = Modifier
               .fillMaxSize()
-              .padding(horizontal = 12.dp, vertical = 10.dp),
+              .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.SpaceBetween
           ) {
-            // Identificação do Veículo
-            Column {
+            // Identificação do Veículo com botão Trocar Veículo
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
               Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
               ) {
-                Icon(
-                  imageVector = Icons.Default.DirectionsCar,
-                  contentDescription = null,
-                  tint = DynoBlueLight,
-                  modifier = Modifier.size(16.dp)
-                )
                 Text(
-                  text = "${vehicle.manufacturer} ${vehicle.model}",
+                  text = "${vehicle.manufacturer} ${vehicle.model}".trim(),
                   style = MaterialTheme.typography.titleSmall.copy(
                     fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
+                    fontSize = 13.5.sp
                   ),
                   color = DynoTextPrimary,
                   maxLines = 1,
-                  overflow = TextOverflow.Ellipsis
+                  overflow = TextOverflow.Ellipsis,
+                  modifier = Modifier.weight(1f)
+                )
+
+                Text(
+                  text = "TROCAR",
+                  style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 9.sp,
+                    color = DynoBlueLight
+                  ),
+                  modifier = Modifier
+                    .clickable { onSwitchVehicle() }
+                    .padding(start = 4.dp, top = 2.dp, bottom = 2.dp)
+                    .testTag("btn_switch_vehicle_compact")
                 )
               }
+
               val subInfo = listOfNotNull(
                 vehicle.engine.ifBlank { null },
                 vehicle.version.ifBlank { null }
@@ -1144,28 +1173,30 @@ fun TestPreparationScreen(
               if (subInfo.isNotEmpty()) {
                 Text(
                   text = subInfo,
-                  style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                  color = DynoTextSecondary,
+                  style = MaterialTheme.typography.bodySmall.copy(
+                    fontSize = 10.5.sp,
+                    color = DynoTextSecondary
+                  ),
                   maxLines = 1,
                   overflow = TextOverflow.Ellipsis
                 )
               }
             }
 
-            HorizontalDivider(thickness = 0.6.dp, color = DynoDivider)
+            HorizontalDivider(thickness = 0.5.dp, color = DynoDivider)
 
             // Especificações Compactas
             Row(
               modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
             ) {
               Column {
                 Text(
-                  text = "PESO TOTAL",
+                  text = "PESO",
                   style = MaterialTheme.typography.labelSmall.copy(
-                    fontSize = 9.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 0.5.sp
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold
                   ),
                   color = DynoTextSecondary
                 )
@@ -1173,7 +1204,7 @@ fun TestPreparationScreen(
                   text = String.format(Locale.US, "%.0f kg", totalWeight),
                   style = MaterialTheme.typography.bodyMedium.copy(
                     fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp
+                    fontSize = 12.sp
                   ),
                   color = DynoTextPrimary
                 )
@@ -1183,9 +1214,8 @@ fun TestPreparationScreen(
                 Text(
                   text = "PNEU",
                   style = MaterialTheme.typography.labelSmall.copy(
-                    fontSize = 9.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 0.5.sp
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold
                   ),
                   color = DynoTextSecondary
                 )
@@ -1193,7 +1223,7 @@ fun TestPreparationScreen(
                   text = "${vehicle.tireWidthMm}/${vehicle.tireAspectRatio} R${vehicle.wheelDiameterInches}",
                   style = MaterialTheme.typography.bodyMedium.copy(
                     fontWeight = FontWeight.Bold,
-                    fontSize = 12.5.sp
+                    fontSize = 11.sp
                   ),
                   color = DynoTextPrimary
                 )
@@ -1203,9 +1233,8 @@ fun TestPreparationScreen(
                 Text(
                   text = "MARCHA",
                   style = MaterialTheme.typography.labelSmall.copy(
-                    fontSize = 9.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 0.5.sp
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold
                   ),
                   color = DynoTextSecondary
                 )
@@ -1213,30 +1242,30 @@ fun TestPreparationScreen(
                   text = "2ª",
                   style = MaterialTheme.typography.bodyMedium.copy(
                     fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp
+                    fontSize = 12.sp
                   ),
                   color = DynoPowerCyan
                 )
               }
             }
 
-            HorizontalDivider(thickness = 0.6.dp, color = DynoDivider)
+            HorizontalDivider(thickness = 0.5.dp, color = DynoDivider)
 
-            // Seletor de Velocidade de Início Automático [ 40 ] [ 50 ] [ 60 ] km/h
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            // Seletor de Velocidade de Início Automático [ 40 ] [ 50 ] [ 60 ]
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
               Text(
                 text = "INÍCIO AUTOMÁTICO",
                 style = MaterialTheme.typography.labelSmall.copy(
-                  fontSize = 10.sp,
+                  fontSize = 9.sp,
                   fontWeight = FontWeight.Bold,
-                  letterSpacing = 0.5.sp
+                  letterSpacing = 0.4.sp
                 ),
                 color = DynoTextSecondary
               )
 
               Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
               ) {
                 listOf(40f, 50f, 60f).forEach { speed ->
@@ -1244,7 +1273,7 @@ fun TestPreparationScreen(
                   val isSelectorEnabled = runState == DynoRunState.PARADO
 
                   Surface(
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(6.dp),
                     color = if (isSelected) DynoBluePrimary else DynoSurfaceElevated,
                     border = BorderStroke(
                       1.dp,
@@ -1252,7 +1281,7 @@ fun TestPreparationScreen(
                     ),
                     modifier = Modifier
                       .weight(1f)
-                      .height(34.dp)
+                      .height(30.dp)
                       .testTag("btn_speed_trigger_${speed.toInt()}")
                       .clickable(enabled = isSelectorEnabled) {
                         startSpeedTriggerKmh = speed
@@ -1265,7 +1294,7 @@ fun TestPreparationScreen(
                         text = "${speed.toInt()}",
                         style = MaterialTheme.typography.labelMedium.copy(
                           fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                          fontSize = 12.5.sp
+                          fontSize = 12.sp
                         ),
                         color = if (isSelected) Color.White else DynoTextSecondary
                       )
@@ -1277,7 +1306,7 @@ fun TestPreparationScreen(
                   text = "km/h",
                   style = MaterialTheme.typography.labelSmall.copy(
                     fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp
+                    fontSize = 10.sp
                   ),
                   color = DynoTextSecondary
                 )
@@ -1287,21 +1316,21 @@ fun TestPreparationScreen(
         }
 
         // =========================================================================
-        // 2. ÁREA CENTRAL: VELOCÍMETRO SEMICIRCULAR GRANDE E ESTADO
+        // 2. ÁREA CENTRAL: VELOCÍMETRO AMPLIADO (+30%) E STATUS LIMPO (50%)
         // =========================================================================
         Column(
           modifier = Modifier
-            .weight(1.6f)
+            .weight(0.50f)
             .fillMaxHeight(),
           horizontalAlignment = Alignment.CenterHorizontally,
           verticalArrangement = Arrangement.SpaceBetween
         ) {
-          // Estado Grande no Topo
+          // Status Único no Topo
           Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(16.dp),
             color = stateColor.copy(alpha = 0.16f),
             border = BorderStroke(1.dp, stateColor.copy(alpha = 0.55f)),
-            modifier = Modifier.padding(top = 2.dp)
+            modifier = Modifier.padding(top = 1.dp)
           ) {
             Text(
               text = stateTitle,
@@ -1311,243 +1340,204 @@ fun TestPreparationScreen(
                 fontSize = 13.sp
               ),
               color = stateColor,
-              modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+              modifier = Modifier.padding(horizontal = 14.dp, vertical = 3.dp)
             )
           }
 
-          // Velocímetro Central Semicircular Grande
+          // Velocímetro Central Semicircular Ampliado em ~30%
           HorizontalDynoSpeedometer(
             currentSpeedKmh = if (runState == DynoRunState.MEDINDO) runVelocityMs * 3.6f else currentGpsSpeedKmh,
             targetTriggerSpeedKmh = startSpeedTriggerKmh,
             isMeasuring = runState == DynoRunState.MEDINDO,
             maxSpeedKmh = if (runState == DynoRunState.MEDINDO) max(dynoTracker.maxCalcSpeedKmh, runVelocityMs * 3.6f) else dynoTracker.maxGpsKmh,
-            modifier = Modifier.weight(1f, fill = false)
+            modifier = Modifier
+              .fillMaxWidth()
+              .weight(1f)
           )
 
-          // Aviso / Motivo de bloqueio ou instrução do gatilho logo acima do botão central
-          if (disabledReasonText != null) {
-            Text(
-              text = disabledReasonText,
-              style = MaterialTheme.typography.bodySmall.copy(
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 11.5.sp
-              ),
-              color = if (hasPhoneMovedAfterCalib || isVehicleMoving) DynoErrorRed else DynoTextSecondary,
-              textAlign = TextAlign.Center,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis,
-              modifier = Modifier.padding(bottom = 2.dp)
-            )
-          } else {
-            Spacer(modifier = Modifier.height(14.dp))
-          }
+          // Instrução Única Abaixo do Velocímetro (Sem duplicação de texto)
+          Text(
+            text = singleDynamicInstruction,
+            style = MaterialTheme.typography.bodySmall.copy(
+              fontWeight = FontWeight.SemiBold,
+              fontSize = 12.sp
+            ),
+            color = if (hasPhoneMovedAfterCalib) DynoErrorRed else DynoTextSecondary,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(bottom = 2.dp)
+          )
         }
 
         // =========================================================================
-        // 3. ÁREA DIREITA: QUALIDADE GPS, CALIBRAÇÃO, MÉTRICAS E INSTRUÇÃO
+        // 3. ÁREA DIREITA: CARTÃO COMPACTO "CONDIÇÕES DO TESTE" (25%)
         // =========================================================================
         Card(
           modifier = Modifier
-            .weight(1.05f)
+            .weight(0.25f)
             .fillMaxHeight(),
-          shape = RoundedCornerShape(14.dp),
+          shape = RoundedCornerShape(12.dp),
           colors = CardDefaults.cardColors(containerColor = DynoSurfaceContainer),
           border = BorderStroke(1.dp, DynoBorder)
         ) {
           Column(
             modifier = Modifier
               .fillMaxSize()
-              .padding(horizontal = 12.dp, vertical = 10.dp),
+              .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.SpaceBetween
           ) {
-            // Status do GPS e da Calibração
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+              text = "CONDIÇÕES DO TESTE",
+              style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.5.sp,
+                fontSize = 9.5.sp
+              ),
+              color = DynoTextSecondary
+            )
+
+            HorizontalDivider(thickness = 0.5.dp, color = DynoDivider)
+
+            // Linhas de Diagnóstico: GPS, Calibração, Veículo, Celular
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+              // 1. GPS
               Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
               ) {
-                Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                  Icon(
-                    imageVector = Icons.Default.GpsFixed,
-                    contentDescription = null,
-                    tint = if (isGpsReady) DynoSuccessGreen else DynoWarningYellow,
-                    modifier = Modifier.size(15.dp)
-                  )
-                  Text(
-                    text = "GPS",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                      fontWeight = FontWeight.Bold,
-                      fontSize = 11.sp
-                    ),
-                    color = DynoTextPrimary
-                  )
-                }
                 Text(
-                  text = if (isGpsReady) "$gpsStatusCategory (±${gpsAccuracyM.toInt()}m)" else gpsStatusCategory,
-                  style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 11.sp
-                  ),
-                  color = if (isGpsReady) DynoSuccessGreen else DynoWarningYellow
+                  text = "GPS:",
+                  style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                  color = DynoTextSecondary
+                )
+                Text(
+                  text = if (isGpsReady) "Bom" else if (hasLocationPermission && isGpsProviderEnabled) "Aguardando" else "Sem sinal",
+                  style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                  color = if (isGpsReady) DynoSuccessGreen else if (hasLocationPermission) DynoWarningYellow else DynoErrorRed
                 )
               }
 
+              // 2. Calibração
               Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
               ) {
-                Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                  Icon(
-                    imageVector = Icons.Default.Tune,
-                    contentDescription = null,
-                    tint = if (isCalibrated) DynoSuccessGreen else DynoWarningYellow,
-                    modifier = Modifier.size(15.dp)
-                  )
-                  Text(
-                    text = "CALIBRAÇÃO",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                      fontWeight = FontWeight.Bold,
-                      fontSize = 11.sp
-                    ),
-                    color = DynoTextPrimary
-                  )
-                }
                 Text(
-                  text = if (isCalibrated) "Calibrado ✓" else if (isCalibrating) "$calibProgressPercent%" else "Pendente",
-                  style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 11.sp
-                  ),
+                  text = "Calibração:",
+                  style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                  color = DynoTextSecondary
+                )
+                Text(
+                  text = if (isCalibrated) "Concluída" else if (isCalibrating) "$calibProgressPercent%" else "Pendente",
+                  style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
                   color = if (isCalibrated) DynoSuccessGreen else if (isCalibrating) DynoPowerCyan else DynoWarningYellow
                 )
               }
-            }
 
-            HorizontalDivider(thickness = 0.6.dp, color = DynoDivider)
-
-            // Métricas em Tempo Real da Passagem
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-              Column {
-                Text(
-                  text = "TEMPO",
-                  style = MaterialTheme.typography.labelSmall.copy(
-                    fontSize = 9.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 0.5.sp
-                  ),
-                  color = DynoTextSecondary
-                )
-                Text(
-                  text = String.format(Locale.US, "%.2f s", runElapsedSeconds),
-                  style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.5.sp
-                  ),
-                  color = DynoTextPrimary
-                )
-              }
-
-              Column(horizontalAlignment = Alignment.End) {
-                Text(
-                  text = "VEL. MÁXIMA",
-                  style = MaterialTheme.typography.labelSmall.copy(
-                    fontSize = 9.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 0.5.sp
-                  ),
-                  color = DynoTextSecondary
-                )
-                val displayedMaxSpeed = if (runState == DynoRunState.MEDINDO) {
-                  max(dynoTracker.maxCalcSpeedKmh, runVelocityMs * 3.6f)
-                } else {
-                  dynoTracker.maxGpsKmh
-                }
-                Text(
-                  text = String.format(Locale.US, "%.1f km/h", displayedMaxSpeed),
-                  style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.5.sp
-                  ),
-                  color = DynoPowerCyan
-                )
-              }
-            }
-
-            HorizontalDivider(thickness = 0.6.dp, color = DynoDivider)
-
-            // Instrução Dinâmica Única
-            Surface(
-              shape = RoundedCornerShape(10.dp),
-              color = DynoSurfaceElevated,
-              border = BorderStroke(1.dp, DynoBorderLight),
-              modifier = Modifier.fillMaxWidth()
-            ) {
+              // 3. Veículo
               Row(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
               ) {
-                Icon(
-                  imageVector = Icons.Outlined.Info,
-                  contentDescription = null,
-                  tint = DynoBlueLight,
-                  modifier = Modifier.size(16.dp)
+                Text(
+                  text = "Veículo:",
+                  style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                  color = DynoTextSecondary
                 )
                 Text(
-                  text = singleDynamicInstruction,
-                  style = MaterialTheme.typography.bodySmall.copy(
-                    fontSize = 11.sp,
-                    lineHeight = 14.sp,
-                    fontWeight = FontWeight.Medium
-                  ),
-                  color = DynoTextPrimary,
-                  maxLines = 2,
-                  overflow = TextOverflow.Ellipsis
+                  text = if (!isVehicleMoving) "Parado" else "Em movimento",
+                  style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                  color = if (!isVehicleMoving) DynoSuccessGreen else DynoWarningYellow
                 )
               }
+
+              // 4. Celular
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Text(
+                  text = "Celular:",
+                  style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                  color = DynoTextSecondary
+                )
+                Text(
+                  text = if (hasPhoneMovedAfterCalib) "Recalibre" else if (isCalibrated) "Pronto" else "Aguardando",
+                  style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                  color = if (hasPhoneMovedAfterCalib) DynoErrorRed else if (isCalibrated) DynoSuccessGreen else DynoWarningYellow
+                )
+              }
+            }
+
+            // Métricas da passagem (aparecem apenas quando armado ou medindo)
+            if (runState == DynoRunState.AGUARDANDO_INICIO || runState == DynoRunState.MEDINDO) {
+              HorizontalDivider(thickness = 0.5.dp, color = DynoDivider)
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Text(
+                  text = String.format(Locale.US, "%.1fs", runElapsedSeconds),
+                  style = MaterialTheme.typography.bodySmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = DynoTextPrimary
+                  )
+                )
+
+                val displayedMax = if (runState == DynoRunState.MEDINDO) max(dynoTracker.maxCalcSpeedKmh, runVelocityMs * 3.6f) else dynoTracker.maxGpsKmh
+                Text(
+                  text = String.format(Locale.US, "Máx: %.0f km/h", displayedMax),
+                  style = MaterialTheme.typography.bodySmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = DynoPowerCyan
+                  )
+                )
+              }
+            } else {
+              Spacer(modifier = Modifier.height(2.dp))
             }
           }
         }
       }
 
-      Spacer(modifier = Modifier.height(8.dp))
+      Spacer(modifier = Modifier.height(6.dp))
 
       // =========================================================================
-      // 4. TRÊS BOTÕES INFERIORES [ CALIBRAR ] [ INICIAR ] [ CANCELAR ]
+      // 4. TRÊS BOTÕES INFERIORES [ CALIBRAR ] [ INICIAR ] [ CANCELAR ] (72–78dp)
+      // Proporções: Calibrar: 30%, Iniciar: 40%, Cancelar: 30%
       // =========================================================================
       Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(74.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically
       ) {
         // -------------------------------------------------------------
-        // 5.1 BOTÃO ESQUERDO — CALIBRAR
+        // 5.1 BOTÃO ESQUERDO — CALIBRAR (30%)
         // -------------------------------------------------------------
         val isCalibrateEnabled = !isCalibrating && (runState == DynoRunState.PARADO)
 
         Surface(
-          shape = RoundedCornerShape(14.dp),
+          shape = RoundedCornerShape(12.dp),
           color = if (isCalibrated) DynoSuccessGreen else DynoSurfaceContainer,
           border = BorderStroke(
             1.5.dp,
             if (isCalibrated) DynoSuccessGreen else if (isCalibrating) DynoPowerCyan else DynoSuccessGreen
           ),
           modifier = Modifier
-            .weight(1f)
-            .height(64.dp)
+            .weight(0.30f)
+            .fillMaxHeight()
             .testTag("btn_calibrate")
             .clickable(enabled = isCalibrateEnabled) {
               if (isCalibrated) {
@@ -1557,11 +1547,10 @@ fun TestPreparationScreen(
                 calibCollector.isCollecting = true
                 isCalibrating = true
                 calibProgressPercent = 0
-                calibrationStatusText = "CALIBRANDO 0%"
               }
             }
         ) {
-          Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 8.dp)) {
+          Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 6.dp)) {
             Row(
               verticalAlignment = Alignment.CenterVertically,
               horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1574,7 +1563,7 @@ fun TestPreparationScreen(
               )
               Text(
                 text = if (isCalibrating) "CALIBRANDO $calibProgressPercent%"
-                       else if (isCalibrated) "✓ CALIBRADO"
+                       else if (isCalibrated) "CALIBRADO"
                        else "CALIBRAR",
                 style = MaterialTheme.typography.labelLarge.copy(
                   fontWeight = FontWeight.Bold,
@@ -1590,7 +1579,7 @@ fun TestPreparationScreen(
         }
 
         // -------------------------------------------------------------
-        // 5.2 BOTÃO CENTRAL — INICIAR (~20% MAIOR)
+        // 5.2 BOTÃO CENTRAL — INICIAR (40%)
         // -------------------------------------------------------------
         val isStartButtonArmed = runState == DynoRunState.AGUARDANDO_INICIO
         val isStartButtonMeasuring = runState == DynoRunState.MEDINDO
@@ -1599,21 +1588,28 @@ fun TestPreparationScreen(
         val startBtnText = when {
           isStartButtonMeasuring -> "MEDINDO"
           isStartButtonArmed -> "ARMADO — ${startSpeedTriggerKmh.toInt()} KM/H"
+          !isCalibrated -> "CALIBRE PRIMEIRO"
+          isVehicleMoving -> "PARE O CARRO"
+          !isGpsReady -> "AGUARDANDO GPS"
           else -> "INICIAR"
         }
 
+        val startBtnColor = when {
+          isStartClickable || isStartButtonArmed || isStartButtonMeasuring -> Color(0xFFE53935)
+          else -> Color(0xFF331617)
+        }
+        val startBtnBorder = when {
+          isStartClickable || isStartButtonArmed || isStartButtonMeasuring -> Color(0xFFFF5252)
+          else -> Color(0xFF4A1E20)
+        }
+
         Surface(
-          shape = RoundedCornerShape(16.dp),
-          color = if (isStartClickable || isStartButtonArmed || isStartButtonMeasuring) Color(0xFFE53935)
-                  else Color(0xFF421516),
-          border = BorderStroke(
-            1.dp,
-            if (isStartClickable || isStartButtonArmed || isStartButtonMeasuring) Color(0xFFFF5252)
-            else Color(0xFF5C1B1A)
-          ),
+          shape = RoundedCornerShape(14.dp),
+          color = startBtnColor,
+          border = BorderStroke(1.dp, startBtnBorder),
           modifier = Modifier
-            .weight(1.35f)
-            .height(74.dp)
+            .weight(0.40f)
+            .fillMaxHeight()
             .testTag("btn_start_test")
             .clickable(enabled = isStartClickable) {
               if (isReadyToArm) {
@@ -1629,7 +1625,7 @@ fun TestPreparationScreen(
               }
             }
         ) {
-          Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 10.dp)) {
+          Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 8.dp)) {
             Row(
               verticalAlignment = Alignment.CenterVertically,
               horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1638,22 +1634,23 @@ fun TestPreparationScreen(
                 imageVector = when {
                   isStartButtonMeasuring -> Icons.Default.FiberManualRecord
                   isStartButtonArmed -> Icons.Default.Speed
-                  else -> Icons.Default.PlayArrow
+                  isStartClickable -> Icons.Default.PlayArrow
+                  else -> Icons.Default.Lock
                 },
                 contentDescription = null,
                 tint = if (isStartClickable || isStartButtonArmed || isStartButtonMeasuring) Color.White
-                       else Color.White.copy(alpha = 0.45f),
-                modifier = Modifier.size(26.dp)
+                       else Color.White.copy(alpha = 0.40f),
+                modifier = Modifier.size(24.dp)
               )
               Text(
                 text = startBtnText,
                 style = MaterialTheme.typography.titleMedium.copy(
                   fontWeight = FontWeight.Black,
-                  fontSize = 17.sp,
-                  letterSpacing = 0.6.sp
+                  fontSize = if (startBtnText.length > 12) 13.5.sp else 16.sp,
+                  letterSpacing = 0.5.sp
                 ),
                 color = if (isStartClickable || isStartButtonArmed || isStartButtonMeasuring) Color.White
-                        else Color.White.copy(alpha = 0.45f),
+                        else Color.White.copy(alpha = 0.40f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
               )
@@ -1662,15 +1659,15 @@ fun TestPreparationScreen(
         }
 
         // -------------------------------------------------------------
-        // 5.3 BOTÃO DIREITO — CANCELAR
+        // 5.3 BOTÃO DIREITO — CANCELAR (30%)
         // -------------------------------------------------------------
         Surface(
-          shape = RoundedCornerShape(14.dp),
+          shape = RoundedCornerShape(12.dp),
           color = DynoSurfaceContainer,
           border = BorderStroke(1.5.dp, DynoBorderLight),
           modifier = Modifier
-            .weight(1f)
-            .height(64.dp)
+            .weight(0.30f)
+            .fillMaxHeight()
             .testTag("btn_cancel_test")
             .clickable {
               if (runState == DynoRunState.AGUARDANDO_INICIO || runState == DynoRunState.MEDINDO) {
@@ -1680,7 +1677,7 @@ fun TestPreparationScreen(
               }
             }
         ) {
-          Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 8.dp)) {
+          Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 6.dp)) {
             Row(
               verticalAlignment = Alignment.CenterVertically,
               horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1744,7 +1741,8 @@ private fun HorizontalDynoSpeedometer(
 
   Box(
     modifier = modifier
-      .size(270.dp, 165.dp)
+      .fillMaxWidth()
+      .height(180.dp)
       .semantics { contentDescription = "Velocidade GPS: ${visualSpeed.toInt()} km/h" }
       .testTag("dyno_speedometer"),
     contentAlignment = Alignment.Center
@@ -1753,12 +1751,12 @@ private fun HorizontalDynoSpeedometer(
       val canvasWidth = size.width
       val canvasHeight = size.height
       val centerX = canvasWidth / 2f
-      val centerY = canvasHeight * 0.72f
+      val centerY = canvasHeight * 0.76f
 
-      val arcRadius = with(density) { 84.dp.toPx() }
-      val strokeWidthPx = with(density) { 11.dp.toPx() }
-      val labelRadius = arcRadius + with(density) { 16.dp.toPx() }
-      val tickInnerRadius = arcRadius - with(density) { 7.dp.toPx() }
+      val arcRadius = with(density) { 98.dp.toPx() }
+      val strokeWidthPx = with(density) { 13.dp.toPx() }
+      val labelRadius = arcRadius + with(density) { 18.dp.toPx() }
+      val tickInnerRadius = arcRadius - with(density) { 9.dp.toPx() }
       val tickOuterRadius = arcRadius - with(density) { 2.dp.toPx() }
 
       val arcRect = Rect(
@@ -1793,7 +1791,7 @@ private fun HorizontalDynoSpeedometer(
       }
 
       // 3. Marcadores de Escala e Números
-      val labelTextSizePx = with(density) { 9.5.sp.toPx() }
+      val labelTextSizePx = with(density) { 11.sp.toPx() }
       textPaint.textSize = labelTextSizePx
 
       tickSteps.forEach { step ->
@@ -1807,9 +1805,9 @@ private fun HorizontalDynoSpeedometer(
         val isTrigger = step == targetTriggerSpeedKmh.toInt()
 
         val tOuter = if (isTrigger) arcRadius else tickOuterRadius
-        val tInner = if (isTrigger) arcRadius - with(density) { 10.dp.toPx() } else tickInnerRadius
+        val tInner = if (isTrigger) arcRadius - with(density) { 12.dp.toPx() } else tickInnerRadius
         val tColor = if (isTrigger) triggerHighlightColor else normalTickColor
-        val tStroke = with(density) { (if (isTrigger) 2.2.dp else 1.dp).toPx() }
+        val tStroke = with(density) { (if (isTrigger) 2.5.dp else 1.2.dp).toPx() }
 
         drawLine(
           color = tColor,
@@ -1838,7 +1836,7 @@ private fun HorizontalDynoSpeedometer(
         val ty = centerY + arcRadius * sin(trigAngleRad).toFloat()
         drawCircle(
           color = if (isMeasuring) DynoPowerCyan else DynoBlueLight,
-          radius = with(density) { 3.5.dp.toPx() },
+          radius = with(density) { 4.5.dp.toPx() },
           center = Offset(tx, ty)
         )
       }
@@ -1852,7 +1850,7 @@ private fun HorizontalDynoSpeedometer(
         val my = centerY + arcRadius * sin(maxAngleRad).toFloat()
         drawCircle(
           color = DynoTorqueOrange,
-          radius = with(density) { 4.dp.toPx() },
+          radius = with(density) { 5.dp.toPx() },
           center = Offset(mx, my)
         )
       }
@@ -1876,9 +1874,9 @@ private fun HorizontalDynoSpeedometer(
         text = formattedSpeed,
         style = MaterialTheme.typography.displayLarge.copy(
           fontWeight = FontWeight.Black,
-          fontSize = 48.sp,
+          fontSize = 58.sp,
           fontFamily = FontFamily.Monospace,
-          letterSpacing = (-1).sp
+          letterSpacing = (-1.5).sp
         ),
         color = DynoTextPrimary,
         modifier = Modifier.padding(0.dp)
@@ -1887,8 +1885,8 @@ private fun HorizontalDynoSpeedometer(
       Text(
         text = "km/h",
         style = MaterialTheme.typography.titleMedium.copy(
-          fontWeight = FontWeight.Medium,
-          fontSize = 13.5.sp
+          fontWeight = FontWeight.Bold,
+          fontSize = 14.sp
         ),
         color = DynoTextSecondary
       )
