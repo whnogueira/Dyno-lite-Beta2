@@ -1,7 +1,6 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,25 +20,15 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DirectionsCar
 import androidx.compose.material.icons.outlined.HelpOutline
-import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MenuBook
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -50,20 +39,30 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.R
 import com.example.data.VehicleDatabase
 import com.example.model.RunResult
 import com.example.model.VehicleCalculations
 import com.example.model.VehicleProfile
+import com.example.ui.components.DynoBadgeStatus
+import com.example.ui.components.DynoCard
+import com.example.ui.components.DynoLogo
+import com.example.ui.components.DynoPrimaryButton
+import com.example.ui.components.DynoSecondaryButton
+import com.example.ui.components.DynoStatusBadge
+import com.example.ui.theme.DynoBlueLight
+import com.example.ui.theme.DynoBluePrimary
+import com.example.ui.theme.DynoDivider
+import com.example.ui.theme.DynoPowerCyan
+import com.example.ui.theme.DynoSuccessGreen
+import com.example.ui.theme.DynoSurfaceElevated
+import com.example.ui.theme.DynoTextPrimary
+import com.example.ui.theme.DynoTextSecondary
+import com.example.ui.theme.DynoTorqueOrange
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -85,99 +84,55 @@ fun HomeScreen(
   Box(
     modifier = modifier
       .fillMaxSize()
-      .padding(horizontal = 20.dp),
+      .padding(horizontal = 16.dp),
     contentAlignment = Alignment.TopCenter
   ) {
     Column(
       modifier = Modifier
         .fillMaxSize()
         .verticalScroll(rememberScrollState())
-        .padding(vertical = 10.dp)
-        .widthIn(max = 500.dp),
+        .padding(top = 8.dp, bottom = 20.dp)
+        .widthIn(max = 520.dp),
       horizontalAlignment = Alignment.CenterHorizontally,
       verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
 
-      // Hero Header
-      Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.fillMaxWidth()
-      ) {
-        // App Icon Container with official Dyno Lite logo
-        Surface(
-          modifier = Modifier.size(72.dp),
-          shape = RoundedCornerShape(20.dp),
-          color = MaterialTheme.colorScheme.surfaceVariant,
-          tonalElevation = 2.dp,
-          border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
-        ) {
-          Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
-          ) {
-            Image(
-              painter = painterResource(id = R.drawable.ic_dyno_logo),
-              contentDescription = stringResource(R.string.app_name),
-              modifier = Modifier
-                .size(60.dp)
-                .clip(RoundedCornerShape(14.dp)),
-              contentScale = ContentScale.Fit
-            )
-          }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-          text = "DYNO LITE",
-          style = MaterialTheme.typography.headlineMedium.copy(
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.sp,
-            fontSize = 22.sp
-          ),
-          color = MaterialTheme.colorScheme.onSurface,
-          modifier = Modifier.testTag("home_title")
-        )
-
-        Text(
-          text = "Descubra o desempenho estimado do seu carro",
-          style = MaterialTheme.typography.bodyMedium.copy(
-            fontSize = 14.sp,
-            lineHeight = 18.sp
-          ),
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-          textAlign = TextAlign.Center,
-          modifier = Modifier.padding(top = 2.dp).testTag("home_subtitle")
-        )
-      }
+      // Hero Header com Logo Oficial
+      DynoLogo(
+        symbolSize = 58.dp,
+        showSubtitle = true,
+        subtitleText = "Desempenho do seu carro de forma simples",
+        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+      )
 
       if (primaryVehicle == null) {
         // -------------------------------------------------------------
-        // INÍCIO - SEM VEÍCULO
+        // ESTADO SEM VEÍCULO
         // -------------------------------------------------------------
-        Card(
+        DynoCard(
           modifier = Modifier
             .fillMaxWidth()
-            .testTag("empty_vehicle_card"),
-          shape = RoundedCornerShape(20.dp),
-          colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-          ),
-          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            .testTag("empty_vehicle_card")
         ) {
           Column(
-            modifier = Modifier
-              .fillMaxWidth()
-              .padding(22.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
           ) {
-            Icon(
-              imageVector = Icons.Outlined.DirectionsCar,
-              contentDescription = null,
-              modifier = Modifier.size(48.dp),
-              tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
-            )
+            Surface(
+              modifier = Modifier.size(54.dp),
+              shape = CircleShape,
+              color = DynoSurfaceElevated
+            ) {
+              Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Icon(
+                  imageVector = Icons.Outlined.DirectionsCar,
+                  contentDescription = null,
+                  modifier = Modifier.size(28.dp),
+                  tint = DynoBlueLight
+                )
+              }
+            }
 
             Text(
               text = "Nenhum veículo cadastrado",
@@ -185,7 +140,7 @@ fun HomeScreen(
                 fontWeight = FontWeight.Bold,
                 fontSize = 17.sp
               ),
-              color = MaterialTheme.colorScheme.onSurface
+              color = DynoTextPrimary
             )
 
             Text(
@@ -194,87 +149,62 @@ fun HomeScreen(
                 fontSize = 13.sp,
                 lineHeight = 18.sp
               ),
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              color = DynoTextSecondary,
               textAlign = TextAlign.Center
             )
 
-            Button(
+            DynoPrimaryButton(
+              text = "CADASTRAR MEU CARRO",
               onClick = onNavigateToWizard,
-              modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .testTag("btn_register_first_car"),
-              shape = RoundedCornerShape(14.dp),
-              colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
-              )
-            ) {
-              Text(
-                text = "CADASTRAR MEU CARRO",
-                style = MaterialTheme.typography.labelLarge.copy(
-                  fontWeight = FontWeight.Bold,
-                  letterSpacing = 0.8.sp,
-                  fontSize = 14.sp
-                )
-              )
-            }
+              icon = Icons.Default.DirectionsCar,
+              modifier = Modifier.fillMaxWidth(),
+              testTag = "btn_register_first_car"
+            )
           }
         }
 
-        // Cartão: Como funciona (5 passos)
-        Card(
+        // Cartão: Como funciona
+        DynoCard(
           modifier = Modifier
             .fillMaxWidth()
-            .testTag("card_how_it_works_steps"),
-          shape = RoundedCornerShape(18.dp),
-          colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-          ),
-          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            .testTag("card_how_it_works_steps")
         ) {
-          Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
           ) {
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-              Icon(
-                imageVector = Icons.Outlined.HelpOutline,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp)
-              )
-              Text(
-                text = "Como funciona o Dyno Lite:",
-                style = MaterialTheme.typography.titleSmall.copy(
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 15.sp
-                ),
-                color = MaterialTheme.colorScheme.onSurface
-              )
-            }
-
-            HorizontalDivider(
-              thickness = 0.8.dp,
-              color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+            Icon(
+              imageVector = Icons.Outlined.HelpOutline,
+              contentDescription = null,
+              tint = DynoBlueLight,
+              modifier = Modifier.size(20.dp)
             )
+            Text(
+              text = "Como funciona o Dyno Lite:",
+              style = MaterialTheme.typography.titleSmall.copy(
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.5.sp
+              ),
+              color = DynoTextPrimary
+            )
+          }
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-              HomeStepItem(number = "1", text = "Cadastre o veículo no catálogo ou de forma personalizada.")
-              HomeStepItem(number = "2", text = "Confirme o peso real com ocupantes e cargas.")
-              HomeStepItem(number = "3", text = "Prepare o teste e calibre com o carro parado.")
-              HomeStepItem(number = "4", text = "O teste começa automaticamente ao atingir a velocidade.")
-              HomeStepItem(number = "5", text = "Veja e compare os resultados das passagens.")
-            }
+          Spacer(modifier = Modifier.height(10.dp))
+          HorizontalDivider(thickness = 0.8.dp, color = DynoDivider)
+          Spacer(modifier = Modifier.height(10.dp))
+
+          Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            HomeStepItem(number = "1", text = "Cadastre o veículo no catálogo ou de forma personalizada.")
+            HomeStepItem(number = "2", text = "Confirme o peso real com ocupantes e cargas.")
+            HomeStepItem(number = "3", text = "Prepare o teste e fixe o celular na vertical voltado para a frente.")
+            HomeStepItem(number = "4", text = "O teste inicia automaticamente ao atingir a velocidade selecionada.")
+            HomeStepItem(number = "5", text = "Veja e compare os resultados de potência e torque.")
           }
         }
 
       } else {
         // -------------------------------------------------------------
-        // INÍCIO - COM VEÍCULO
+        // ESTADO COM VEÍCULO
         // -------------------------------------------------------------
         val transmissionLabel = when {
           primaryVehicle.transmissionId != null ->
@@ -302,321 +232,239 @@ fun HomeScreen(
           primaryVehicle.wheelDiameterInches > 0 &&
           totalWeight > 300f
 
-        val dataStatusLabel = if (primaryVehicle.useMeasuredWeight) {
-          "Dados verificados"
-        } else if (isDataComplete) {
-          "Dados conferidos"
-        } else {
-          "Dados parciais"
+        val (dataStatusLabel, dataBadgeStatus) = when {
+          primaryVehicle.useMeasuredWeight -> Pair("Verificado", DynoBadgeStatus.SUCCESS)
+          isDataComplete -> Pair("Conferido", DynoBadgeStatus.INFO)
+          else -> Pair("Parcial", DynoBadgeStatus.WARNING)
         }
 
         // Cartão do Veículo Principal
-        Card(
+        DynoCard(
           modifier = Modifier
             .fillMaxWidth()
-            .testTag("primary_vehicle_card"),
-          shape = RoundedCornerShape(20.dp),
-          colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-          ),
-          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+            .testTag("primary_vehicle_card")
         ) {
-          Column(
-            modifier = Modifier
-              .fillMaxWidth()
-              .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+          // Cabeçalho do Cartão
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
           ) {
             Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-              Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-              ) {
-                Icon(
-                  imageVector = Icons.Default.DirectionsCar,
-                  contentDescription = null,
-                  tint = MaterialTheme.colorScheme.primary,
-                  modifier = Modifier.size(22.dp)
-                )
-                Text(
-                  text = "VEÍCULO PRINCIPAL",
-                  style = MaterialTheme.typography.labelLarge.copy(
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.8.sp,
-                    fontSize = 12.5.sp
-                  ),
-                  color = MaterialTheme.colorScheme.primary
-                )
-              }
-
-              Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
-              ) {
-                Text(
-                  text = dataStatusLabel,
-                  style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp
-                  ),
-                  color = MaterialTheme.colorScheme.onPrimaryContainer,
-                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                )
-              }
+              Icon(
+                imageVector = Icons.Default.DirectionsCar,
+                contentDescription = null,
+                tint = DynoBluePrimary,
+                modifier = Modifier.size(20.dp)
+              )
+              Text(
+                text = "VEÍCULO PRINCIPAL",
+                style = MaterialTheme.typography.labelSmall.copy(
+                  fontWeight = FontWeight.Bold,
+                  letterSpacing = 0.8.sp,
+                  fontSize = 11.5.sp
+                ),
+                color = DynoBlueLight
+              )
             }
 
-            HorizontalDivider(
-              thickness = 0.8.dp,
-              color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-            )
+            DynoStatusBadge(text = dataStatusLabel, status = dataBadgeStatus)
+          }
 
-            // Vehicle Title
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+          Spacer(modifier = Modifier.height(10.dp))
+          HorizontalDivider(thickness = 0.8.dp, color = DynoDivider)
+          Spacer(modifier = Modifier.height(10.dp))
+
+          // Título do Veículo
+          Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+              text = "${primaryVehicle.manufacturer} ${primaryVehicle.model}",
+              style = MaterialTheme.typography.titleLarge.copy(
+                fontWeight = FontWeight.Bold,
+                fontSize = 19.sp
+              ),
+              color = DynoTextPrimary
+            )
+            val details = listOfNotNull(
+              primaryVehicle.year.toString(),
+              primaryVehicle.engine.ifBlank { null },
+              primaryVehicle.version.ifBlank { null }
+            ).joinToString(" • ")
+            Text(
+              text = details,
+              style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.5.sp),
+              color = DynoTextSecondary
+            )
+          }
+
+          Spacer(modifier = Modifier.height(12.dp))
+
+          // Linha de Especificações
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+          ) {
+            Column {
               Text(
-                text = "${primaryVehicle.manufacturer} ${primaryVehicle.model}",
-                style = MaterialTheme.typography.titleLarge.copy(
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 20.sp
-                ),
-                color = MaterialTheme.colorScheme.onSurface
+                text = "Peso Total",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                color = DynoTextSecondary
               )
-              val details = listOfNotNull(
-                primaryVehicle.year.toString(),
-                primaryVehicle.engine.ifBlank { null },
-                primaryVehicle.version.ifBlank { null }
-              ).joinToString(" • ")
               Text(
-                text = details,
+                text = String.format(Locale.US, "%.0f kg", totalWeight),
                 style = MaterialTheme.typography.bodyMedium.copy(
+                  fontWeight = FontWeight.Bold,
                   fontSize = 14.sp
                 ),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = DynoTextPrimary
               )
             }
 
-            // Specs Row
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-              Column {
-                Text(
-                  text = "Peso Total",
-                  style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                  color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                )
-                Text(
-                  text = String.format(Locale.US, "%.0f kg", totalWeight),
-                  style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                  ),
-                  color = MaterialTheme.colorScheme.onSurface
-                )
-              }
-
-              Column {
-                Text(
-                  text = "Pneu",
-                  style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                  color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                )
-                Text(
-                  text = "${primaryVehicle.tireWidthMm}/${primaryVehicle.tireAspectRatio} R${primaryVehicle.wheelDiameterInches}",
-                  style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                  ),
-                  color = MaterialTheme.colorScheme.onSurface
-                )
-              }
-
-              Column {
-                Text(
-                  text = "Câmbio",
-                  style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                  color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                )
-                Text(
-                  text = transmissionLabel.take(12),
-                  style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                  ),
-                  color = MaterialTheme.colorScheme.onSurface
-                )
-              }
-
-              if (primaryVehicle.factoryPowerCv != null && primaryVehicle.factoryPowerCv > 0f) {
-                Column {
-                  Text(
-                    text = "Potência Orig.",
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                  )
-                  Text(
-                    text = String.format(Locale.US, "%.0f cv", primaryVehicle.factoryPowerCv),
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                      fontWeight = FontWeight.Bold,
-                      fontSize = 14.sp
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface
-                  )
-                }
-              }
+            Column {
+              Text(
+                text = "Pneu",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                color = DynoTextSecondary
+              )
+              Text(
+                text = "${primaryVehicle.tireWidthMm}/${primaryVehicle.tireAspectRatio} R${primaryVehicle.wheelDiameterInches}",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 14.sp
+                ),
+                color = DynoTextPrimary
+              )
             }
 
-            HorizontalDivider(
-              thickness = 0.8.dp,
-              color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-            )
+            Column {
+              Text(
+                text = "Câmbio",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                color = DynoTextSecondary
+              )
+              Text(
+                text = transmissionLabel.take(12),
+                style = MaterialTheme.typography.bodyMedium.copy(
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 14.sp
+                ),
+                color = DynoTextPrimary
+              )
+            }
 
-            // Último Resultado
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-              Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-              ) {
-                Icon(
-                  imageVector = Icons.Outlined.Speed,
-                  contentDescription = null,
-                  tint = MaterialTheme.colorScheme.primary,
-                  modifier = Modifier.size(16.dp)
+            if (primaryVehicle.factoryPowerCv != null && primaryVehicle.factoryPowerCv > 0f) {
+              Column {
+                Text(
+                  text = "Potência Orig.",
+                  style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                  color = DynoTextSecondary
                 )
                 Text(
-                  text = "Último teste:",
-                  style = MaterialTheme.typography.bodySmall.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 12.sp
+                  text = String.format(Locale.US, "%.0f cv", primaryVehicle.factoryPowerCv),
+                  style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
                   ),
-                  color = MaterialTheme.colorScheme.onSurface
-                )
-              }
-
-              if (lastRunResult != null) {
-                val dateFormat = SimpleDateFormat("dd/MM 'às' HH:mm", Locale.getDefault())
-                val formattedDate = dateFormat.format(Date(lastRunResult.timestamp))
-                Text(
-                  text = "Qualidade: ${lastRunResult.quality} • Máx: ${String.format(Locale.US, "%.0f km/h", lastRunResult.maximumGpsSpeedKmh)} • $formattedDate",
-                  style = MaterialTheme.typography.bodySmall.copy(
-                    fontSize = 11.5.sp
-                  ),
-                  color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-              } else {
-                Text(
-                  text = "Nenhum teste realizado",
-                  style = MaterialTheme.typography.bodySmall.copy(
-                    fontSize = 12.sp
-                  ),
-                  color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                  color = DynoPowerCyan
                 )
               }
             }
           }
+
+          Spacer(modifier = Modifier.height(10.dp))
+          HorizontalDivider(thickness = 0.8.dp, color = DynoDivider)
+          Spacer(modifier = Modifier.height(8.dp))
+
+          // Último Teste
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+              Icon(
+                imageVector = Icons.Outlined.Speed,
+                contentDescription = null,
+                tint = DynoBlueLight,
+                modifier = Modifier.size(16.dp)
+              )
+              Text(
+                text = "Último teste:",
+                style = MaterialTheme.typography.bodySmall.copy(
+                  fontWeight = FontWeight.Medium,
+                  fontSize = 12.sp
+                ),
+                color = DynoTextPrimary
+              )
+            }
+
+            if (lastRunResult != null) {
+              val dateFormat = SimpleDateFormat("dd/MM 'às' HH:mm", Locale.getDefault())
+              val formattedDate = dateFormat.format(Date(lastRunResult.timestamp))
+              Text(
+                text = "Máx: ${String.format(Locale.US, "%.0f km/h", lastRunResult.maximumGpsSpeedKmh)} • $formattedDate",
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
+                color = DynoTextSecondary
+              )
+            } else {
+              Text(
+                text = "Nenhum teste realizado",
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
+                color = DynoTextSecondary
+              )
+            }
+          }
         }
 
-        // Botões de Ação
+        // Botões de Ação Principais
         Column(
           modifier = Modifier.fillMaxWidth(),
           verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-          // Botão Principal
-          Button(
+          // Botão Principal Azul "INICIAR TESTE"
+          DynoPrimaryButton(
+            text = "INICIAR TESTE",
             onClick = onNavigateToTestPrep,
-            modifier = Modifier
-              .fillMaxWidth()
-              .height(54.dp)
-              .testTag("btn_discover_power"),
-            shape = RoundedCornerShape(14.dp),
-            colors = ButtonDefaults.buttonColors(
-              containerColor = MaterialTheme.colorScheme.primary,
-              contentColor = MaterialTheme.colorScheme.onPrimary
-            )
-          ) {
-            Icon(
-              imageVector = Icons.Default.PlayArrow,
-              contentDescription = null,
-              modifier = Modifier.size(22.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-              text = "DESCOBRIR A POTÊNCIA",
-              style = MaterialTheme.typography.labelLarge.copy(
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.8.sp,
-                fontSize = 14.sp
-              )
-            )
-          }
+            icon = Icons.Default.PlayArrow,
+            modifier = Modifier.fillMaxWidth(),
+            testTag = "btn_discover_power"
+          )
 
           // Botões Secundários
           Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
           ) {
-            FilledTonalButton(
+            DynoSecondaryButton(
+              text = "VER RESULTADOS",
               onClick = onNavigateToResults,
-              modifier = Modifier
-                .weight(1f)
-                .height(48.dp)
-                .testTag("btn_view_last_result"),
-              shape = RoundedCornerShape(12.dp)
-            ) {
-              Icon(
-                imageVector = Icons.Outlined.Visibility,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp)
-              )
-              Spacer(modifier = Modifier.width(6.dp))
-              Text(
-                text = "VER RESULTADO",
-                style = MaterialTheme.typography.labelMedium.copy(
-                  fontWeight = FontWeight.SemiBold,
-                  fontSize = 12.sp
-                )
-              )
-            }
+              icon = Icons.Outlined.Visibility,
+              modifier = Modifier.weight(1f),
+              testTag = "btn_view_last_result"
+            )
 
-            FilledTonalButton(
+            DynoSecondaryButton(
+              text = "DADOS DO CARRO",
               onClick = onNavigateToGarage,
-              modifier = Modifier
-                .weight(1f)
-                .height(48.dp)
-                .testTag("btn_view_vehicle_data"),
-              shape = RoundedCornerShape(12.dp)
-            ) {
-              Icon(
-                imageVector = Icons.Outlined.DirectionsCar,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp)
-              )
-              Spacer(modifier = Modifier.width(6.dp))
-              Text(
-                text = "DADOS DO CARRO",
-                style = MaterialTheme.typography.labelMedium.copy(
-                  fontWeight = FontWeight.SemiBold,
-                  fontSize = 12.sp
-                )
-              )
-            }
+              icon = Icons.Outlined.DirectionsCar,
+              modifier = Modifier.weight(1f),
+              testTag = "btn_view_vehicle_data"
+            )
           }
         }
       }
 
-      // Secondary Helpful Links
+      // Links Secundários de Apoio
       Row(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(top = 4.dp),
+          .padding(top = 2.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
       ) {
@@ -627,7 +475,8 @@ fun HomeScreen(
           Icon(
             imageVector = Icons.Outlined.MenuBook,
             contentDescription = null,
-            modifier = Modifier.size(16.dp)
+            modifier = Modifier.size(16.dp),
+            tint = DynoBlueLight
           )
           Spacer(modifier = Modifier.width(6.dp))
           Text(
@@ -635,7 +484,8 @@ fun HomeScreen(
             style = MaterialTheme.typography.bodyMedium.copy(
               fontWeight = FontWeight.Medium,
               fontSize = 13.sp
-            )
+            ),
+            color = DynoTextPrimary
           )
         }
 
@@ -646,7 +496,8 @@ fun HomeScreen(
           Icon(
             imageVector = Icons.Outlined.HelpOutline,
             contentDescription = null,
-            modifier = Modifier.size(16.dp)
+            modifier = Modifier.size(16.dp),
+            tint = DynoBlueLight
           )
           Spacer(modifier = Modifier.width(6.dp))
           Text(
@@ -654,7 +505,8 @@ fun HomeScreen(
             style = MaterialTheme.typography.bodyMedium.copy(
               fontWeight = FontWeight.Medium,
               fontSize = 13.sp
-            )
+            ),
+            color = DynoTextPrimary
           )
         }
       }
@@ -664,10 +516,12 @@ fun HomeScreen(
   if (showHowItWorksDialog) {
     AlertDialog(
       onDismissRequest = { showHowItWorksDialog = false },
+      containerColor = DynoSurfaceElevated,
       title = {
         Text(
           text = "Como funciona o Dyno Lite",
-          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+          color = DynoTextPrimary
         )
       },
       text = {
@@ -676,26 +530,29 @@ fun HomeScreen(
         ) {
           Text(
             text = "1. Cadastre os dados reais do seu veículo (peso, pneu e câmbio).",
-            style = MaterialTheme.typography.bodyMedium
+            style = MaterialTheme.typography.bodyMedium,
+            color = DynoTextPrimary
           )
           Text(
             text = "2. Fixe o celular no suporte veicular alinhado na vertical voltado para a frente.",
-            style = MaterialTheme.typography.bodyMedium
+            style = MaterialTheme.typography.bodyMedium,
+            color = DynoTextPrimary
           )
           Text(
             text = "3. Ao atingir a velocidade de início selecionada (40, 50 ou 60 km/h), o teste inicia automaticamente e mede a aceleração longitudinal precisa do veículo.",
-            style = MaterialTheme.typography.bodyMedium
+            style = MaterialTheme.typography.bodyMedium,
+            color = DynoTextPrimary
           )
           Text(
             text = "Aviso: Sempre realize os testes em local seguro e fechado, com o auxílio de um passageiro.",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = DynoTextSecondary
           )
         }
       },
       confirmButton = {
         TextButton(onClick = { showHowItWorksDialog = false }) {
-          Text("ENTENDI")
+          Text("ENTENDI", color = DynoBlueLight, fontWeight = FontWeight.Bold)
         }
       }
     )
@@ -716,16 +573,17 @@ private fun HomeStepItem(
     Surface(
       modifier = Modifier.size(24.dp),
       shape = CircleShape,
-      color = MaterialTheme.colorScheme.primaryContainer
+      color = DynoSurfaceElevated,
+      border = BorderStroke(0.8.dp, DynoBluePrimary.copy(alpha = 0.5f))
     ) {
       Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(
           text = number,
           style = MaterialTheme.typography.labelSmall.copy(
             fontWeight = FontWeight.Bold,
-            fontSize = 12.sp
+            fontSize = 11.5.sp
           ),
-          color = MaterialTheme.colorScheme.onPrimaryContainer
+          color = DynoBlueLight
         )
       }
     }
@@ -735,7 +593,7 @@ private fun HomeStepItem(
         fontSize = 12.5.sp,
         lineHeight = 17.sp
       ),
-      color = MaterialTheme.colorScheme.onSurfaceVariant
+      color = DynoTextSecondary
     )
   }
 }

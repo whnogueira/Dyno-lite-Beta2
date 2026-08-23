@@ -47,6 +47,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.VehicleRepository
 import com.example.model.VehicleProfile
+import com.example.ui.components.DynoBottomNavigation
+import com.example.ui.components.DynoTopBar
 import com.example.ui.screens.AccuracyGuideScreen
 import com.example.ui.screens.GarageScreen
 import com.example.ui.screens.HomeScreen
@@ -136,19 +138,9 @@ fun DynoLiteApp() {
         modifier = Modifier.fillMaxSize().testTag("main_screen"),
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-          TopAppBar(
-            title = {
-              Text(
-                text = stringResource(R.string.app_name),
-                style = MaterialTheme.typography.titleLarge.copy(
-                  fontWeight = FontWeight.Bold,
-                  letterSpacing = 0.5.sp,
-                  fontSize = 20.sp,
-                ),
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.testTag("top_bar_app_title")
-              )
-            },
+          DynoTopBar(
+            title = stringResource(R.string.app_name),
+            showBrandLogo = true,
             actions = {
               IconButton(
                 onClick = { currentDestination = AppDestination.SETTINGS },
@@ -160,117 +152,14 @@ fun DynoLiteApp() {
                   tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
               }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-              containerColor = MaterialTheme.colorScheme.background,
-            ),
+            }
           )
         },
         bottomBar = {
-          Column {
-            HorizontalDivider(
-              thickness = 0.8.dp,
-              color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-            )
-            NavigationBar(
-              containerColor = MaterialTheme.colorScheme.background,
-              tonalElevation = 0.dp,
-              modifier = Modifier.height(72.dp),
-            ) {
-              // 1. INÍCIO
-              NavigationBarItem(
-                selected = selectedTabIndex == 0,
-                onClick = { selectedTabIndex = 0 },
-                icon = {
-                  Icon(
-                    imageVector = if (selectedTabIndex == 0) Icons.Default.Home else Icons.Outlined.Home,
-                    contentDescription = "Início",
-                    modifier = Modifier.size(24.dp),
-                  )
-                },
-                label = {
-                  Text(
-                    text = "INÍCIO",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                      fontWeight = if (selectedTabIndex == 0) FontWeight.Bold else FontWeight.Medium,
-                      fontSize = 11.sp,
-                      letterSpacing = 0.5.sp,
-                    )
-                  )
-                },
-                colors = NavigationBarItemDefaults.colors(
-                  selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                  selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                  indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                  unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                  unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                ),
-                modifier = Modifier.testTag("nav_tab_home")
-              )
-
-              // 2. GARAGEM
-              NavigationBarItem(
-                selected = selectedTabIndex == 1,
-                onClick = { selectedTabIndex = 1 },
-                icon = {
-                  Icon(
-                    imageVector = if (selectedTabIndex == 1) Icons.Default.DirectionsCar else Icons.Outlined.DirectionsCar,
-                    contentDescription = "Garagem",
-                    modifier = Modifier.size(24.dp),
-                  )
-                },
-                label = {
-                  Text(
-                    text = "GARAGEM",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                      fontWeight = if (selectedTabIndex == 1) FontWeight.Bold else FontWeight.Medium,
-                      fontSize = 11.sp,
-                      letterSpacing = 0.5.sp,
-                    )
-                  )
-                },
-                colors = NavigationBarItemDefaults.colors(
-                  selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                  selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                  indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                  unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                  unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                ),
-                modifier = Modifier.testTag("nav_tab_garage")
-              )
-
-              // 3. RESULTADOS
-              NavigationBarItem(
-                selected = selectedTabIndex == 2,
-                onClick = { selectedTabIndex = 2 },
-                icon = {
-                  Icon(
-                    imageVector = if (selectedTabIndex == 2) Icons.Default.Assessment else Icons.Outlined.Assessment,
-                    contentDescription = "Resultados",
-                    modifier = Modifier.size(24.dp),
-                  )
-                },
-                label = {
-                  Text(
-                    text = "RESULTADOS",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                      fontWeight = if (selectedTabIndex == 2) FontWeight.Bold else FontWeight.Medium,
-                      fontSize = 11.sp,
-                      letterSpacing = 0.5.sp,
-                    )
-                  )
-                },
-                colors = NavigationBarItemDefaults.colors(
-                  selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                  selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                  indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                  unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                  unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                ),
-                modifier = Modifier.testTag("nav_tab_results")
-              )
-            }
-          }
+          DynoBottomNavigation(
+            selectedTabIndex = selectedTabIndex,
+            onTabSelected = { selectedTabIndex = it }
+          )
         }
       ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding)) {

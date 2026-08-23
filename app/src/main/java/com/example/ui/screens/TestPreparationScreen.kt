@@ -129,6 +129,27 @@ import com.example.model.RunResult
 import com.example.model.RunSample
 import com.example.model.VehicleCalculations
 import com.example.model.VehicleProfile
+import com.example.ui.components.DynoBadgeStatus
+import com.example.ui.components.DynoCard
+import com.example.ui.components.DynoDangerButton
+import com.example.ui.components.DynoPrimaryButton
+import com.example.ui.components.DynoSecondaryButton
+import com.example.ui.components.DynoSpeedometer
+import com.example.ui.components.DynoStatusBadge
+import com.example.ui.theme.DynoBlueLight
+import com.example.ui.theme.DynoBluePrimary
+import com.example.ui.theme.DynoDivider
+import com.example.ui.theme.DynoErrorRed
+import com.example.ui.theme.DynoPowerCyan
+import com.example.ui.theme.DynoSuccessGreen
+import com.example.ui.theme.DynoSurface
+import com.example.ui.theme.DynoSurfaceContainer
+import com.example.ui.theme.DynoSurfaceElevated
+import com.example.ui.theme.DynoTextMuted
+import com.example.ui.theme.DynoTextPrimary
+import com.example.ui.theme.DynoTextSecondary
+import com.example.ui.theme.DynoTorqueOrange
+import com.example.ui.theme.DynoWarningYellow
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.cos
@@ -1995,7 +2016,7 @@ private fun ArmedDrivingHud(
   Column(
     modifier = modifier
       .fillMaxSize()
-      .padding(24.dp)
+      .padding(20.dp)
       .widthIn(max = 480.dp),
     horizontalAlignment = Alignment.CenterHorizontally,
     verticalArrangement = Arrangement.SpaceBetween
@@ -2005,26 +2026,10 @@ private fun ArmedDrivingHud(
       horizontalAlignment = Alignment.CenterHorizontally,
       verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-      Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.primaryContainer
-      ) {
-        Row(
-          modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-          Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(8.dp)) {}
-          Text(
-            text = "TESTE ARMADO",
-            style = MaterialTheme.typography.labelMedium.copy(
-              fontWeight = FontWeight.Bold,
-              letterSpacing = 1.sp
-            ),
-            color = MaterialTheme.colorScheme.primary
-          )
-        }
-      }
+      DynoStatusBadge(
+        text = "TESTE ARMADO",
+        status = DynoBadgeStatus.INFO
+      )
 
       Text(
         text = "Acelere na marcha selecionada",
@@ -2032,27 +2037,22 @@ private fun ArmedDrivingHud(
           fontWeight = FontWeight.Medium,
           textAlign = TextAlign.Center
         ),
-        color = MaterialTheme.colorScheme.onSurface
+        color = DynoTextPrimary
       )
     }
 
-    // Center Speed HUD with Semicircular Speedometer
-    Card(
-      shape = RoundedCornerShape(24.dp),
-      colors = CardDefaults.cardColors(
-        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-      ),
-      border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-      modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+    // Center Speed HUD with DynoSpeedometer
+    DynoCard(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(vertical = 10.dp)
     ) {
       Column(
-        modifier = Modifier
-          .fillMaxWidth()
-          .padding(vertical = 20.dp, horizontal = 16.dp),
+        modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp)
       ) {
-        SemicircularSpeedometer(
+        DynoSpeedometer(
           currentSpeedKmh = currentSpeedKmh,
           targetTriggerSpeedKmh = targetTriggerSpeedKmh,
           isMeasuring = false
@@ -2060,32 +2060,14 @@ private fun ArmedDrivingHud(
 
         // Remaining speed indicator or "PREPARE-SE"
         if (isCloseToTrigger) {
-          Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = Color(0xFFF59E0B).copy(alpha = 0.2f),
-            border = BorderStroke(1.dp, Color(0xFFF59E0B))
-          ) {
-            Row(
-              modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-              Surface(shape = CircleShape, color = Color(0xFFF59E0B), modifier = Modifier.size(8.dp)) {}
-              Text(
-                text = "PREPARE-SE",
-                style = MaterialTheme.typography.labelMedium.copy(
-                  fontWeight = FontWeight.Black,
-                  letterSpacing = 1.sp,
-                  fontSize = 13.sp
-                ),
-                color = Color(0xFFF59E0B)
-              )
-            }
-          }
+          DynoStatusBadge(
+            text = "PREPARE-SE PARA ACELERAR",
+            status = DynoBadgeStatus.WARNING
+          )
         } else {
           Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainer
+            shape = RoundedCornerShape(10.dp),
+            color = DynoSurfaceElevated
           ) {
             Text(
               text = if (remainingKmh > 0f) "FALTAM ${remainingKmh.toInt()} km/h PARA INICIAR" else "INICIANDO MEDIÇÃO...",
@@ -2094,7 +2076,7 @@ private fun ArmedDrivingHud(
                 letterSpacing = 0.6.sp,
                 fontSize = 12.sp
               ),
-              color = MaterialTheme.colorScheme.primary,
+              color = DynoBlueLight,
               modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
             )
           }
@@ -2110,17 +2092,17 @@ private fun ArmedDrivingHud(
     ) {
       Surface(
         shape = CircleShape,
-        color = MaterialTheme.colorScheme.surfaceContainer
+        color = DynoSurfaceContainer
       ) {
         Row(
-          modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+          modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
           Icon(
             imageVector = Icons.Outlined.LocationOn,
             contentDescription = null,
-            tint = Color(0xFF10B981),
+            tint = DynoSuccessGreen,
             modifier = Modifier.size(14.dp)
           )
           Text(
@@ -2129,37 +2111,19 @@ private fun ArmedDrivingHud(
               fontWeight = FontWeight.SemiBold,
               fontSize = 11.5.sp
             ),
-            color = MaterialTheme.colorScheme.onSurface
+            color = DynoTextPrimary
           )
         }
       }
 
-      OutlinedButton(
+      DynoDangerButton(
+        text = "CANCELAR TESTE",
         onClick = onCancel,
-        modifier = Modifier
-          .fillMaxWidth()
-          .height(52.dp)
-          .testTag("btn_cancel_armed_test"),
-        shape = RoundedCornerShape(12.dp),
-        colors = ButtonDefaults.outlinedButtonColors(
-          contentColor = MaterialTheme.colorScheme.error
-        ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
-      ) {
-        Icon(
-          imageVector = Icons.Default.Close,
-          contentDescription = null,
-          modifier = Modifier.size(20.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-          text = "CANCELAR TESTE",
-          style = MaterialTheme.typography.labelLarge.copy(
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp
-          )
-        )
-      }
+        icon = Icons.Default.Close,
+        isOutlined = true,
+        modifier = Modifier.fillMaxWidth(),
+        testTag = "btn_cancel_armed_test"
+      )
     }
   }
 }
@@ -2179,62 +2143,39 @@ private fun MeasuringHud(
   Column(
     modifier = modifier
       .fillMaxSize()
-      .padding(24.dp)
+      .padding(20.dp)
       .widthIn(max = 480.dp),
     horizontalAlignment = Alignment.CenterHorizontally,
     verticalArrangement = Arrangement.SpaceBetween
   ) {
     // Top Status
-    Surface(
-      shape = RoundedCornerShape(20.dp),
-      color = Color(0xFF10B981).copy(alpha = 0.2f),
-      border = BorderStroke(1.dp, Color(0xFF10B981))
-    ) {
-      Row(
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-      ) {
-        Surface(shape = CircleShape, color = Color(0xFF10B981), modifier = Modifier.size(10.dp)) {}
-        Text(
-          text = "MEDIÇÃO EM ANDAMENTO",
-          style = MaterialTheme.typography.labelLarge.copy(
-            fontWeight = FontWeight.Black,
-            letterSpacing = 1.sp
-          ),
-          color = Color(0xFF10B981)
-        )
-      }
-    }
+    DynoStatusBadge(
+      text = "MEDIÇÃO EM ANDAMENTO",
+      status = DynoBadgeStatus.SUCCESS
+    )
 
-    // Center Speed & Stats HUD with Semicircular Speedometer
-    Card(
-      shape = RoundedCornerShape(24.dp),
-      colors = CardDefaults.cardColors(
-        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-      ),
-      border = BorderStroke(2.dp, Color(0xFF10B981)),
-      modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+    // Center Speed & Stats HUD with DynoSpeedometer
+    DynoCard(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(vertical = 10.dp),
+      borderColor = DynoSuccessGreen.copy(alpha = 0.5f)
     ) {
       Column(
-        modifier = Modifier
-          .fillMaxWidth()
-          .padding(vertical = 16.dp, horizontal = 16.dp),
+        modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp)
       ) {
-        SemicircularSpeedometer(
+        DynoSpeedometer(
           currentSpeedKmh = currentSpeedKmh,
           targetTriggerSpeedKmh = targetTriggerSpeedKmh,
           isMeasuring = true
         )
 
-        // Stats card: Tempo, Início, Velocidade máxima
-        Card(
-          shape = RoundedCornerShape(14.dp),
-          colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-          ),
+        // Stats panel: Tempo, Início, Velocidade máxima
+        Surface(
+          shape = RoundedCornerShape(12.dp),
+          color = DynoSurfaceElevated,
           modifier = Modifier.fillMaxWidth()
         ) {
           Row(
@@ -2248,15 +2189,15 @@ private fun MeasuringHud(
               Text(
                 text = "Tempo",
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = DynoTextSecondary
               )
               Text(
                 text = String.format(Locale.US, "%.2f s", elapsedSeconds),
                 style = MaterialTheme.typography.bodyMedium.copy(
                   fontWeight = FontWeight.Bold,
-                  fontSize = 13.5.sp
+                  fontSize = 14.sp
                 ),
-                color = MaterialTheme.colorScheme.onSurface
+                color = DynoTextPrimary
               )
             }
 
@@ -2264,22 +2205,22 @@ private fun MeasuringHud(
               modifier = Modifier
                 .height(24.dp)
                 .width(1.dp),
-              color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+              color = DynoDivider
             ) {}
 
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
               Text(
                 text = "Início",
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = DynoTextSecondary
               )
               Text(
                 text = "${targetTriggerSpeedKmh.toInt()} km/h",
                 style = MaterialTheme.typography.bodyMedium.copy(
                   fontWeight = FontWeight.Bold,
-                  fontSize = 13.5.sp
+                  fontSize = 14.sp
                 ),
-                color = MaterialTheme.colorScheme.onSurface
+                color = DynoTextPrimary
               )
             }
 
@@ -2287,66 +2228,46 @@ private fun MeasuringHud(
               modifier = Modifier
                 .height(24.dp)
                 .width(1.dp),
-              color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+              color = DynoDivider
             ) {}
 
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
               Text(
                 text = "Vel. máxima",
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = DynoTextSecondary
               )
               Text(
                 text = String.format(Locale.US, "%.1f km/h", max(maxSpeedKmh, currentSpeedKmh)),
                 style = MaterialTheme.typography.bodyMedium.copy(
                   fontWeight = FontWeight.Bold,
-                  fontSize = 13.5.sp
+                  fontSize = 14.sp
                 ),
-                color = Color(0xFF10B981)
+                color = DynoSuccessGreen
               )
             }
           }
         }
 
         Text(
-          text = "Mantenha a aceleração na mesma marcha.",
+          text = "Mantenha o pé cravado na mesma marcha.",
           style = MaterialTheme.typography.bodyMedium.copy(
             fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center,
             fontSize = 13.sp
           ),
-          color = Color(0xFF10B981)
+          color = DynoSuccessGreen
         )
       }
     }
 
     // Bottom Action: Emergency stop
-    Button(
+    DynoDangerButton(
+      text = "ENCERRAR TESTE",
       onClick = onEmergencyStop,
-      modifier = Modifier
-        .fillMaxWidth()
-        .height(52.dp)
-        .testTag("btn_stop_measuring_emergency"),
-      shape = RoundedCornerShape(12.dp),
-      colors = ButtonDefaults.buttonColors(
-        containerColor = MaterialTheme.colorScheme.error,
-        contentColor = MaterialTheme.colorScheme.onError
-      )
-    ) {
-      Icon(
-        imageVector = Icons.Default.Stop,
-        contentDescription = null,
-        modifier = Modifier.size(20.dp)
-      )
-      Spacer(modifier = Modifier.width(8.dp))
-      Text(
-        text = "ENCERRAR TESTE",
-        style = MaterialTheme.typography.labelLarge.copy(
-          fontWeight = FontWeight.Bold,
-          letterSpacing = 0.5.sp,
-          fontSize = 14.sp
-        )
-      )
-    }
+      icon = Icons.Default.Stop,
+      modifier = Modifier.fillMaxWidth(),
+      testTag = "btn_stop_measuring_emergency"
+    )
   }
 }
