@@ -3,15 +3,16 @@ package com.example.model
 import java.util.UUID
 
 enum class FinishReason(val code: String, val displayName: String) {
-  USER_STOP("USER_STOP", "Finalização manual"),
-  SENSOR_DECELERATION("SENSOR_DECELERATION", "Desaceleração detectada no eixo Z"),
-  GPS_DECELERATION("GPS_DECELERATION", "Queda confirmada pelo GPS"),
-  TIMEOUT("TIMEOUT", "Tempo de passagem excessivo (> 25s)"),
+  USER_STOP("USER_STOP", "Teste encerrado manualmente"),
+  SENSOR_DECELERATION("SENSOR_DECELERATION", "Fim da aceleração confirmado"),
+  GPS_DECELERATION("GPS_DECELERATION", "Desaceleração confirmada pelo GPS"),
+  GPS_LOST("GPS_LOST", "Sinal GPS perdido"),
+  TIMEOUT("TIMEOUT", "Tempo máximo atingido"),
   CANCELLED("CANCELLED", "Passagem cancelada");
 
   companion object {
     fun fromCode(code: String): FinishReason {
-      return entries.firstOrNull { it.code == code } ?: SENSOR_DECELERATION
+      return entries.firstOrNull { it.code == code } ?: GPS_DECELERATION
     }
   }
 }

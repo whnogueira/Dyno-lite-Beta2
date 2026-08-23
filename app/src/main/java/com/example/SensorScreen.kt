@@ -107,8 +107,12 @@ import kotlinx.coroutines.launch
 enum class DynoRunState {
   PARADO,
   AGUARDANDO_INICIO,
+  MEDINDO_PROTEGIDO,
   MEDINDO,
-  FINALIZADO
+  SUSPEITA_DESACELERACAO,
+  FINALIZANDO,
+  FINALIZADO,
+  CANCELADO
 }
 
 data class PrepBufferSample(
@@ -2103,7 +2107,7 @@ private fun DynoRunCard(
         Icon(
           imageVector = when (runState) {
             DynoRunState.FINALIZADO -> Icons.Default.CheckCircle
-            DynoRunState.MEDINDO -> Icons.Default.Speed
+            DynoRunState.MEDINDO, DynoRunState.MEDINDO_PROTEGIDO, DynoRunState.SUSPEITA_DESACELERACAO, DynoRunState.FINALIZANDO -> Icons.Default.Speed
             else -> Icons.Outlined.Speed
           },
           contentDescription = null,
@@ -2113,9 +2117,9 @@ private fun DynoRunCard(
         Text(
           text = when (runState) {
             DynoRunState.FINALIZADO -> "PASSAGEM FINALIZADA"
-            DynoRunState.MEDINDO -> "TESTE EM ANDAMENTO"
+            DynoRunState.MEDINDO, DynoRunState.MEDINDO_PROTEGIDO, DynoRunState.SUSPEITA_DESACELERACAO, DynoRunState.FINALIZANDO -> "TESTE EM ANDAMENTO"
             DynoRunState.AGUARDANDO_INICIO -> "TESTE PREPARADO"
-            DynoRunState.PARADO -> "PASSAGEM DINAMOMÉTRICA"
+            DynoRunState.PARADO, DynoRunState.CANCELADO -> "PASSAGEM DINAMOMÉTRICA"
           },
           style = MaterialTheme.typography.labelLarge.copy(
             fontWeight = FontWeight.Bold,
@@ -2242,7 +2246,7 @@ private fun DynoRunCard(
       } else {
         // Controls and Clean Mode display based on state
         when (runState) {
-          DynoRunState.PARADO -> {
+          DynoRunState.PARADO, DynoRunState.CANCELADO -> {
             // Seleção de Gatilho de Início (40, 50 ou 60 km/h)
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
               Text(
@@ -2451,7 +2455,7 @@ private fun DynoRunCard(
               }
             }
           }
-          DynoRunState.MEDINDO -> {
+          DynoRunState.MEDINDO, DynoRunState.MEDINDO_PROTEGIDO, DynoRunState.SUSPEITA_DESACELERACAO, DynoRunState.FINALIZANDO -> {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
               Button(
                 onClick = onStop,

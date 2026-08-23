@@ -167,6 +167,30 @@ fun LockScreenOrientation(orientation: Int) {
   }
 }
 
+// Constantes centralizadas para detecção de desaceleração e qualidade da passagem
+object DynoConfig {
+  const val START_PROTECTION_MS = 3000L
+  const val ACCEL_DEAD_ZONE = 0.25f
+  const val DECEL_SUSPECT_THRESHOLD = -0.45f
+  const val DECEL_RECOVERY_THRESHOLD = -0.20f
+  const val DECEL_SUSTAIN_MS = 500L
+  const val CLUTCH_CONFIRM_MS = 700L
+  const val GPS_MIN_DROP_KMH = 2.5f
+  const val GPS_STRONG_DROP_KMH = 4.0f
+  const val MIN_VALID_DURATION_MS = 4000L
+  const val MIN_VALID_SAMPLES = 60
+  const val MIN_GPS_UPDATES = 4
+  const val MIN_SPEED_GAIN_KMH = 10.0f
+}
+
+data class GpsFixRecord(
+  val timestampMs: Long,
+  val speedKmh: Float,
+  val accuracyM: Float,
+  val elapsedRealtimeNs: Long,
+  val runElapsedSec: Float
+)
+
 /**
  * PAINEL HORIZONTAL PRINCIPAL DO TESTE DYNO LITE
  * Executa exclusivamente em orientação horizontal durante a preparação e a passagem.
@@ -325,8 +349,11 @@ fun TestPreparationScreen(
       var runEndTimeNs: Long = 0L
       var lastSensorTimestampNs: Long = 0L
       var lastSampleRecordedNs: Long = 0L
-      var decelerationStartNs: Long? = null
-      var gpsSpeedDropStartNs: Long? = null
+
+      var suspectStartTimeNs: Long? = null
+      var suspectNegativeSampleCount: Int = 0
+      var speedAtSuspectStartKmh: Float = 0f
+      var clutchStartTimeNs: Long? = null
 
       val zMedianBuffer = mutableListOf<Float>()
       var zFiltradoRun = 0f
@@ -347,7 +374,10 @@ fun TestPreparationScreen(
       var finishReason: FinishReason? = null
 
       var lastProcessedGpsTimestamp: Long = -1L
+      var lastProcessedGpsElapsedRealtimeNs: Long = 0L
       var validGpsUpdatesCount: Int = 0
+      val gpsHistory = mutableListOf<GpsFixRecord>()
+      val diagnosticLogs = mutableListOf<String>()
 
       var diffSum = 0.0
       var diffCount = 0
@@ -359,8 +389,10 @@ fun TestPreparationScreen(
         state = DynoRunState.PARADO
         zMedianBuffer.clear()
         zFiltradoRun = 0f
-        decelerationStartNs = null
-        gpsSpeedDropStartNs = null
+        suspectStartTimeNs = null
+        suspectNegativeSampleCount = 0
+        speedAtSuspectStartKmh = 0f
+        clutchStartTimeNs = null
         runStartTimeNs = 0L
         runEndTimeNs = 0L
         lastSensorTimestampNs = 0L
@@ -385,7 +417,10 @@ fun TestPreparationScreen(
         finishReason = null
 
         lastProcessedGpsTimestamp = -1L
+        lastProcessedGpsElapsedRealtimeNs = 0L
         validGpsUpdatesCount = 0
+        gpsHistory.clear()
+        diagnosticLogs.clear()
 
         diffSum = 0.0
         diffCount = 0
@@ -459,7 +494,7 @@ fun TestPreparationScreen(
   fun triggerOfficialRunStart(nowNs: Long, availableGpsKmh: Float) {
     val actualGpsSpeed = availableGpsKmh.coerceAtLeast(0f)
 
-    dynoTracker.state = DynoRunState.MEDINDO
+    dynoTracker.state = DynoRunState.MEDINDO_PROTEGIDO
     dynoTracker.runStartTimeNs = nowNs
     dynoTracker.lastSensorTimestampNs = nowNs
     dynoTracker.lastSampleRecordedNs = nowNs
@@ -471,8 +506,14 @@ fun TestPreparationScreen(
     dynoTracker.maxCalcSpeedMs = actualGpsSpeed / 3.6f
     dynoTracker.maxGpsKmh = actualGpsSpeed
 
-    dynoTracker.decelerationStartNs = null
-    dynoTracker.gpsSpeedDropStartNs = null
+    dynoTracker.suspectStartTimeNs = null
+    dynoTracker.suspectNegativeSampleCount = 0
+    dynoTracker.speedAtSuspectStartKmh = actualGpsSpeed
+    dynoTracker.clutchStartTimeNs = null
+    dynoTracker.gpsHistory.clear()
+    dynoTracker.diagnosticLogs.clear()
+    dynoTracker.diagnosticLogs.add("Início oficial da passagem: gatilho=${dynoTracker.startTriggerSpeedKmh} km/h, gpsInicial=$actualGpsSpeed km/h")
+
     dynoTracker.rejected = 0
     dynoTracker.total = 0
     dynoTracker.diffSum = 0.0
@@ -504,7 +545,12 @@ fun TestPreparationScreen(
 
   // Finalização e Salvamento Único da Passagem
   fun finalizeRun(reason: FinishReason) {
-    if (dynoTracker.state == DynoRunState.MEDINDO && !resultSaved) {
+    val isMeasuring = dynoTracker.state == DynoRunState.MEDINDO_PROTEGIDO ||
+      dynoTracker.state == DynoRunState.MEDINDO ||
+      dynoTracker.state == DynoRunState.SUSPEITA_DESACELERACAO ||
+      dynoTracker.state == DynoRunState.FINALIZANDO
+
+    if (isMeasuring && !resultSaved) {
       val nowNs = System.nanoTime()
       dynoTracker.runEndTimeNs = nowNs
       dynoTracker.finalGpsKmh = currentGpsSpeedKmh
@@ -513,18 +559,46 @@ fun TestPreparationScreen(
       dynoTracker.state = DynoRunState.FINALIZADO
       runState = DynoRunState.FINALIZADO
 
+      dynoTracker.diagnosticLogs.add("Finalizando teste: motivo=${reason.displayName}, tempo=${dynoTracker.elapsedSec}s, maxGps=${dynoTracker.maxGpsKmh} km/h, maxCalc=${dynoTracker.maxCalcSpeedKmh} km/h")
+
       val avgDiff = if (dynoTracker.diffCount > 0) (dynoTracker.diffSum / dynoTracker.diffCount).toFloat() else 0f
       val peakDiff = abs(dynoTracker.maxGpsKmh - dynoTracker.maxCalcSpeedKmh)
+      val finalSamples = dynoTracker.recordedSamples.take(500).toList()
+      val validCount = finalSamples.count { it.isValid }
+      val rejectedCount = finalSamples.count { !it.isValid }
       val rejectionRatio = if (dynoTracker.total > 0) dynoTracker.rejected.toFloat() / dynoTracker.total.toFloat() else 0f
+      val speedGainKmh = dynoTracker.maxGpsKmh - dynoTracker.startGpsKmh
+
       var invalidReasonText: String? = null
 
+      val isCompletePass = dynoTracker.elapsedSec >= (DynoConfig.MIN_VALID_DURATION_MS / 1000f) &&
+        validCount >= DynoConfig.MIN_VALID_SAMPLES &&
+        dynoTracker.validGpsUpdatesCount >= DynoConfig.MIN_GPS_UPDATES &&
+        speedGainKmh >= DynoConfig.MIN_SPEED_GAIN_KMH
+
       val runQualityStr = when {
+        reason == FinishReason.CANCELLED || (reason == FinishReason.USER_STOP && !isCompletePass) -> {
+          invalidReasonText = "Teste encerrado manualmente antes de atingir os critérios mínimos de validação."
+          "INVÁLIDA"
+        }
         reason == FinishReason.TIMEOUT -> {
           invalidReasonText = "Tempo de passagem excessivo (> 25s)."
           "INVÁLIDA"
         }
-        dynoTracker.elapsedSec < 1.5f -> {
-          invalidReasonText = "Duração muito curta (${String.format(Locale.US, "%.2f", dynoTracker.elapsedSec)}s) para registrar curva completa."
+        dynoTracker.elapsedSec < (DynoConfig.MIN_VALID_DURATION_MS / 1000f) -> {
+          invalidReasonText = "Duração insuficiente (${String.format(Locale.US, "%.2f", dynoTracker.elapsedSec)}s < 4.00s) para registrar curva de potência completa."
+          "INVÁLIDA"
+        }
+        speedGainKmh < DynoConfig.MIN_SPEED_GAIN_KMH -> {
+          invalidReasonText = "Ganho de velocidade GPS insuficiente (${String.format(Locale.US, "%.1f", speedGainKmh)} km/h < 10.0 km/h) após o gatilho."
+          "INVÁLIDA"
+        }
+        validCount < DynoConfig.MIN_VALID_SAMPLES -> {
+          invalidReasonText = "Quantidade insuficiente de amostras válidas ($validCount < ${DynoConfig.MIN_VALID_SAMPLES})."
+          "INVÁLIDA"
+        }
+        dynoTracker.validGpsUpdatesCount < DynoConfig.MIN_GPS_UPDATES -> {
+          invalidReasonText = "Poucas leituras de GPS válidas (${dynoTracker.validGpsUpdatesCount} < ${DynoConfig.MIN_GPS_UPDATES}) durante a medição."
           "INVÁLIDA"
         }
         gpsAccuracyM > 12f -> {
@@ -535,11 +609,7 @@ fun TestPreparationScreen(
           invalidReasonText = "Mais de 25% das amostras rejeitadas por vibração excessiva."
           "INVÁLIDA"
         }
-        dynoTracker.validGpsUpdatesCount < 2 -> {
-          invalidReasonText = "Poucas leituras de GPS válidas (< 2) durante a medição."
-          "INVÁLIDA"
-        }
-        peakDiff > 15.0f -> {
+        peakDiff > 16.0f -> {
           invalidReasonText = "Divergência entre velocidade máxima GPS (${String.format(Locale.US, "%.1f", dynoTracker.maxGpsKmh)} km/h) e calculada (${String.format(Locale.US, "%.1f", dynoTracker.maxCalcSpeedKmh)} km/h)."
           "INVÁLIDA"
         }
@@ -547,28 +617,23 @@ fun TestPreparationScreen(
           invalidReasonText = "Diferença média sincronizada entre GPS e acelerômetro elevada (±${String.format(Locale.US, "%.1f", avgDiff)} km/h)."
           "INVÁLIDA"
         }
-        dynoTracker.maxDiff > 20.0f -> {
-          invalidReasonText = "Pico de divergência momentânea excessivo (${String.format(Locale.US, "%.1f", dynoTracker.maxDiff)} km/h)."
-          "INVÁLIDA"
-        }
-        dynoTracker.maxGpsKmh < (dynoTracker.startTriggerSpeedKmh + 5f) -> {
-          invalidReasonText = "Velocidade máxima atingida insuficiente para teste de aceleração."
-          "INVÁLIDA"
-        }
-        avgDiff <= 6.0f && dynoTracker.maxDiff <= 12.0f && peakDiff <= 10.0f && dynoTracker.validGpsUpdatesCount >= 2 &&
-          gpsAccuracyM <= 6f && dynoTracker.elapsedSec in 2f..20f && rejectionRatio <= 0.10f &&
-          dynoTracker.maxGpsKmh >= (dynoTracker.startTriggerSpeedKmh + 10f) -> "BOA"
-        avgDiff <= 12.0f && dynoTracker.maxDiff <= 20.0f && peakDiff <= 15.0f && dynoTracker.validGpsUpdatesCount >= 2 &&
+        // Passagem BOA
+        avgDiff <= 6.0f && dynoTracker.maxDiff <= 12.0f && peakDiff <= 10.0f &&
+          dynoTracker.validGpsUpdatesCount >= DynoConfig.MIN_GPS_UPDATES &&
+          gpsAccuracyM <= 6f && dynoTracker.elapsedSec in 4f..20f && rejectionRatio <= 0.10f &&
+          speedGainKmh >= DynoConfig.MIN_SPEED_GAIN_KMH -> "BOA"
+
+        // Passagem REGULAR
+        avgDiff <= 12.0f && dynoTracker.maxDiff <= 20.0f && peakDiff <= 16.0f &&
+          dynoTracker.validGpsUpdatesCount >= DynoConfig.MIN_GPS_UPDATES &&
           gpsAccuracyM <= 10f && dynoTracker.elapsedSec <= 25f && rejectionRatio <= 0.25f -> "REGULAR"
+
         else -> {
           invalidReasonText = "Inconsistência na detecção inercial ou divergência de velocidade."
           "INVÁLIDA"
         }
       }
 
-      val finalSamples = dynoTracker.recordedSamples.take(500).toList()
-      val validCount = finalSamples.count { it.isValid }
-      val rejectedCount = finalSamples.count { !it.isValid }
       val avgHz = if (dynoTracker.elapsedSec > 0f) finalSamples.size / dynoTracker.elapsedSec else 0f
 
       val result = RunResult(
@@ -612,9 +677,14 @@ fun TestPreparationScreen(
           currentGpsSpeedKmh = speedKmh
           gpsAccuracyM = location.accuracy
 
-          val isNewGpsFix = (location.time != dynoTracker.lastProcessedGpsTimestamp)
+          val locationTime = location.time
+          val elapsedRealtimeNs = location.elapsedRealtimeNanos
+          val isNewGpsFix = (locationTime != dynoTracker.lastProcessedGpsTimestamp &&
+            (dynoTracker.lastProcessedGpsTimestamp == -1L || locationTime > dynoTracker.lastProcessedGpsTimestamp))
+
           if (isNewGpsFix) {
-            dynoTracker.lastProcessedGpsTimestamp = location.time
+            dynoTracker.lastProcessedGpsTimestamp = locationTime
+            dynoTracker.lastProcessedGpsElapsedRealtimeNs = elapsedRealtimeNs
           }
 
           if (dynoTracker.state == DynoRunState.AGUARDANDO_INICIO) {
@@ -632,14 +702,32 @@ fun TestPreparationScreen(
               val now = System.nanoTime()
               triggerOfficialRunStart(now, speedKmh)
             }
-          } else if (dynoTracker.state == DynoRunState.MEDINDO) {
+          } else if (dynoTracker.state == DynoRunState.MEDINDO_PROTEGIDO ||
+            dynoTracker.state == DynoRunState.MEDINDO ||
+            dynoTracker.state == DynoRunState.SUSPEITA_DESACELERACAO) {
+
             if (speedKmh > dynoTracker.maxGpsKmh) {
               dynoTracker.maxGpsKmh = speedKmh
             }
 
-            val isBeforeDeceleration = dynoTracker.decelerationStartNs == null && dynoTracker.gpsSpeedDropStartNs == null
-            if (isNewGpsFix && location.hasSpeed() && location.hasAccuracy() && location.accuracy <= 12f && isBeforeDeceleration) {
+            if (isNewGpsFix && location.hasSpeed() && location.hasAccuracy() && location.accuracy <= 12f) {
               dynoTracker.validGpsUpdatesCount++
+              dynoTracker.gpsHistory.add(
+                GpsFixRecord(
+                  timestampMs = locationTime,
+                  speedKmh = speedKmh,
+                  accuracyM = location.accuracy,
+                  elapsedRealtimeNs = elapsedRealtimeNs,
+                  runElapsedSec = dynoTracker.elapsedSec
+                )
+              )
+
+              // Suave sincronização da velocidade calculada quando o GPS tem alta precisão
+              if (location.accuracy <= 8.0f) {
+                val gpsMs = speedKmh / 3.6f
+                dynoTracker.velocityMs = dynoTracker.velocityMs * 0.94f + gpsMs * 0.06f
+              }
+
               val currentCalcKmh = dynoTracker.velocityMs * 3.6f
               val diff = abs(currentCalcKmh - speedKmh)
               dynoTracker.diffSum += diff
@@ -647,18 +735,68 @@ fun TestPreparationScreen(
               if (diff > dynoTracker.maxDiff) {
                 dynoTracker.maxDiff = diff
               }
-            }
 
-            // Detecção de Desaceleração pelo GPS
-            if (speedKmh <= (dynoTracker.maxGpsKmh - 2.0f) && dynoTracker.zFiltradoRun <= 0.0f) {
+              // CONFIRMAÇÃO DE FINALIZAÇÃO PELO GPS (apenas após o período protegido de 3 segundos)
               val nowNs = System.nanoTime()
-              if (dynoTracker.gpsSpeedDropStartNs == null) {
-                dynoTracker.gpsSpeedDropStartNs = nowNs
-              } else if (nowNs - dynoTracker.gpsSpeedDropStartNs!! >= 600_000_000L) {
-                finalizeRun(FinishReason.GPS_DECELERATION)
+              val runDurationMs = ((nowNs - dynoTracker.runStartTimeNs) / 1_000_000L)
+              if (runDurationMs >= DynoConfig.START_PROTECTION_MS) {
+                val history = dynoTracker.gpsHistory
+                val historySize = history.size
+
+                // CONDIÇÃO A:
+                // Pelo menos 2 atualizações GPS novas e consecutivas com velocidade decrescente
+                // Queda acumulada mínima de 2,5 km/h
+                // Intervalo mínimo de 600 ms
+                var conditionAMet = false
+                if (historySize >= 3) {
+                  val lastFix = history[historySize - 1]
+                  val prevFix = history[historySize - 2]
+                  val prevPrevFix = history[historySize - 3]
+
+                  val isConsecutiveDecreasing = (lastFix.speedKmh < prevFix.speedKmh) && (prevFix.speedKmh <= prevPrevFix.speedKmh)
+                  val dropFromPrevPrev = prevPrevFix.speedKmh - lastFix.speedKmh
+                  val timeIntervalMs = lastFix.timestampMs - prevPrevFix.timestampMs
+
+                  if (isConsecutiveDecreasing && dropFromPrevPrev >= DynoConfig.GPS_MIN_DROP_KMH && timeIntervalMs >= 600L) {
+                    conditionAMet = true
+                    dynoTracker.diagnosticLogs.add("Condição A satisfeita: queda=${dropFromPrevPrev}km/h em ${timeIntervalMs}ms")
+                  }
+                } else if (historySize == 2) {
+                  val lastFix = history[historySize - 1]
+                  val prevFix = history[historySize - 2]
+                  val drop = prevFix.speedKmh - lastFix.speedKmh
+                  val timeIntervalMs = lastFix.timestampMs - prevFix.timestampMs
+                  if (drop >= DynoConfig.GPS_MIN_DROP_KMH && timeIntervalMs >= 600L) {
+                    conditionAMet = true
+                    dynoTracker.diagnosticLogs.add("Condição A satisfeita (2 fixes): queda=${drop}km/h em ${timeIntervalMs}ms")
+                  }
+                }
+
+                // CONDIÇÃO B:
+                // Queda GPS de pelo menos 4 km/h em relação à maior velocidade recente, sem recuperação
+                var conditionBMet = false
+                val dropFromMax = dynoTracker.maxGpsKmh - speedKmh
+                if (dropFromMax >= DynoConfig.GPS_STRONG_DROP_KMH) {
+                  if (historySize >= 2) {
+                    val lastFix = history[historySize - 1]
+                    val prevFix = history[historySize - 2]
+                    if (lastFix.speedKmh <= prevFix.speedKmh + 0.5f) {
+                      conditionBMet = true
+                      dynoTracker.diagnosticLogs.add("Condição B satisfeita: queda=${dropFromMax}km/h de max (${dynoTracker.maxGpsKmh} -> $speedKmh)")
+                    }
+                  } else {
+                    conditionBMet = true
+                    dynoTracker.diagnosticLogs.add("Condição B satisfeita: queda=${dropFromMax}km/h de max")
+                  }
+                }
+
+                // Finalizar se confirmada e estamos em suspeita ou aceleração não positiva
+                if ((conditionAMet || conditionBMet) && (dynoTracker.state == DynoRunState.SUSPEITA_DESACELERACAO || dynoTracker.zFiltradoRun <= 0.05f)) {
+                  dynoTracker.state = DynoRunState.FINALIZANDO
+                  dynoTracker.diagnosticLogs.add("GPS confirmou desaceleração (CondA=$conditionAMet, CondB=$conditionBMet). Finalizando teste.")
+                  finalizeRun(FinishReason.GPS_DECELERATION)
+                }
               }
-            } else {
-              dynoTracker.gpsSpeedDropStartNs = null
             }
           }
         }
@@ -702,14 +840,19 @@ fun TestPreparationScreen(
                 val rawLinearZ = event.values[2]
                 val rawCorrigidoZ = (rawLinearZ - dynoTracker.offsetZ) * (if (dynoTracker.invertSignal) -1f else 1f)
 
+                // Filtro mediano (5 amostras) para eliminar picos de ruído impulsivo isolados
                 dynoTracker.zMedianBuffer.add(rawCorrigidoZ)
                 if (dynoTracker.zMedianBuffer.size > 5) {
                   dynoTracker.zMedianBuffer.removeAt(0)
                 }
                 val sortedZ = dynoTracker.zMedianBuffer.sorted()
                 val medianaZ = if (sortedZ.isNotEmpty()) sortedZ[sortedZ.size / 2] else 0f
-                dynoTracker.zFiltradoRun += 0.18f * (medianaZ - dynoTracker.zFiltradoRun)
-                val zRunFinal = if (abs(dynoTracker.zFiltradoRun) < 0.05f) 0f else dynoTracker.zFiltradoRun
+
+                // Filtro passa-baixas com constante de tempo ~350ms (alpha = 0.12 a ~50Hz)
+                dynoTracker.zFiltradoRun += 0.12f * (medianaZ - dynoTracker.zFiltradoRun)
+
+                // Zona morta no eixo longitudinal [-0.25, +0.25] m/s²
+                val zDeadZone = if (abs(dynoTracker.zFiltradoRun) <= DynoConfig.ACCEL_DEAD_ZONE) 0f else dynoTracker.zFiltradoRun
 
                 val nowNs = System.nanoTime()
 
@@ -719,7 +862,7 @@ fun TestPreparationScreen(
                   val gMag = sqrt(gyroX * gyroX + gyroY * gyroY + gyroZ * gyroZ)
                   if (gMag > 3.2f) {
                     persistentMovementCount++
-                    if (persistentMovementCount >= 25) { // Movimento contínuo por mais de ~500ms
+                    if (persistentMovementCount >= 25) {
                       isCalibrated = false
                       hasPhoneMovedAfterCalib = true
                       persistentMovementCount = 0
@@ -734,7 +877,7 @@ fun TestPreparationScreen(
                   if (dynoTracker.armedLastNanoTime != 0L) {
                     val dt = (nowNs - dynoTracker.armedLastNanoTime) / 1_000_000_000f
                     if (dt > 0f && dt <= 0.1f) {
-                      dynoTracker.armedEstimatedSpeedMs = (dynoTracker.armedEstimatedSpeedMs + zRunFinal * dt).coerceAtLeast(0f)
+                      dynoTracker.armedEstimatedSpeedMs = (dynoTracker.armedEstimatedSpeedMs + zDeadZone * dt).coerceAtLeast(0f)
                       armedEstimatedSpeedKmh = dynoTracker.armedEstimatedSpeedMs * 3.6f
                     }
                   }
@@ -747,11 +890,22 @@ fun TestPreparationScreen(
                   } else if (estKmh >= targetTrigger && currentGpsSpeedKmh >= (targetTrigger - 5.0f) && gpsAccuracyM <= 12.0f && isCalibrated) {
                     triggerOfficialRunStart(nowNs, currentGpsSpeedKmh)
                   }
-                } else if (dynoTracker.state == DynoRunState.MEDINDO) {
+                } else if (dynoTracker.state == DynoRunState.MEDINDO_PROTEGIDO ||
+                  dynoTracker.state == DynoRunState.MEDINDO ||
+                  dynoTracker.state == DynoRunState.SUSPEITA_DESACELERACAO) {
+
+                  val runDurationMs = (nowNs - dynoTracker.runStartTimeNs) / 1_000_000L
+                  val elapsedSec = runDurationMs / 1000f
+                  dynoTracker.elapsedSec = elapsedSec
+                  runElapsedSeconds = elapsedSec
+
+                  // Integração da velocidade
                   if (dynoTracker.lastSensorTimestampNs != 0L) {
                     val dt = (nowNs - dynoTracker.lastSensorTimestampNs) / 1_000_000_000f
                     if (dt > 0f && dt <= 0.1f) {
-                      dynoTracker.velocityMs = (dynoTracker.velocityMs + zRunFinal * dt).coerceAtLeast(0f)
+                      if (zDeadZone != 0f) {
+                        dynoTracker.velocityMs = (dynoTracker.velocityMs + zDeadZone * dt).coerceAtLeast(0f)
+                      }
                       val currentCalcKmh = dynoTracker.velocityMs * 3.6f
                       runVelocityMs = dynoTracker.velocityMs
 
@@ -759,8 +913,6 @@ fun TestPreparationScreen(
                         dynoTracker.maxCalcSpeedKmh = currentCalcKmh
                         dynoTracker.maxCalcSpeedMs = dynoTracker.velocityMs
                       }
-                      dynoTracker.elapsedSec = (nowNs - dynoTracker.runStartTimeNs) / 1_000_000_000f
-                      runElapsedSeconds = dynoTracker.elapsedSec
                     }
                   }
                   dynoTracker.lastSensorTimestampNs = nowNs
@@ -777,9 +929,9 @@ fun TestPreparationScreen(
                     dynoTracker.rejected++
                   }
 
+                  // Gravação de amostras para o gráfico dinamométrico (~20 Hz)
                   if (nowNs - dynoTracker.lastSampleRecordedNs >= 50_000_000L && dynoTracker.recordedSamples.size < 500) {
                     dynoTracker.lastSampleRecordedNs = nowNs
-                    val elapsedMs = ((nowNs - dynoTracker.runStartTimeNs) / 1_000_000L).coerceAtLeast(0L)
                     val currentCalcKmh = dynoTracker.velocityMs * 3.6f
                     val diff = abs(currentCalcKmh - currentGpsSpeedKmh)
 
@@ -792,8 +944,8 @@ fun TestPreparationScreen(
                     } else null
 
                     val samplePoint = RunSample(
-                      elapsedTimeMs = elapsedMs,
-                      filteredAccelerationZ = zRunFinal,
+                      elapsedTimeMs = runDurationMs,
+                      filteredAccelerationZ = dynoTracker.zFiltradoRun,
                       correctedAccelerationZ = rawCorrigidoZ,
                       gpsSpeedKmh = currentGpsSpeedKmh,
                       calculatedSpeedKmh = currentCalcKmh,
@@ -806,18 +958,67 @@ fun TestPreparationScreen(
                     dynoTracker.recordedSamples.add(samplePoint)
                   }
 
-                  // Detecção de desaceleração pelos sensores
-                  if (zRunFinal < -0.15f) {
-                    if (dynoTracker.decelerationStartNs == null) {
-                      dynoTracker.decelerationStartNs = nowNs
-                    } else if (nowNs - dynoTracker.decelerationStartNs!! >= 600_000_000L) {
-                      finalizeRun(FinishReason.SENSOR_DECELERATION)
+                  // 2. PERÍODO DE PROTEÇÃO DE INÍCIO (3 SEGUNDOS):
+                  // Durante esses 3 segundos: não finalizar automaticamente por aceleração negativa;
+                  // não interpretar vibração como embreagem; não interpretar balanço como desaceleração.
+                  if (runDurationMs < DynoConfig.START_PROTECTION_MS) {
+                    if (dynoTracker.state != DynoRunState.MEDINDO_PROTEGIDO) {
+                      dynoTracker.state = DynoRunState.MEDINDO_PROTEGIDO
                     }
+                    dynoTracker.suspectStartTimeNs = null
+                    dynoTracker.suspectNegativeSampleCount = 0
+                    dynoTracker.clutchStartTimeNs = null
                   } else {
-                    dynoTracker.decelerationStartNs = null
+                    // Transição normal para MEDINDO após os 3s de proteção
+                    if (dynoTracker.state == DynoRunState.MEDINDO_PROTEGIDO) {
+                      dynoTracker.state = DynoRunState.MEDINDO
+                      dynoTracker.diagnosticLogs.add("Período de proteção (3s) concluído. Estado: MEDINDO")
+                    }
+
+                    // 4. SUSPEITA DE DESACELERAÇÃO
+                    // O acelerômetro sozinho NUNCA finaliza a passagem.
+                    if (dynoTracker.state == DynoRunState.MEDINDO) {
+                      if (zDeadZone < DynoConfig.DECEL_SUSPECT_THRESHOLD) {
+                        dynoTracker.suspectNegativeSampleCount++
+                        if (dynoTracker.suspectStartTimeNs == null) {
+                          dynoTracker.suspectStartTimeNs = nowNs
+                          dynoTracker.speedAtSuspectStartKmh = currentGpsSpeedKmh
+                        } else {
+                          val suspectMs = (nowNs - dynoTracker.suspectStartTimeNs!!) / 1_000_000L
+                          if (suspectMs >= DynoConfig.DECEL_SUSTAIN_MS && dynoTracker.suspectNegativeSampleCount >= 15) {
+                            dynoTracker.state = DynoRunState.SUSPEITA_DESACELERACAO
+                            dynoTracker.diagnosticLogs.add("SUSPEITA DE DESACELERAÇÃO: z=${dynoTracker.zFiltradoRun}, amostras=${dynoTracker.suspectNegativeSampleCount}, dur=${suspectMs}ms")
+                          }
+                        }
+                      } else if (zDeadZone > DynoConfig.DECEL_RECOVERY_THRESHOLD) {
+                        // Aceleração recuperada: reseta contadores de suspeita
+                        dynoTracker.suspectStartTimeNs = null
+                        dynoTracker.suspectNegativeSampleCount = 0
+                      }
+                    } else if (dynoTracker.state == DynoRunState.SUSPEITA_DESACELERACAO) {
+                      // Se a aceleração voltar a subir acima do limiar de recuperação: cancela suspeita
+                      if (zDeadZone > DynoConfig.DECEL_RECOVERY_THRESHOLD) {
+                        dynoTracker.state = DynoRunState.MEDINDO
+                        dynoTracker.suspectStartTimeNs = null
+                        dynoTracker.suspectNegativeSampleCount = 0
+                        dynoTracker.diagnosticLogs.add("Recuperação da aceleração (z=${dynoTracker.zFiltradoRun} > ${DynoConfig.DECEL_RECOVERY_THRESHOLD}). Retornando para MEDINDO.")
+                      }
+                    }
                   }
 
+                  // Detecção de Embreagem (não finaliza sozinho sem confirmação GPS)
+                  val wasAccelerating = dynoTracker.maxGpsKmh >= (dynoTracker.startGpsKmh + 3.0f)
+                  if (wasAccelerating && zDeadZone < DynoConfig.DECEL_SUSPECT_THRESHOLD && currentGpsSpeedKmh <= dynoTracker.maxGpsKmh) {
+                    if (dynoTracker.clutchStartTimeNs == null) {
+                      dynoTracker.clutchStartTimeNs = nowNs
+                    }
+                  } else if (currentGpsSpeedKmh > dynoTracker.maxGpsKmh) {
+                    dynoTracker.clutchStartTimeNs = null
+                  }
+
+                  // Timeout de segurança após 25 segundos
                   if (dynoTracker.elapsedSec > 25.0f) {
+                    dynoTracker.diagnosticLogs.add("Timeout de segurança de 25s atingido.")
                     finalizeRun(FinishReason.TIMEOUT)
                   }
                 }
