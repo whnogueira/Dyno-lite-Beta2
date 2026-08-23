@@ -139,6 +139,34 @@ import kotlin.math.sqrt
 import kotlinx.coroutines.delay
 
 /**
+ * Gerenciador centralizado de bloqueio de orientação de tela.
+ * Bloqueia a orientação enquanto estiver no Composable e restaura ao sair.
+ */
+@Composable
+fun LockScreenOrientation(orientation: Int) {
+  val context = LocalContext.current
+  val activity = remember(context) {
+    generateSequence(context) { current ->
+      (current as? ContextWrapper)?.baseContext
+    }.filterIsInstance<Activity>().firstOrNull()
+  }
+
+  DisposableEffect(activity, orientation) {
+    val previousOrientation = activity?.requestedOrientation
+
+    activity?.requestedOrientation = orientation
+
+    onDispose {
+      if (previousOrientation != null) {
+        activity.requestedOrientation = previousOrientation
+      } else {
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+      }
+    }
+  }
+}
+
+/**
  * PAINEL HORIZONTAL PRINCIPAL DO TESTE DYNO LITE
  * Executa exclusivamente em orientação horizontal durante a preparação e a passagem.
  */
@@ -153,20 +181,18 @@ fun TestPreparationScreen(
   onNavigateBack: () -> Unit,
   modifier: Modifier = Modifier
 ) {
+  // 1. BLOQUEIO CENTRALIZADO DE ORIENTAÇÃO HORIZONTAL
+  LockScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE)
+
   val context = LocalContext.current
   val activity = remember(context) {
-    var ctx = context
-    while (ctx is ContextWrapper) {
-      if (ctx is Activity) return@remember ctx
-      ctx = ctx.baseContext
-    }
-    null
+    generateSequence(context) { current ->
+      (current as? ContextWrapper)?.baseContext
+    }.filterIsInstance<Activity>().firstOrNull()
   }
 
-  // 1. ORIENTAÇÃO E COMPORTAMENTO DE TELA HORIZONTAL IMERSIVA
+  // 2. MODO IMERSIVO E MANTER TELA ACESA (SEM MANIPULAR ORIENTAÇÃO)
   DisposableEffect(activity) {
-    val originalOrientation = activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-    activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
     activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
     val window = activity?.window
@@ -175,7 +201,6 @@ fun TestPreparationScreen(
     insetsController?.hide(WindowInsetsCompat.Type.navigationBars())
 
     onDispose {
-      activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
       activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
       insetsController?.show(WindowInsetsCompat.Type.navigationBars())
     }

@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -90,9 +91,9 @@ fun DynoLiteApp() {
   }
 
   var vehicles by remember { mutableStateOf(repository.getVehicles()) }
-  var currentDestination by remember { mutableStateOf(AppDestination.MAIN_TABS) }
-  var previousDestination by remember { mutableStateOf<AppDestination?>(null) }
-  var selectedTabIndex by remember { mutableIntStateOf(0) }
+  var currentDestination by rememberSaveable { mutableStateOf(AppDestination.MAIN_TABS) }
+  var previousDestination by rememberSaveable { mutableStateOf<AppDestination?>(null) }
+  var selectedTabIndex by rememberSaveable { mutableIntStateOf(0) }
   var vehicleToEdit by remember { mutableStateOf<VehicleProfile?>(null) }
   var activeTestVehicle by remember { mutableStateOf<VehicleProfile?>(null) }
 
