@@ -184,10 +184,10 @@ fun SettingsScreen(
           color = MaterialTheme.colorScheme.primary
         )
 
-        // 3. Diagnóstico de sensores
+        // 3. Diagnóstico avançado
         SettingsItemCard(
-          title = "Diagnóstico de sensores",
-          subtitle = "Acelerômetro bruto, eixos X/Y/Z, calibração de zero, giroscópio, GPS e passagem experimental.",
+          title = "Diagnóstico avançado",
+          subtitle = "Acelerômetro bruto, eixos X/Y/Z, calibração manual, giroscópio, GPS e passagem experimental.",
           icon = Icons.Outlined.Sensors,
           onClick = onNavigateToSensorDiagnostic,
           testTag = "card_sensor_diagnostic"

@@ -92,6 +92,7 @@ fun DynoLiteApp() {
   var previousDestination by remember { mutableStateOf<AppDestination?>(null) }
   var selectedTabIndex by remember { mutableIntStateOf(0) }
   var vehicleToEdit by remember { mutableStateOf<VehicleProfile?>(null) }
+  var activeTestVehicle by remember { mutableStateOf<VehicleProfile?>(null) }
 
   // Onboarding presentation dialog state for version 0.16.0
   var showOnboardingDialog by remember {
@@ -283,6 +284,7 @@ fun DynoLiteApp() {
               onNavigateToGarage = { selectedTabIndex = 1 },
               onNavigateToTestPrep = {
                 if (primaryVehicle != null) {
+                  activeTestVehicle = primaryVehicle
                   currentDestination = AppDestination.TEST_PREPARATION
                 } else {
                   vehicleToEdit = null
@@ -305,6 +307,10 @@ fun DynoLiteApp() {
                 vehicleToEdit = veh
                 currentDestination = AppDestination.VEHICLE_WIZARD
               },
+              onDuplicateVehicle = { id ->
+                repository.duplicateVehicle(id)
+                vehicles = repository.getVehicles()
+              },
               onSetPrimaryVehicle = { id ->
                 repository.setPrimaryVehicle(id)
                 vehicles = repository.getVehicles()
@@ -312,11 +318,19 @@ fun DynoLiteApp() {
               onDeleteVehicle = { id ->
                 repository.deleteVehicle(id)
                 vehicles = repository.getVehicles()
+              },
+              onTestVehicle = { veh ->
+                activeTestVehicle = veh
+                currentDestination = AppDestination.TEST_PREPARATION
+              },
+              onNavigateToHome = {
+                selectedTabIndex = 0
               }
             )
             2 -> ResultsScreen(
               onStartNewTest = {
                 if (primaryVehicle != null) {
+                  activeTestVehicle = primaryVehicle
                   currentDestination = AppDestination.TEST_PREPARATION
                 } else {
                   vehicleToEdit = null
@@ -330,33 +344,57 @@ fun DynoLiteApp() {
     }
 
     AppDestination.VEHICLE_WIZARD -> {
+      val isComingFromPrep = activeTestVehicle != null || previousDestination == AppDestination.TEST_PREPARATION
       VehicleWizardScreen(
         existingVehicle = vehicleToEdit,
         onSaveVehicle = { savedVeh ->
           repository.saveVehicle(savedVeh)
           vehicles = repository.getVehicles()
-          currentDestination = AppDestination.MAIN_TABS
-          selectedTabIndex = 1
+          if (isComingFromPrep) {
+            activeTestVehicle = savedVeh
+            currentDestination = AppDestination.TEST_PREPARATION
+          } else {
+            currentDestination = AppDestination.MAIN_TABS
+            selectedTabIndex = 1
+          }
         },
         onCancel = {
-          currentDestination = AppDestination.MAIN_TABS
+          if (isComingFromPrep) {
+            currentDestination = AppDestination.TEST_PREPARATION
+          } else {
+            currentDestination = AppDestination.MAIN_TABS
+          }
         }
       )
     }
 
     AppDestination.TEST_PREPARATION -> {
-      val veh = primaryVehicle ?: vehicles.firstOrNull()
+      val veh = activeTestVehicle ?: primaryVehicle ?: vehicles.firstOrNull()
       if (veh != null) {
         TestPreparationScreen(
           vehicle = veh,
-          onProceedToSensorScreen = {
-            currentDestination = AppDestination.SENSORS
+          onNavigateToResults = {
+            activeTestVehicle = null
+            currentDestination = AppDestination.MAIN_TABS
+            selectedTabIndex = 2
+          },
+          onNavigateToHome = {
+            activeTestVehicle = null
+            currentDestination = AppDestination.MAIN_TABS
+            selectedTabIndex = 0
+          },
+          onSwitchVehicle = {
+            activeTestVehicle = null
+            currentDestination = AppDestination.MAIN_TABS
+            selectedTabIndex = 1
           },
           onEditVehicle = {
             vehicleToEdit = veh
+            previousDestination = AppDestination.TEST_PREPARATION
             currentDestination = AppDestination.VEHICLE_WIZARD
           },
           onNavigateBack = {
+            activeTestVehicle = null
             currentDestination = AppDestination.MAIN_TABS
           }
         )

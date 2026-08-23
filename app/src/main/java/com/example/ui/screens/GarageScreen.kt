@@ -20,8 +20,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -37,6 +38,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -50,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.VehicleDatabase
@@ -65,6 +68,8 @@ fun GarageScreen(
   onDuplicateVehicle: (String) -> Unit = {},
   onSetPrimaryVehicle: (String) -> Unit,
   onDeleteVehicle: (String) -> Unit,
+  onTestVehicle: (VehicleProfile) -> Unit = {},
+  onNavigateToHome: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   var vehicleToDelete by remember { mutableStateOf<VehicleProfile?>(null) }
@@ -187,6 +192,36 @@ fun GarageScreen(
             }
           }
         }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        OutlinedButton(
+          onClick = onNavigateToHome,
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .testTag("btn_back_to_home_from_garage_empty"),
+          shape = RoundedCornerShape(12.dp),
+          colors = ButtonDefaults.outlinedButtonColors(
+            contentColor = MaterialTheme.colorScheme.onSurface
+          ),
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        ) {
+          Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp)
+          )
+          Spacer(modifier = Modifier.width(8.dp))
+          Text(
+            text = "VOLTAR AO INÍCIO",
+            style = MaterialTheme.typography.labelLarge.copy(
+              fontWeight = FontWeight.SemiBold,
+              fontSize = 13.5.sp,
+              letterSpacing = 0.5.sp
+            )
+          )
+        }
       } else {
         LazyColumn(
           modifier = Modifier.fillMaxSize(),
@@ -196,11 +231,45 @@ fun GarageScreen(
           items(vehicles, key = { it.id }) { vehicle ->
             VehicleGarageCard(
               vehicle = vehicle,
+              isOnlyVehicle = vehicles.size == 1,
+              onTestVehicle = { onTestVehicle(vehicle) },
               onSelectPrimary = { onSetPrimaryVehicle(vehicle.id) },
               onEdit = { onEditVehicle(vehicle) },
               onDuplicate = { onDuplicateVehicle(vehicle.id) },
               onDelete = { vehicleToDelete = vehicle }
             )
+          }
+
+          item {
+            Spacer(modifier = Modifier.height(6.dp))
+            OutlinedButton(
+              onClick = onNavigateToHome,
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .testTag("btn_back_to_home_from_garage"),
+              shape = RoundedCornerShape(12.dp),
+              colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = MaterialTheme.colorScheme.onSurface
+              ),
+              border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
+              )
+              Spacer(modifier = Modifier.width(8.dp))
+              Text(
+                text = "VOLTAR AO INÍCIO",
+                style = MaterialTheme.typography.labelLarge.copy(
+                  fontWeight = FontWeight.SemiBold,
+                  fontSize = 13.5.sp,
+                  letterSpacing = 0.5.sp
+                )
+              )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
           }
         }
       }
@@ -255,6 +324,8 @@ fun GarageScreen(
 @Composable
 private fun VehicleGarageCard(
   vehicle: VehicleProfile,
+  isOnlyVehicle: Boolean,
+  onTestVehicle: () -> Unit,
   onSelectPrimary: () -> Unit,
   onEdit: () -> Unit,
   onDuplicate: () -> Unit,
@@ -295,6 +366,8 @@ private fun VehicleGarageCard(
     "Dados parciais"
   }
 
+  val isEffectivelyPrimary = vehicle.isPrimary || isOnlyVehicle
+
   Card(
     modifier = modifier
       .fillMaxWidth()
@@ -302,14 +375,14 @@ private fun VehicleGarageCard(
       .clickable { onEdit() },
     shape = RoundedCornerShape(16.dp),
     colors = CardDefaults.cardColors(
-      containerColor = if (vehicle.isPrimary)
+      containerColor = if (isEffectivelyPrimary)
         MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
       else
         MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
     ),
     border = BorderStroke(
       1.dp,
-      if (vehicle.isPrimary)
+      if (isEffectivelyPrimary)
         MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
       else
         MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
@@ -366,7 +439,7 @@ private fun VehicleGarageCard(
             )
           }
 
-          if (vehicle.isPrimary) {
+          if (isEffectivelyPrimary) {
             Surface(
               shape = CircleShape,
               color = MaterialTheme.colorScheme.primaryContainer
@@ -401,12 +474,12 @@ private fun VehicleGarageCard(
         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
       )
 
-      // Specs summary
+      // Specs summary with proper wrapping and space allocation
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween
       ) {
-        Column {
+        Column(modifier = Modifier.weight(1f)) {
           Text(
             text = "Peso Total",
             style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
@@ -419,7 +492,7 @@ private fun VehicleGarageCard(
           )
         }
 
-        Column {
+        Column(modifier = Modifier.weight(1.3f)) {
           Text(
             text = "Pneu",
             style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
@@ -432,23 +505,25 @@ private fun VehicleGarageCard(
           )
         }
 
-        Column {
+        Column(modifier = Modifier.weight(1.4f)) {
           Text(
             text = "Câmbio",
             style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
           )
           Text(
-            text = transmissionLabel.take(12),
+            text = transmissionLabel,
             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
           )
         }
 
         if (vehicle.factoryPowerCv != null && vehicle.factoryPowerCv > 0f) {
-          Column {
+          Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
             Text(
-              text = "Potência Orig.",
+              text = "Potência",
               style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
               color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             )
@@ -466,13 +541,45 @@ private fun VehicleGarageCard(
         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
       )
 
-      // Action buttons
+      // Test Vehicle Action Button (Wide / Largo)
+      val actionButtonLabel = if (isEffectivelyPrimary) "TESTAR ESTE VEÍCULO" else "USAR NESTE TESTE"
+      val actionButtonTag = if (isEffectivelyPrimary) "btn_test_vehicle_${vehicle.id}" else "btn_use_in_test_${vehicle.id}"
+
+      Button(
+        onClick = onTestVehicle,
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(48.dp)
+          .testTag(actionButtonTag),
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(
+          containerColor = MaterialTheme.colorScheme.primary,
+          contentColor = MaterialTheme.colorScheme.onPrimary
+        )
+      ) {
+        Icon(
+          imageVector = Icons.Default.PlayArrow,
+          contentDescription = null,
+          modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+          text = actionButtonLabel,
+          style = MaterialTheme.typography.labelLarge.copy(
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.6.sp,
+            fontSize = 13.5.sp
+          )
+        )
+      }
+
+      // Secondary action buttons (Tornar principal, Duplicar, Editar, Excluir)
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        if (!vehicle.isPrimary) {
+        if (!isEffectivelyPrimary) {
           TextButton(
             onClick = onSelectPrimary,
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),

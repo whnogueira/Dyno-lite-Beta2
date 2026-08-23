@@ -1134,11 +1134,11 @@ fun SensorScreen(
         TopAppBar(
           title = {
             Text(
-              text = stringResource(R.string.title_sensors_test),
+              text = "DIAGNÓSTICO AVANÇADO",
               style = MaterialTheme.typography.titleLarge.copy(
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.5.sp,
-                fontSize = 20.sp,
+                fontSize = 18.sp,
               ),
               color = MaterialTheme.colorScheme.onSurface,
               modifier = Modifier.testTag("sensor_screen_title")
@@ -1182,6 +1182,34 @@ fun SensorScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
       ) {
+        // Warning Banner for Advanced Diagnostics
+        Surface(
+          shape = RoundedCornerShape(12.dp),
+          color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+          modifier = Modifier.fillMaxWidth().testTag("advanced_diagnostic_banner")
+        ) {
+          Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+          ) {
+            Icon(
+              imageVector = Icons.Outlined.Info,
+              contentDescription = null,
+              tint = MaterialTheme.colorScheme.primary,
+              modifier = Modifier.size(22.dp)
+            )
+            Text(
+              text = "Área destinada a testes e diagnóstico. As alterações podem afetar as medições.",
+              style = MaterialTheme.typography.bodySmall.copy(
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Medium
+              ),
+              color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+          }
+        }
         // 0. CHECKLIST ANTES DE COMEÇAR (v0.17.0)
         TestChecklistCard(
           vehicle = primaryVehicle,
