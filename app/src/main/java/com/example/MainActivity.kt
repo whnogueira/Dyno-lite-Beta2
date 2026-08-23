@@ -209,6 +209,8 @@ fun DynoLiteApp() {
                 vehicles = repository.getVehicles()
               },
               onTestVehicle = { veh ->
+                repository.setPrimaryVehicle(veh.id)
+                vehicles = repository.getVehicles()
                 activeTestVehicle = veh
                 currentDestination = AppDestination.TEST_PREPARATION
               },
@@ -217,9 +219,12 @@ fun DynoLiteApp() {
               }
             )
             2 -> ResultsScreen(
-              onStartNewTest = {
-                if (primaryVehicle != null) {
-                  activeTestVehicle = primaryVehicle
+              onStartNewTest = { vehicleId ->
+                val targetVeh = vehicleId?.let { id -> vehicles.find { it.id == id } }
+                  ?: primaryVehicle
+                  ?: vehicles.firstOrNull()
+                if (targetVeh != null) {
+                  activeTestVehicle = targetVeh
                   currentDestination = AppDestination.TEST_PREPARATION
                 } else {
                   vehicleToEdit = null
@@ -233,22 +238,17 @@ fun DynoLiteApp() {
     }
 
     AppDestination.VEHICLE_WIZARD -> {
-      val isComingFromPrep = activeTestVehicle != null || previousDestination == AppDestination.TEST_PREPARATION
       VehicleWizardScreen(
         existingVehicle = vehicleToEdit,
         onSaveVehicle = { savedVeh ->
           repository.saveVehicle(savedVeh)
+          repository.setPrimaryVehicle(savedVeh.id)
           vehicles = repository.getVehicles()
-          if (isComingFromPrep) {
-            activeTestVehicle = savedVeh
-            currentDestination = AppDestination.TEST_PREPARATION
-          } else {
-            currentDestination = AppDestination.MAIN_TABS
-            selectedTabIndex = 1
-          }
+          activeTestVehicle = savedVeh
+          currentDestination = AppDestination.TEST_PREPARATION
         },
         onCancel = {
-          if (isComingFromPrep) {
+          if (activeTestVehicle != null || previousDestination == AppDestination.TEST_PREPARATION) {
             currentDestination = AppDestination.TEST_PREPARATION
           } else {
             currentDestination = AppDestination.MAIN_TABS

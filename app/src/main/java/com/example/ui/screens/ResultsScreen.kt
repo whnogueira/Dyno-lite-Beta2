@@ -112,7 +112,7 @@ import kotlin.math.abs
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ResultsScreen(
-  onStartNewTest: () -> Unit,
+  onStartNewTest: (String?) -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
@@ -525,7 +525,7 @@ fun ResultsScreen(
 
             // 7. BOTÃO REPETIR QUANDO ESTIVER PARADO
             Button(
-              onClick = onStartNewTest,
+              onClick = { onStartNewTest(run.vehicleId) },
               modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp)
@@ -735,7 +735,7 @@ fun ResultsScreen(
 
             // 7. BOTÃO REPETIR TESTE
             Button(
-              onClick = onStartNewTest,
+              onClick = { onStartNewTest(run.vehicleId) },
               modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp)

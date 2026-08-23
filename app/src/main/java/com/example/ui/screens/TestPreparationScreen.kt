@@ -1,7 +1,10 @@
 package com.example.ui.screens
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -11,11 +14,10 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -23,79 +25,55 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DirectionsCar
-import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.LocationOn
-import androidx.compose.material.icons.outlined.PhoneAndroid
-import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Sensors
 import androidx.compose.material.icons.outlined.Speed
-import androidx.compose.material.icons.outlined.SwapHoriz
-import androidx.compose.material.icons.outlined.Timer
-import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -107,7 +85,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -117,9 +94,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.example.DynoRunState
 import com.example.PrepBufferSample
 import com.example.data.RunResultRepository
@@ -131,13 +112,12 @@ import com.example.model.VehicleCalculations
 import com.example.model.VehicleProfile
 import com.example.ui.components.DynoBadgeStatus
 import com.example.ui.components.DynoCard
-import com.example.ui.components.DynoDangerButton
-import com.example.ui.components.DynoPrimaryButton
-import com.example.ui.components.DynoSecondaryButton
-import com.example.ui.components.DynoSpeedometer
 import com.example.ui.components.DynoStatusBadge
+import com.example.ui.theme.DynoBackground
 import com.example.ui.theme.DynoBlueLight
 import com.example.ui.theme.DynoBluePrimary
+import com.example.ui.theme.DynoBorder
+import com.example.ui.theme.DynoBorderLight
 import com.example.ui.theme.DynoDivider
 import com.example.ui.theme.DynoErrorRed
 import com.example.ui.theme.DynoPowerCyan
@@ -158,6 +138,10 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlinx.coroutines.delay
 
+/**
+ * PAINEL HORIZONTAL PRINCIPAL DO TESTE DYNO LITE
+ * Executa exclusivamente em orientação horizontal durante a preparação e a passagem.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TestPreparationScreen(
@@ -170,6 +154,33 @@ fun TestPreparationScreen(
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
+  val activity = remember(context) {
+    var ctx = context
+    while (ctx is ContextWrapper) {
+      if (ctx is Activity) return@remember ctx
+      ctx = ctx.baseContext
+    }
+    null
+  }
+
+  // 1. ORIENTAÇÃO E COMPORTAMENTO DE TELA HORIZONTAL IMERSIVA
+  DisposableEffect(activity) {
+    val originalOrientation = activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+    activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+    val window = activity?.window
+    val insetsController = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
+    insetsController?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+    insetsController?.hide(WindowInsetsCompat.Type.navigationBars())
+
+    onDispose {
+      activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+      activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+      insetsController?.show(WindowInsetsCompat.Type.navigationBars())
+    }
+  }
+
   val prefs = remember(context) {
     context.getSharedPreferences("dyno_lite_prefs", Context.MODE_PRIVATE)
   }
@@ -182,9 +193,6 @@ fun TestPreparationScreen(
   }
   val runResultRepository = remember { RunResultRepository(context) }
 
-  val accelerometerSensor = remember(sensorManager) {
-    sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-  }
   val linearAccelerationSensor = remember(sensorManager) {
     sensorManager?.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
   }
@@ -192,7 +200,7 @@ fun TestPreparationScreen(
     sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
   }
 
-  // Raw and Filtered Sensors
+  // Sensores Brutos e Filtrados
   var linearX by remember { mutableFloatStateOf(0f) }
   var linearY by remember { mutableFloatStateOf(0f) }
   var linearZ by remember { mutableFloatStateOf(0f) }
@@ -200,7 +208,7 @@ fun TestPreparationScreen(
   var gyroY by remember { mutableFloatStateOf(0f) }
   var gyroZ by remember { mutableFloatStateOf(0f) }
 
-  // Calibration Offsets & Vehicle Vibration Baseline
+  // Offsets de Calibração e Ruído Normal
   var isCalibrated by remember {
     mutableStateOf(prefs.getBoolean("is_calibrated", false))
   }
@@ -213,9 +221,12 @@ fun TestPreparationScreen(
 
   var isCalibrating by remember { mutableStateOf(false) }
   var calibProgressPercent by remember { mutableIntStateOf(0) }
-  var calibrationStatusText by remember { mutableStateOf(if (isCalibrated) "Calibração concluída" else "Não calibrado") }
+  var hasPhoneMovedAfterCalib by remember { mutableStateOf(false) }
+  var calibrationStatusText by remember {
+    mutableStateOf(if (isCalibrated) "Calibração concluída" else "Não calibrado")
+  }
 
-  // Calibration Collector: Collects ~150 samples (~3s) with vehicle stopped & engine running
+  // Coletor de Calibração: Coleta 150 amostras (~3s) com veículo parado no suporte
   val calibCollector = remember {
     object {
       var isCollecting = false
@@ -242,22 +253,22 @@ fun TestPreparationScreen(
     }
   }
 
-  // Automatic Start Trigger Speed (40, 50 or 60 km/h)
+  // Velocidade de Gatilho de Início Automático (40, 50 ou 60 km/h)
   var startSpeedTriggerKmh by remember {
     mutableFloatStateOf(prefs.getFloat("start_speed_trigger_kmh", 40.0f))
   }
 
-  // Dyno Run State Machine
+  // Máquina de Estados da Passagem Dyno
   var runState by remember { mutableStateOf(DynoRunState.PARADO) }
   var currentGpsSpeedKmh by remember { mutableFloatStateOf(0f) }
   var armedEstimatedSpeedKmh by remember { mutableFloatStateOf(0f) }
   var runElapsedSeconds by remember { mutableFloatStateOf(0f) }
   var runVelocityMs by remember { mutableFloatStateOf(0f) }
   var resultSaved by remember { mutableStateOf(false) }
-  var runFinishReason by remember { mutableStateOf<FinishReason?>(null) }
   var showCancelConfirmDialog by remember { mutableStateOf(false) }
+  var showRecalibrateConfirmDialog by remember { mutableStateOf(false) }
 
-  // Tracker State & Circular Buffer & Time Series Recording
+  // Tracker e Amostragem
   val dynoTracker = remember {
     object {
       var state: DynoRunState = DynoRunState.PARADO
@@ -273,8 +284,6 @@ fun TestPreparationScreen(
 
       var armedEstimatedSpeedMs: Float = 0f
       var armedLastNanoTime: Long = 0L
-      val prepCircularBuffer = mutableListOf<PrepBufferSample>()
-      val maxPrepBufferSize = 180
 
       var runStartTimeNs: Long = 0L
       var runEndTimeNs: Long = 0L
@@ -323,7 +332,6 @@ fun TestPreparationScreen(
 
         armedEstimatedSpeedMs = 0f
         armedLastNanoTime = 0L
-        prepCircularBuffer.clear()
 
         startCalculatedKmh = startTriggerSpeedKmh
         startGpsKmh = 0f
@@ -361,7 +369,7 @@ fun TestPreparationScreen(
   dynoTracker.invertSignal = invertSignal
   dynoTracker.startTriggerSpeedKmh = startSpeedTriggerKmh
 
-  // Location / GPS Setup
+  // Permissões e Provedor GPS
   var hasLocationPermission by remember {
     mutableStateOf(
       ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
@@ -390,7 +398,7 @@ fun TestPreparationScreen(
   var hasGpsFix by remember { mutableStateOf(false) }
   var gpsAccuracyM by remember { mutableFloatStateOf(0.0f) }
 
-  // Vehicle Stopped Check (< 3 km/h for >= 2 seconds)
+  // Verificação de Veículo Parado (< 3 km/h estável)
   var isStoppedForTwoSeconds by remember { mutableStateOf(true) }
   var stoppedStartTimeMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
@@ -411,7 +419,7 @@ fun TestPreparationScreen(
     }
   }
 
-  // Official Start of Dyno Run using real GPS speed at the trigger instant
+  // Início Oficial da Passagem usando a velocidade GPS real no instante do gatilho
   fun triggerOfficialRunStart(nowNs: Long, availableGpsKmh: Float) {
     val actualGpsSpeed = availableGpsKmh.coerceAtLeast(0f)
 
@@ -437,7 +445,6 @@ fun TestPreparationScreen(
     dynoTracker.validGpsUpdatesCount = 1
     dynoTracker.finishReason = null
     dynoTracker.recordedSamples.clear()
-    dynoTracker.prepCircularBuffer.clear()
 
     val firstSample = RunSample(
       elapsedTimeMs = 0L,
@@ -456,21 +463,18 @@ fun TestPreparationScreen(
     runVelocityMs = actualGpsSpeed / 3.6f
     runElapsedSeconds = 0f
     resultSaved = false
-    runFinishReason = null
     runState = DynoRunState.MEDINDO
   }
 
-  // Function to finalize run and save automatically once, then navigate to results
+  // Finalização e Salvamento Único da Passagem
   fun finalizeRun(reason: FinishReason) {
-    if (dynoTracker.state == DynoRunState.MEDINDO) {
+    if (dynoTracker.state == DynoRunState.MEDINDO && !resultSaved) {
       val nowNs = System.nanoTime()
       dynoTracker.runEndTimeNs = nowNs
       dynoTracker.finalGpsKmh = currentGpsSpeedKmh
       dynoTracker.finalCalcSpeedKmh = dynoTracker.velocityMs * 3.6f
       dynoTracker.finishReason = reason
       dynoTracker.state = DynoRunState.FINALIZADO
-
-      runFinishReason = reason
       runState = DynoRunState.FINALIZADO
 
       val avgDiff = if (dynoTracker.diffCount > 0) (dynoTracker.diffSum / dynoTracker.diffCount).toFloat() else 0f
@@ -531,38 +535,36 @@ fun TestPreparationScreen(
       val rejectedCount = finalSamples.count { !it.isValid }
       val avgHz = if (dynoTracker.elapsedSec > 0f) finalSamples.size / dynoTracker.elapsedSec else 0f
 
-      if (!resultSaved) {
-        val result = RunResult(
-          vehicleId = vehicle.id,
-          vehicleName = "${vehicle.manufacturer} ${vehicle.model} ${vehicle.engine}".trim(),
-          runStartCalculatedSpeedKmh = dynoTracker.startCalculatedKmh,
-          runStartGpsSpeedKmh = dynoTracker.startGpsKmh,
-          maximumGpsSpeedKmh = dynoTracker.maxGpsKmh,
-          maximumCalculatedSpeedKmh = dynoTracker.maxCalcSpeedKmh,
-          finalGpsSpeedKmh = dynoTracker.finalGpsKmh,
-          finalCalculatedSpeedKmh = dynoTracker.finalCalcSpeedKmh,
-          elapsedSeconds = dynoTracker.elapsedSec,
-          gpsAccuracyMeters = gpsAccuracyM,
-          totalSamples = finalSamples.size,
-          rejectedSamples = rejectedCount,
-          validSamplesCount = validCount,
-          averageSamplingRateHz = avgHz,
-          quality = runQualityStr,
-          finishReason = reason.code,
-          averageSpeedDifferenceKmh = avgDiff,
-          maximumSpeedDifferenceKmh = dynoTracker.maxDiff,
-          invalidationReason = invalidReasonText,
-          appVersion = "0.19.1",
-          samples = finalSamples
-        )
-        runResultRepository.saveResult(result)
-        resultSaved = true
-        onNavigateToResults()
-      }
+      val result = RunResult(
+        vehicleId = vehicle.id,
+        vehicleName = "${vehicle.manufacturer} ${vehicle.model} ${vehicle.engine}".trim(),
+        runStartCalculatedSpeedKmh = dynoTracker.startCalculatedKmh,
+        runStartGpsSpeedKmh = dynoTracker.startGpsKmh,
+        maximumGpsSpeedKmh = dynoTracker.maxGpsKmh,
+        maximumCalculatedSpeedKmh = dynoTracker.maxCalcSpeedKmh,
+        finalGpsSpeedKmh = dynoTracker.finalGpsKmh,
+        finalCalculatedSpeedKmh = dynoTracker.finalCalcSpeedKmh,
+        elapsedSeconds = dynoTracker.elapsedSec,
+        gpsAccuracyMeters = gpsAccuracyM,
+        totalSamples = finalSamples.size,
+        rejectedSamples = rejectedCount,
+        validSamplesCount = validCount,
+        averageSamplingRateHz = avgHz,
+        quality = runQualityStr,
+        finishReason = reason.code,
+        averageSpeedDifferenceKmh = avgDiff,
+        maximumSpeedDifferenceKmh = dynoTracker.maxDiff,
+        invalidationReason = invalidReasonText,
+        appVersion = "0.19.1",
+        samples = finalSamples
+      )
+      runResultRepository.saveResult(result)
+      resultSaved = true
+      onNavigateToResults()
     }
   }
 
-  // Location Listener
+  // Listener GPS
   DisposableEffect(locationManager, hasLocationPermission) {
     if (locationManager != null && hasLocationPermission) {
       isGpsProviderEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
@@ -611,7 +613,7 @@ fun TestPreparationScreen(
               }
             }
 
-            // GPS Deceleration Detection
+            // Detecção de Desaceleração pelo GPS
             if (speedKmh <= (dynoTracker.maxGpsKmh - 2.0f) && dynoTracker.zFiltradoRun <= 0.0f) {
               val nowNs = System.nanoTime()
               if (dynoTracker.gpsSpeedDropStartNs == null) {
@@ -649,8 +651,8 @@ fun TestPreparationScreen(
     }
   }
 
-  // Sensor Listener
-  DisposableEffect(sensorManager, accelerometerSensor, linearAccelerationSensor, gyroscopeSensor) {
+  // Listener de Sensores (Acelerômetro Linear e Giroscópio)
+  DisposableEffect(sensorManager, linearAccelerationSensor, gyroscopeSensor) {
     if (sensorManager != null) {
       val listener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent?) {
@@ -674,6 +676,17 @@ fun TestPreparationScreen(
                 val zRunFinal = if (abs(dynoTracker.zFiltradoRun) < 0.05f) 0f else dynoTracker.zFiltradoRun
 
                 val nowNs = System.nanoTime()
+
+                // Detecção de alteração física da posição do celular no suporte (após calibrar)
+                if (isCalibrated && !isCalibrating && dynoTracker.state == DynoRunState.PARADO && currentGpsSpeedKmh < 3f) {
+                  val gMag = sqrt(gyroX * gyroX + gyroY * gyroY + gyroZ * gyroZ)
+                  if (gMag > 2.2f) {
+                    isCalibrated = false
+                    hasPhoneMovedAfterCalib = true
+                    calibrationStatusText = "O celular mudou de posição. Calibre novamente."
+                    prefs.edit().putBoolean("is_calibrated", false).apply()
+                  }
+                }
 
                 if (dynoTracker.state == DynoRunState.AGUARDANDO_INICIO) {
                   if (dynoTracker.armedLastNanoTime != 0L) {
@@ -751,7 +764,7 @@ fun TestPreparationScreen(
                     dynoTracker.recordedSamples.add(samplePoint)
                   }
 
-                  // Sensor deceleration detection
+                  // Detecção de desaceleração pelos sensores
                   if (zRunFinal < -0.15f) {
                     if (dynoTracker.decelerationStartNs == null) {
                       dynoTracker.decelerationStartNs = nowNs
@@ -767,7 +780,7 @@ fun TestPreparationScreen(
                   }
                 }
 
-                // Calibration Collection Logic
+                // Coleta de Calibração com Celular no Suporte
                 if (calibCollector.isCollecting) {
                   val currentCount = calibCollector.count
                   if (currentCount > 10) {
@@ -776,13 +789,13 @@ fun TestPreparationScreen(
                     val partialAvgZ = (calibCollector.sumZ / currentCount).toFloat()
                     val gyroMag = sqrt(gyroX * gyroX + gyroY * gyroY + gyroZ * gyroZ)
 
-                    if (abs(event.values[0] - partialAvgX) > 2.0f ||
-                      abs(event.values[1] - partialAvgY) > 2.0f ||
-                      abs(event.values[2] - partialAvgZ) > 2.0f ||
-                      gyroMag > 1.8f) {
+                    if (abs(event.values[0] - partialAvgX) > 2.2f ||
+                      abs(event.values[1] - partialAvgY) > 2.2f ||
+                      abs(event.values[2] - partialAvgZ) > 2.2f ||
+                      gyroMag > 2.0f) {
                       calibCollector.reset()
                       isCalibrating = false
-                      calibrationStatusText = "Calibração cancelada: aparelho se moveu"
+                      calibrationStatusText = "O aparelho se moveu durante a calibração"
                     }
                   }
 
@@ -805,7 +818,7 @@ fun TestPreparationScreen(
                     calibCollector.count++
                     val newCount = calibCollector.count
                     calibProgressPercent = (newCount * 100) / 150
-                    calibrationStatusText = "Calibrando… $calibProgressPercent%"
+                    calibrationStatusText = "CALIBRANDO $calibProgressPercent%"
 
                     if (newCount >= 150) {
                       val avgX = (calibCollector.sumX / 150.0).toFloat()
@@ -821,6 +834,7 @@ fun TestPreparationScreen(
                       calibratedNormalVibration = normVib
                       calibratedGyroDeviation = avgGyroDev
                       isCalibrated = true
+                      hasPhoneMovedAfterCalib = false
                       calibrationStatusText = "Calibração concluída"
                       isCalibrating = false
                       calibCollector.reset()
@@ -865,43 +879,103 @@ fun TestPreparationScreen(
     }
   }
 
-  // Internal Stability Evaluation (gyroscope + linear accel magnitude)
+  // Estabilidade do celular e prontidão GPS
   val currentGyroMag = sqrt(gyroX * gyroX + gyroY * gyroY + gyroZ * gyroZ)
-  val phoneStabilityState = when {
-    gyroscopeSensor == null || linearAccelerationSensor == null -> "pronto"
-    currentGyroMag > 0.65f -> "aguardando"
-    currentGyroMag > 0.25f -> "verificando"
-    else -> "pronto"
-  }
-
-  // GPS textual status
+  val isPhoneStable = currentGyroMag <= 0.65f
   val gpsStatusCategory = when {
     !hasLocationPermission -> "Permissão negada"
     !isGpsProviderEnabled -> "GPS desligado"
     !hasGpsFix -> "Aguardando GPS"
-    gpsAccuracyM <= 8.0f -> "GPS bom"
-    gpsAccuracyM <= 15.0f -> "GPS regular"
-    else -> "GPS fraco"
+    gpsAccuracyM <= 8.0f -> "GPS Bom"
+    gpsAccuracyM <= 15.0f -> "GPS Regular"
+    else -> "GPS Fraco"
   }
   val isGpsReady = hasLocationPermission && isGpsProviderEnabled && hasGpsFix && gpsAccuracyM <= 15.0f
-
   val isVehicleMoving = currentGpsSpeedKmh >= 3.0f
-  val isReadyToArm = isCalibrated && isGpsReady && isStoppedForTwoSeconds && !isVehicleMoving
 
-  // Hardware back handler
+  // Habilitação para Iniciar
+  val isReadyToArm = isCalibrated && isGpsReady && isStoppedForTwoSeconds && !isVehicleMoving && isPhoneStable && runState == DynoRunState.PARADO
+
+  // Motivo da desabilitação para exibir acima do botão INICIAR
+  val disabledReasonText: String? = when {
+    runState == DynoRunState.AGUARDANDO_INICIO -> "Acelere até ${startSpeedTriggerKmh.toInt()} km/h na marcha selecionada."
+    runState == DynoRunState.MEDINDO -> "Passagem em andamento — aceleração plena."
+    hasPhoneMovedAfterCalib -> "O celular mudou de posição. Calibre novamente."
+    !isCalibrated -> "Calibre o celular antes de iniciar."
+    isVehicleMoving -> "Aguarde o veículo parar (${String.format(Locale.US, "%.1f", currentGpsSpeedKmh)} km/h)."
+    !isGpsReady -> "Procurando sinal GPS..."
+    !isPhoneStable -> "Celular em movimento excessivo."
+    else -> null
+  }
+
+  // Estado grande para o topo do velocímetro
+  val (stateTitle, stateColor) = when {
+    runState == DynoRunState.MEDINDO -> Pair("MEDINDO", DynoSuccessGreen)
+    runState == DynoRunState.AGUARDANDO_INICIO -> Pair("TESTE ARMADO", DynoBlueLight)
+    isCalibrating -> Pair("CALIBRANDO", DynoPowerCyan)
+    hasPhoneMovedAfterCalib -> Pair("TESTE INVÁLIDO", DynoErrorRed)
+    isReadyToArm -> Pair("PRONTO", DynoSuccessGreen)
+    runState == DynoRunState.FINALIZADO -> Pair("FINALIZADO", DynoBlueLight)
+    else -> Pair("PREPARE O TESTE", DynoTextSecondary)
+  }
+
+  // Instrução única dinâmica para a área direita
+  val singleDynamicInstruction = when {
+    hasPhoneMovedAfterCalib -> "O celular mudou de posição. Calibre novamente."
+    !isCalibrated -> "Pare o veículo e calibre o celular no suporte."
+    isCalibrating -> "Mantenha o veículo parado com o celular no suporte."
+    runState == DynoRunState.PARADO -> "Tudo pronto. Toque em iniciar."
+    runState == DynoRunState.AGUARDANDO_INICIO -> {
+      if (currentGpsSpeedKmh >= startSpeedTriggerKmh - 8f) "Prepare-se."
+      else "Acelere na marcha selecionada até ${startSpeedTriggerKmh.toInt()} km/h."
+    }
+    runState == DynoRunState.MEDINDO -> "Mantenha a aceleração na mesma marcha."
+    runState == DynoRunState.FINALIZADO -> "Passagem finalizada. Salvando resultado."
+    else -> "Pare o veículo e calibre o celular no suporte."
+  }
+
+  val totalWeight = remember(vehicle) {
+    VehicleCalculations.calculateTotalWeight(
+      curbWeightKg = vehicle.curbWeightKg,
+      driverWeightKg = vehicle.driverWeightKg,
+      passengerWeightKg = vehicle.passengerWeightKg,
+      cargoWeightKg = vehicle.cargoWeightKg,
+      audioWeightKg = vehicle.audioWeightKg,
+      gnvWeightKg = vehicle.gnvWeightKg,
+      otherWeightKg = vehicle.otherWeightKg,
+      removedWeightKg = vehicle.removedWeightKg,
+      measuredTotalWeightKg = vehicle.measuredTotalWeightKg,
+      useMeasuredWeight = vehicle.useMeasuredWeight
+    )
+  }
+
+  // Interceptação do botão Voltar do sistema
   BackHandler {
     if (runState == DynoRunState.AGUARDANDO_INICIO || runState == DynoRunState.MEDINDO) {
       showCancelConfirmDialog = true
     } else {
-      onNavigateBack()
+      onNavigateHomeOrBack(onNavigateToHome, onNavigateBack)
     }
   }
 
+  // Diálogo de confirmação para cancelamento durante espera ou medição
   if (showCancelConfirmDialog) {
     AlertDialog(
       onDismissRequest = { showCancelConfirmDialog = false },
-      title = { Text("Cancelar teste?", fontWeight = FontWeight.Bold) },
-      text = { Text("O teste em andamento será cancelado e os dados temporários serão descartados.") },
+      title = {
+        Text(
+          text = "Deseja cancelar este teste?",
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+          color = DynoTextPrimary
+        )
+      },
+      text = {
+        Text(
+          text = "A medição em andamento será interrompida e nenhum resultado será gravado.",
+          style = MaterialTheme.typography.bodyMedium,
+          color = DynoTextSecondary
+        )
+      },
       confirmButton = {
         Button(
           onClick = {
@@ -910,220 +984,613 @@ fun TestPreparationScreen(
             runState = DynoRunState.PARADO
             onNavigateHomeOrBack(onNavigateToHome, onNavigateBack)
           },
-          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+          colors = ButtonDefaults.buttonColors(containerColor = DynoErrorRed),
+          shape = RoundedCornerShape(10.dp)
         ) {
-          Text("Sim, cancelar")
+          Text("CANCELAR TESTE", fontWeight = FontWeight.Bold, color = Color.White)
         }
       },
       dismissButton = {
-        TextButton(onClick = { showCancelConfirmDialog = false }) {
-          Text("Continuar no teste")
+        TextButton(
+          onClick = { showCancelConfirmDialog = false },
+          shape = RoundedCornerShape(10.dp)
+        ) {
+          Text("CONTINUAR TESTE", fontWeight = FontWeight.SemiBold, color = DynoBlueLight)
         }
-      }
+      },
+      containerColor = DynoSurfaceContainer,
+      shape = RoundedCornerShape(16.dp),
+      modifier = Modifier.testTag("dialog_cancel_test_confirm")
     )
   }
 
-  Scaffold(
-    modifier = modifier.fillMaxSize().testTag("test_preparation_screen"),
-    containerColor = MaterialTheme.colorScheme.background,
-    topBar = {
-      TopAppBar(
-        title = {
-          Column {
-            Text(
-              text = if (runState == DynoRunState.MEDINDO) "MEDIÇÃO EM ANDAMENTO"
-                     else if (runState == DynoRunState.AGUARDANDO_INICIO) "TESTE ARMADO"
-                     else "PREPARAR TESTE",
-              style = MaterialTheme.typography.titleMedium.copy(
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.5.sp,
-                fontSize = 18.sp
-              ),
-              color = MaterialTheme.colorScheme.onSurface
-            )
-            if (runState == DynoRunState.PARADO) {
+  // Diálogo para recalibrar
+  if (showRecalibrateConfirmDialog) {
+    AlertDialog(
+      onDismissRequest = { showRecalibrateConfirmDialog = false },
+      title = {
+        Text(
+          text = "Calibrar novamente?",
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+          color = DynoTextPrimary
+        )
+      },
+      text = {
+        Text(
+          text = "Deseja realizar uma nova leitura de vibração com o celular preso no suporte?",
+          style = MaterialTheme.typography.bodyMedium,
+          color = DynoTextSecondary
+        )
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            showRecalibrateConfirmDialog = false
+            if (!isVehicleMoving) {
+              calibCollector.reset()
+              calibCollector.isCollecting = true
+              isCalibrating = true
+              calibProgressPercent = 0
+              calibrationStatusText = "CALIBRANDO 0%"
+            }
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = DynoSuccessGreen),
+          shape = RoundedCornerShape(10.dp)
+        ) {
+          Text("CALIBRAR", fontWeight = FontWeight.Bold, color = DynoSurface)
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showRecalibrateConfirmDialog = false }) {
+          Text("VOLTAR", color = DynoTextSecondary)
+        }
+      },
+      containerColor = DynoSurfaceContainer,
+      shape = RoundedCornerShape(16.dp)
+    )
+  }
+
+  // ESTRUTURA PRINCIPAL DO PAINEL HORIZONTAL
+  Box(
+    modifier = modifier
+      .fillMaxSize()
+      .background(DynoBackground)
+      .safeDrawingPadding()
+      .testTag("test_preparation_screen")
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(horizontal = 14.dp, vertical = 8.dp),
+      verticalArrangement = Arrangement.SpaceBetween
+    ) {
+      // LINHA SUPERIOR: 3 ÁREAS PRINCIPAIS
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .weight(1f),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        // =========================================================================
+        // 1. ÁREA ESQUERDA: RESUMO DO VEÍCULO E GATILHO
+        // =========================================================================
+        Card(
+          modifier = Modifier
+            .weight(1.05f)
+            .fillMaxHeight(),
+          shape = RoundedCornerShape(14.dp),
+          colors = CardDefaults.cardColors(containerColor = DynoSurfaceContainer),
+          border = BorderStroke(1.dp, DynoBorder)
+        ) {
+          Column(
+            modifier = Modifier
+              .fillMaxSize()
+              .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+          ) {
+            // Identificação do Veículo
+            Column {
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+              ) {
+                Icon(
+                  imageVector = Icons.Default.DirectionsCar,
+                  contentDescription = null,
+                  tint = DynoBlueLight,
+                  modifier = Modifier.size(16.dp)
+                )
+                Text(
+                  text = "${vehicle.manufacturer} ${vehicle.model}",
+                  style = MaterialTheme.typography.titleSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                  ),
+                  color = DynoTextPrimary,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
+                )
+              }
+              val subInfo = listOfNotNull(
+                vehicle.engine.ifBlank { null },
+                vehicle.version.ifBlank { null }
+              ).joinToString(" • ")
+              if (subInfo.isNotEmpty()) {
+                Text(
+                  text = subInfo,
+                  style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                  color = DynoTextSecondary,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
+                )
+              }
+            }
+
+            HorizontalDivider(thickness = 0.6.dp, color = DynoDivider)
+
+            // Especificações Compactas
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              Column {
+                Text(
+                  text = "PESO TOTAL",
+                  style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.5.sp
+                  ),
+                  color = DynoTextSecondary
+                )
+                Text(
+                  text = String.format(Locale.US, "%.0f kg", totalWeight),
+                  style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                  ),
+                  color = DynoTextPrimary
+                )
+              }
+
+              Column {
+                Text(
+                  text = "PNEU",
+                  style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.5.sp
+                  ),
+                  color = DynoTextSecondary
+                )
+                Text(
+                  text = "${vehicle.tireWidthMm}/${vehicle.tireAspectRatio} R${vehicle.wheelDiameterInches}",
+                  style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.5.sp
+                  ),
+                  color = DynoTextPrimary
+                )
+              }
+
+              Column {
+                Text(
+                  text = "MARCHA",
+                  style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.5.sp
+                  ),
+                  color = DynoTextSecondary
+                )
+                Text(
+                  text = "2ª",
+                  style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                  ),
+                  color = DynoPowerCyan
+                )
+              }
+            }
+
+            HorizontalDivider(thickness = 0.6.dp, color = DynoDivider)
+
+            // Seletor de Velocidade de Início Automático [ 40 ] [ 50 ] [ 60 ] km/h
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
               Text(
-                text = "${vehicle.manufacturer} ${vehicle.model} ${vehicle.engine}".trim(),
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = "INÍCIO AUTOMÁTICO",
+                style = MaterialTheme.typography.labelSmall.copy(
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.Bold,
+                  letterSpacing = 0.5.sp
+                ),
+                color = DynoTextSecondary
+              )
+
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                listOf(40f, 50f, 60f).forEach { speed ->
+                  val isSelected = startSpeedTriggerKmh == speed
+                  val isSelectorEnabled = runState == DynoRunState.PARADO
+
+                  Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isSelected) DynoBluePrimary else DynoSurfaceElevated,
+                    border = BorderStroke(
+                      1.dp,
+                      if (isSelected) DynoBlueLight else DynoBorder
+                    ),
+                    modifier = Modifier
+                      .weight(1f)
+                      .height(34.dp)
+                      .testTag("btn_speed_trigger_${speed.toInt()}")
+                      .clickable(enabled = isSelectorEnabled) {
+                        startSpeedTriggerKmh = speed
+                        dynoTracker.startTriggerSpeedKmh = speed
+                        prefs.edit().putFloat("start_speed_trigger_kmh", speed).apply()
+                      }
+                  ) {
+                    Box(contentAlignment = Alignment.Center) {
+                      Text(
+                        text = "${speed.toInt()}",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                          fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                          fontSize = 12.5.sp
+                        ),
+                        color = if (isSelected) Color.White else DynoTextSecondary
+                      )
+                    }
+                  }
+                }
+
+                Text(
+                  text = "km/h",
+                  style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp
+                  ),
+                  color = DynoTextSecondary
+                )
+              }
+            }
+          }
+        }
+
+        // =========================================================================
+        // 2. ÁREA CENTRAL: VELOCÍMETRO SEMICIRCULAR GRANDE E ESTADO
+        // =========================================================================
+        Column(
+          modifier = Modifier
+            .weight(1.6f)
+            .fillMaxHeight(),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.SpaceBetween
+        ) {
+          // Estado Grande no Topo
+          Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = stateColor.copy(alpha = 0.16f),
+            border = BorderStroke(1.dp, stateColor.copy(alpha = 0.55f)),
+            modifier = Modifier.padding(top = 2.dp)
+          ) {
+            Text(
+              text = stateTitle,
+              style = MaterialTheme.typography.labelLarge.copy(
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.2.sp,
+                fontSize = 13.sp
+              ),
+              color = stateColor,
+              modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+          }
+
+          // Velocímetro Central Semicircular Grande
+          HorizontalDynoSpeedometer(
+            currentSpeedKmh = if (runState == DynoRunState.MEDINDO) runVelocityMs * 3.6f else currentGpsSpeedKmh,
+            targetTriggerSpeedKmh = startSpeedTriggerKmh,
+            isMeasuring = runState == DynoRunState.MEDINDO,
+            maxSpeedKmh = if (runState == DynoRunState.MEDINDO) max(dynoTracker.maxCalcSpeedKmh, runVelocityMs * 3.6f) else dynoTracker.maxGpsKmh,
+            modifier = Modifier.weight(1f, fill = false)
+          )
+
+          // Aviso / Motivo de bloqueio ou instrução do gatilho logo acima do botão central
+          if (disabledReasonText != null) {
+            Text(
+              text = disabledReasonText,
+              style = MaterialTheme.typography.bodySmall.copy(
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 11.5.sp
+              ),
+              color = if (hasPhoneMovedAfterCalib || isVehicleMoving) DynoErrorRed else DynoTextSecondary,
+              textAlign = TextAlign.Center,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+              modifier = Modifier.padding(bottom = 2.dp)
+            )
+          } else {
+            Spacer(modifier = Modifier.height(14.dp))
+          }
+        }
+
+        // =========================================================================
+        // 3. ÁREA DIREITA: QUALIDADE GPS, CALIBRAÇÃO, MÉTRICAS E INSTRUÇÃO
+        // =========================================================================
+        Card(
+          modifier = Modifier
+            .weight(1.05f)
+            .fillMaxHeight(),
+          shape = RoundedCornerShape(14.dp),
+          colors = CardDefaults.cardColors(containerColor = DynoSurfaceContainer),
+          border = BorderStroke(1.dp, DynoBorder)
+        ) {
+          Column(
+            modifier = Modifier
+              .fillMaxSize()
+              .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+          ) {
+            // Status do GPS e da Calibração
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.GpsFixed,
+                    contentDescription = null,
+                    tint = if (isGpsReady) DynoSuccessGreen else DynoWarningYellow,
+                    modifier = Modifier.size(15.dp)
+                  )
+                  Text(
+                    text = "GPS",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontWeight = FontWeight.Bold,
+                      fontSize = 11.sp
+                    ),
+                    color = DynoTextPrimary
+                  )
+                }
+                Text(
+                  text = if (isGpsReady) "$gpsStatusCategory (±${gpsAccuracyM.toInt()}m)" else gpsStatusCategory,
+                  style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 11.sp
+                  ),
+                  color = if (isGpsReady) DynoSuccessGreen else DynoWarningYellow
+                )
+              }
+
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.Tune,
+                    contentDescription = null,
+                    tint = if (isCalibrated) DynoSuccessGreen else DynoWarningYellow,
+                    modifier = Modifier.size(15.dp)
+                  )
+                  Text(
+                    text = "CALIBRAÇÃO",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontWeight = FontWeight.Bold,
+                      fontSize = 11.sp
+                    ),
+                    color = DynoTextPrimary
+                  )
+                }
+                Text(
+                  text = if (isCalibrated) "Calibrado ✓" else if (isCalibrating) "$calibProgressPercent%" else "Pendente",
+                  style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 11.sp
+                  ),
+                  color = if (isCalibrated) DynoSuccessGreen else if (isCalibrating) DynoPowerCyan else DynoWarningYellow
+                )
+              }
+            }
+
+            HorizontalDivider(thickness = 0.6.dp, color = DynoDivider)
+
+            // Métricas em Tempo Real da Passagem
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              Column {
+                Text(
+                  text = "TEMPO",
+                  style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.5.sp
+                  ),
+                  color = DynoTextSecondary
+                )
+                Text(
+                  text = String.format(Locale.US, "%.2f s", runElapsedSeconds),
+                  style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 13.5.sp
+                  ),
+                  color = DynoTextPrimary
+                )
+              }
+
+              Column(horizontalAlignment = Alignment.End) {
+                Text(
+                  text = "VEL. MÁXIMA",
+                  style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.5.sp
+                  ),
+                  color = DynoTextSecondary
+                )
+                val displayedMaxSpeed = if (runState == DynoRunState.MEDINDO) {
+                  max(dynoTracker.maxCalcSpeedKmh, runVelocityMs * 3.6f)
+                } else {
+                  dynoTracker.maxGpsKmh
+                }
+                Text(
+                  text = String.format(Locale.US, "%.1f km/h", displayedMaxSpeed),
+                  style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 13.5.sp
+                  ),
+                  color = DynoPowerCyan
+                )
+              }
+            }
+
+            HorizontalDivider(thickness = 0.6.dp, color = DynoDivider)
+
+            // Instrução Dinâmica Única
+            Surface(
+              shape = RoundedCornerShape(10.dp),
+              color = DynoSurfaceElevated,
+              border = BorderStroke(1.dp, DynoBorderLight),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+              ) {
+                Icon(
+                  imageVector = Icons.Outlined.Info,
+                  contentDescription = null,
+                  tint = DynoBlueLight,
+                  modifier = Modifier.size(16.dp)
+                )
+                Text(
+                  text = singleDynamicInstruction,
+                  style = MaterialTheme.typography.bodySmall.copy(
+                    fontSize = 11.sp,
+                    lineHeight = 14.sp,
+                    fontWeight = FontWeight.Medium
+                  ),
+                  color = DynoTextPrimary,
+                  maxLines = 2,
+                  overflow = TextOverflow.Ellipsis
+                )
+              }
+            }
+          }
+        }
+      }
+
+      Spacer(modifier = Modifier.height(8.dp))
+
+      // =========================================================================
+      // 4. TRÊS BOTÕES INFERIORES [ CALIBRAR ] [ INICIAR ] [ CANCELAR ]
+      // =========================================================================
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        // -------------------------------------------------------------
+        // 5.1 BOTÃO ESQUERDO — CALIBRAR
+        // -------------------------------------------------------------
+        val isCalibrateEnabled = !isCalibrating && (runState == DynoRunState.PARADO)
+
+        Surface(
+          shape = RoundedCornerShape(14.dp),
+          color = if (isCalibrated) DynoSuccessGreen else DynoSurfaceContainer,
+          border = BorderStroke(
+            1.5.dp,
+            if (isCalibrated) DynoSuccessGreen else if (isCalibrating) DynoPowerCyan else DynoSuccessGreen
+          ),
+          modifier = Modifier
+            .weight(1f)
+            .height(64.dp)
+            .testTag("btn_calibrate")
+            .clickable(enabled = isCalibrateEnabled) {
+              if (isCalibrated) {
+                showRecalibrateConfirmDialog = true
+              } else if (!isVehicleMoving) {
+                calibCollector.reset()
+                calibCollector.isCollecting = true
+                isCalibrating = true
+                calibProgressPercent = 0
+                calibrationStatusText = "CALIBRANDO 0%"
+              }
+            }
+        ) {
+          Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 8.dp)) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+              Icon(
+                imageVector = if (isCalibrated) Icons.Default.Check else Icons.Default.Tune,
+                contentDescription = null,
+                tint = if (isCalibrated) DynoSurface else DynoSuccessGreen,
+                modifier = Modifier.size(20.dp)
+              )
+              Text(
+                text = if (isCalibrating) "CALIBRANDO $calibProgressPercent%"
+                       else if (isCalibrated) "✓ CALIBRADO"
+                       else "CALIBRAR",
+                style = MaterialTheme.typography.labelLarge.copy(
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 14.sp,
+                  letterSpacing = 0.5.sp
+                ),
+                color = if (isCalibrated) DynoSurface else DynoSuccessGreen,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
               )
             }
           }
-        },
-        navigationIcon = {
-          IconButton(
-            onClick = {
-              if (runState != DynoRunState.PARADO) {
-                showCancelConfirmDialog = true
-              } else {
-                onNavigateBack()
-              }
-            },
-            modifier = Modifier.testTag("top_bar_back_prep")
-          ) {
-            Icon(
-              imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-              contentDescription = "Voltar"
-            )
-          }
-        },
-        actions = {
-          if (runState == DynoRunState.PARADO) {
-            TextButton(
-              onClick = onSwitchVehicle,
-              modifier = Modifier.testTag("btn_switch_vehicle_top")
-            ) {
-              Text(
-                text = "Trocar veículo",
-                style = MaterialTheme.typography.labelMedium.copy(
-                  fontWeight = FontWeight.SemiBold,
-                  fontSize = 12.sp
-                ),
-                color = MaterialTheme.colorScheme.primary
-              )
-            }
-          }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-          containerColor = MaterialTheme.colorScheme.background
-        )
-      )
-    }
-  ) { innerPadding ->
-    Box(
-      modifier = Modifier
-        .fillMaxSize()
-        .padding(innerPadding),
-      contentAlignment = Alignment.TopCenter
-    ) {
-      // -------------------------------------------------------------
-      // STATE 1: ARMED (AGUARDANDO_INICIO)
-      // -------------------------------------------------------------
-      if (runState == DynoRunState.AGUARDANDO_INICIO) {
-        ArmedDrivingHud(
-          currentSpeedKmh = currentGpsSpeedKmh,
-          targetTriggerSpeedKmh = startSpeedTriggerKmh,
-          gpsStatusText = gpsStatusCategory,
-          onCancel = {
-            dynoTracker.reset()
-            runState = DynoRunState.PARADO
-          }
-        )
-      }
-      // -------------------------------------------------------------
-      // STATE 2: MEASURING (MEDINDO)
-      // -------------------------------------------------------------
-      else if (runState == DynoRunState.MEDINDO) {
-        MeasuringHud(
-          currentSpeedKmh = runVelocityMs * 3.6f,
-          elapsedSeconds = runElapsedSeconds,
-          targetTriggerSpeedKmh = startSpeedTriggerKmh,
-          maxSpeedKmh = max(dynoTracker.maxCalcSpeedKmh, runVelocityMs * 3.6f),
-          onEmergencyStop = {
-            finalizeRun(FinishReason.USER_STOP)
-          }
-        )
-      }
-      // -------------------------------------------------------------
-      // STATE 0: CONFIGURING & PREPARATION (PARADO)
-      // -------------------------------------------------------------
-      else {
-        Column(
+        }
+
+        // -------------------------------------------------------------
+        // 5.2 BOTÃO CENTRAL — INICIAR (~20% MAIOR)
+        // -------------------------------------------------------------
+        val isStartButtonArmed = runState == DynoRunState.AGUARDANDO_INICIO
+        val isStartButtonMeasuring = runState == DynoRunState.MEDINDO
+        val isStartClickable = isReadyToArm && runState == DynoRunState.PARADO
+
+        val startBtnText = when {
+          isStartButtonMeasuring -> "MEDINDO"
+          isStartButtonArmed -> "ARMADO — ${startSpeedTriggerKmh.toInt()} KM/H"
+          else -> "INICIAR"
+        }
+
+        Surface(
+          shape = RoundedCornerShape(16.dp),
+          color = if (isStartClickable || isStartButtonArmed || isStartButtonMeasuring) Color(0xFFE53935)
+                  else Color(0xFF421516),
+          border = BorderStroke(
+            1.dp,
+            if (isStartClickable || isStartButtonArmed || isStartButtonMeasuring) Color(0xFFFF5252)
+            else Color(0xFF5C1B1A)
+          ),
           modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 12.dp)
-            .widthIn(max = 480.dp),
-          verticalArrangement = Arrangement.spacedBy(16.dp),
-          horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-          // 1. RESUMO DO VEÍCULO
-          VehicleSummaryCard(
-            vehicle = vehicle,
-            startSpeedTriggerKmh = startSpeedTriggerKmh,
-            onEditVehicle = onEditVehicle
-          )
-
-          // 2. FIXAÇÃO DO CELULAR
-          PhoneMountCard(
-            stabilityState = phoneStabilityState
-          )
-
-          // 3. CALIBRAÇÃO SIMPLIFICADA
-          CalibrationCard(
-            isCalibrated = isCalibrated,
-            isCalibrating = isCalibrating,
-            progressPercent = calibProgressPercent,
-            statusText = calibrationStatusText,
-            isVehicleMoving = isVehicleMoving,
-            onStartCalibration = {
-              if (!isVehicleMoving) {
-                calibCollector.reset()
-                calibCollector.isCollecting = true
-                isCalibrating = true
-                calibProgressPercent = 0
-                calibrationStatusText = "Calibrando… 0%"
-              }
-            }
-          )
-
-          // 4. VELOCIDADE DE INÍCIO AUTOMÁTICO
-          StartSpeedTriggerCard(
-            selectedSpeedKmh = startSpeedTriggerKmh,
-            onSelectSpeed = { newSpeed ->
-              startSpeedTriggerKmh = newSpeed
-              dynoTracker.startTriggerSpeedKmh = newSpeed
-              prefs.edit().putFloat("start_speed_trigger_kmh", newSpeed).apply()
-            }
-          )
-
-          // 5. VERIFICAÇÃO AUTOMÁTICA
-          ReadinessChecklistCard(
-            isVehicleConfigured = true,
-            isCalibrated = isCalibrated,
-            isPhoneStable = phoneStabilityState == "pronto",
-            isGpsReady = isGpsReady,
-            gpsStatusText = gpsStatusCategory
-          )
-
-          Spacer(modifier = Modifier.height(4.dp))
-
-          // Moving Alert Notice if vehicle is moving
-          if (isVehicleMoving) {
-            Surface(
-              shape = RoundedCornerShape(12.dp),
-              color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
-              border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
-              modifier = Modifier.fillMaxWidth().testTag("vehicle_moving_warning")
-            ) {
-              Row(
-                modifier = Modifier.padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-              ) {
-                Icon(
-                  imageVector = Icons.Outlined.Warning,
-                  contentDescription = null,
-                  tint = MaterialTheme.colorScheme.error,
-                  modifier = Modifier.size(20.dp)
-                )
-                Text(
-                  text = "Pare o veículo completamente antes de armar (${String.format(Locale.US, "%.1f", currentGpsSpeedKmh)} km/h).",
-                  style = MaterialTheme.typography.bodySmall.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 12.5.sp
-                  ),
-                  color = MaterialTheme.colorScheme.error
-                )
-              }
-            }
-          }
-
-          // 6. BOTÃO PRINCIPAL: ARMAR TESTE
-          Button(
-            onClick = {
+            .weight(1.35f)
+            .height(74.dp)
+            .testTag("btn_start_test")
+            .clickable(enabled = isStartClickable) {
               if (isReadyToArm) {
                 dynoTracker.reset()
                 dynoTracker.state = DynoRunState.AGUARDANDO_INICIO
@@ -1133,458 +1600,82 @@ fun TestPreparationScreen(
                 runElapsedSeconds = 0f
                 runVelocityMs = 0f
                 resultSaved = false
-                runFinishReason = null
                 runState = DynoRunState.AGUARDANDO_INICIO
               }
-            },
-            enabled = isReadyToArm,
-            modifier = Modifier
-              .fillMaxWidth()
-              .height(52.dp)
-              .testTag("btn_arm_test"),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-              containerColor = MaterialTheme.colorScheme.primary,
-              disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-              contentColor = MaterialTheme.colorScheme.onPrimary
-            )
-          ) {
-            Icon(
-              imageVector = Icons.Default.PlayArrow,
-              contentDescription = null,
-              modifier = Modifier.size(22.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-              text = if (isVehicleMoving) "PARE O VEÍCULO (< 3 km/h)" else "ARMAR TESTE",
-              style = MaterialTheme.typography.labelLarge.copy(
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.6.sp,
-                fontSize = 15.sp
-              )
-            )
-          }
-
-          // 7. BOTÃO SECUNDÁRIO: VOLTAR AO INÍCIO
-          OutlinedButton(
-            onClick = onNavigateToHome,
-            modifier = Modifier
-              .fillMaxWidth()
-              .height(48.dp)
-              .testTag("btn_back_to_home_from_prep"),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.outlinedButtonColors(
-              contentColor = MaterialTheme.colorScheme.onSurface
-            ),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-          ) {
-            Icon(
-              imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-              contentDescription = null,
-              modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-              text = "VOLTAR AO INÍCIO",
-              style = MaterialTheme.typography.labelLarge.copy(
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 13.5.sp,
-                letterSpacing = 0.5.sp
-              )
-            )
-          }
-
-          Spacer(modifier = Modifier.height(16.dp))
-        }
-      }
-    }
-  }
-}
-
-private fun onNavigateHomeOrBack(onHome: () -> Unit, onBack: () -> Unit) {
-  try {
-    onHome()
-  } catch (e: Exception) {
-    onBack()
-  }
-}
-
-// -----------------------------------------------------------------------------------------
-// COMPONENT 1: RESUMO DO VEÍCULO (Cartão Compacto)
-// -----------------------------------------------------------------------------------------
-@Composable
-private fun VehicleSummaryCard(
-  vehicle: VehicleProfile,
-  startSpeedTriggerKmh: Float,
-  onEditVehicle: () -> Unit,
-  modifier: Modifier = Modifier
-) {
-  val transmission = VehicleDatabase.getTransmission(vehicle.transmissionId)
-  val transmissionLabel = transmission?.displayName ?: vehicle.customTransmissionName ?: "Câmbio manual"
-  val tireCalculation = VehicleCalculations.calculateTireDimensions(
-    vehicle.tireWidthMm,
-    vehicle.tireAspectRatio,
-    vehicle.wheelDiameterInches
-  )
-  val tireDimension = tireCalculation.formattedMeasure
-  val totalWeightKg = VehicleCalculations.calculateTotalWeight(
-    curbWeightKg = vehicle.curbWeightKg,
-    driverWeightKg = if (vehicle.driverWeightKg > 0f) vehicle.driverWeightKg else 75f,
-    passengerWeightKg = vehicle.passengerWeightKg,
-    cargoWeightKg = vehicle.cargoWeightKg,
-    audioWeightKg = vehicle.audioWeightKg,
-    gnvWeightKg = vehicle.gnvWeightKg,
-    otherWeightKg = vehicle.otherWeightKg,
-    removedWeightKg = vehicle.removedWeightKg,
-    measuredTotalWeightKg = vehicle.measuredTotalWeightKg,
-    useMeasuredWeight = vehicle.useMeasuredWeight
-  )
-
-  Card(
-    modifier = modifier.fillMaxWidth().testTag("card_vehicle_summary_prep"),
-    shape = RoundedCornerShape(16.dp),
-    colors = CardDefaults.cardColors(
-      containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-    ),
-    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-  ) {
-    Column(
-      modifier = Modifier.padding(16.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(8.dp)
+            }
         ) {
-          Icon(
-            imageVector = Icons.Outlined.DirectionsCar,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(20.dp)
-          )
-          Text(
-            text = "VEÍCULO DO TESTE",
-            style = MaterialTheme.typography.labelSmall.copy(
-              fontWeight = FontWeight.Bold,
-              letterSpacing = 0.8.sp,
-              fontSize = 12.sp
-            ),
-            color = MaterialTheme.colorScheme.primary
-          )
-        }
-
-        TextButton(
-          onClick = onEditVehicle,
-          contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-          modifier = Modifier.testTag("btn_correct_vehicle_data")
-        ) {
-          Icon(
-            imageVector = Icons.Outlined.Edit,
-            contentDescription = null,
-            modifier = Modifier.size(14.dp)
-          )
-          Spacer(modifier = Modifier.width(4.dp))
-          Text(
-            text = "CORRIGIR DADOS",
-            style = MaterialTheme.typography.labelSmall.copy(
-              fontWeight = FontWeight.Bold,
-              fontSize = 11.5.sp
-            ),
-            color = MaterialTheme.colorScheme.primary
-          )
-        }
-      }
-
-      Text(
-        text = "${vehicle.manufacturer} ${vehicle.model} ${vehicle.engine}".trim(),
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-        color = MaterialTheme.colorScheme.onSurface
-      )
-
-      HorizontalDivider(
-        thickness = 0.8.dp,
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-      )
-
-      // 4 Specs Lines
-      Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        SpecRow(label = "Peso total utilizado", value = String.format(Locale.US, "%.0f kg", totalWeightKg))
-        SpecRow(label = "Pneu", value = tireDimension)
-        SpecRow(label = "Câmbio e marcha", value = "$transmissionLabel (3ª Marcha)")
-        SpecRow(label = "Velocidade de início", value = "${startSpeedTriggerKmh.toInt()} km/h")
-      }
-    }
-  }
-}
-
-@Composable
-private fun SpecRow(label: String, value: String) {
-  Row(
-    modifier = Modifier.fillMaxWidth(),
-    horizontalArrangement = Arrangement.SpaceBetween,
-    verticalAlignment = Alignment.CenterVertically
-  ) {
-    Text(
-      text = label,
-      style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.5.sp),
-      color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-    )
-    Text(
-      text = value,
-      style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 13.sp),
-      color = MaterialTheme.colorScheme.onSurface
-    )
-  }
-}
-
-// -----------------------------------------------------------------------------------------
-// COMPONENT 2: FIXAÇÃO DO CELULAR
-// -----------------------------------------------------------------------------------------
-@Composable
-private fun PhoneMountCard(
-  stabilityState: String,
-  modifier: Modifier = Modifier
-) {
-  val (statusLabel, statusColor, statusBg) = when (stabilityState) {
-    "aguardando" -> Triple("Aguardando posicionamento", MaterialTheme.colorScheme.onSurfaceVariant, MaterialTheme.colorScheme.surfaceContainer)
-    "verificando" -> Triple("Verificando estabilidade", Color(0xFFF59E0B), Color(0xFFF59E0B).copy(alpha = 0.15f))
-    else -> Triple("Celular pronto", Color(0xFF10B981), Color(0xFF10B981).copy(alpha = 0.15f))
-  }
-
-  Card(
-    modifier = modifier.fillMaxWidth().testTag("card_phone_mount"),
-    shape = RoundedCornerShape(16.dp),
-    colors = CardDefaults.cardColors(
-      containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-    ),
-    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-  ) {
-    Column(
-      modifier = Modifier.padding(16.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-          Icon(
-            imageVector = Icons.Outlined.PhoneAndroid,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(20.dp)
-          )
-          Text(
-            text = "POSICIONE O CELULAR",
-            style = MaterialTheme.typography.labelSmall.copy(
-              fontWeight = FontWeight.Bold,
-              letterSpacing = 0.8.sp,
-              fontSize = 12.sp
-            ),
-            color = MaterialTheme.colorScheme.primary
-          )
-        }
-
-        Surface(
-          shape = RoundedCornerShape(8.dp),
-          color = statusBg
-        ) {
-          Text(
-            text = statusLabel,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            style = MaterialTheme.typography.labelSmall.copy(
-              fontWeight = FontWeight.Bold,
-              fontSize = 11.sp
-            ),
-            color = statusColor
-          )
-        }
-      }
-
-      Text(
-        text = "Prenda o celular firmemente no suporte, na posição vertical, com a tela voltada para o motorista. Não movimente o aparelho durante o teste.",
-        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.5.sp, lineHeight = 17.sp),
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-      )
-    }
-  }
-}
-
-// -----------------------------------------------------------------------------------------
-// COMPONENT 3: CALIBRAÇÃO SIMPLIFICADA
-// -----------------------------------------------------------------------------------------
-@Composable
-private fun CalibrationCard(
-  isCalibrated: Boolean,
-  isCalibrating: Boolean,
-  progressPercent: Int,
-  statusText: String,
-  isVehicleMoving: Boolean,
-  onStartCalibration: () -> Unit,
-  modifier: Modifier = Modifier
-) {
-  Card(
-    modifier = modifier.fillMaxWidth().testTag("card_calibration_prep"),
-    shape = RoundedCornerShape(16.dp),
-    colors = CardDefaults.cardColors(
-      containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-    ),
-    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-  ) {
-    Column(
-      modifier = Modifier.padding(16.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-          Icon(
-            imageVector = Icons.Outlined.Sensors,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(20.dp)
-          )
-          Text(
-            text = "CALIBRAÇÃO",
-            style = MaterialTheme.typography.labelSmall.copy(
-              fontWeight = FontWeight.Bold,
-              letterSpacing = 0.8.sp,
-              fontSize = 12.sp
-            ),
-            color = MaterialTheme.colorScheme.primary
-          )
-        }
-
-        if (isCalibrated && !isCalibrating) {
-          Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = Color(0xFF10B981).copy(alpha = 0.15f)
-          ) {
+          Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 10.dp)) {
             Row(
-              modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(4.dp)
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
               Icon(
-                imageVector = Icons.Filled.Check,
+                imageVector = when {
+                  isStartButtonMeasuring -> Icons.Default.FiberManualRecord
+                  isStartButtonArmed -> Icons.Default.Speed
+                  else -> Icons.Default.PlayArrow
+                },
                 contentDescription = null,
-                tint = Color(0xFF10B981),
-                modifier = Modifier.size(12.dp)
+                tint = if (isStartClickable || isStartButtonArmed || isStartButtonMeasuring) Color.White
+                       else Color.White.copy(alpha = 0.45f),
+                modifier = Modifier.size(26.dp)
               )
               Text(
-                text = "Calibração concluída",
-                style = MaterialTheme.typography.labelSmall.copy(
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 11.sp
+                text = startBtnText,
+                style = MaterialTheme.typography.titleMedium.copy(
+                  fontWeight = FontWeight.Black,
+                  fontSize = 17.sp,
+                  letterSpacing = 0.6.sp
                 ),
-                color = Color(0xFF10B981)
+                color = if (isStartClickable || isStartButtonArmed || isStartButtonMeasuring) Color.White
+                        else Color.White.copy(alpha = 0.45f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
               )
             }
           }
         }
-      }
 
-      Text(
-        text = "Com o veículo parado e o motor funcionando, mantenha o celular preso no suporte.",
-        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.5.sp, lineHeight = 17.sp),
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-      )
-
-      if (isCalibrating) {
-        Column(
-          modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-          verticalArrangement = Arrangement.spacedBy(6.dp)
+        // -------------------------------------------------------------
+        // 5.3 BOTÃO DIREITO — CANCELAR
+        // -------------------------------------------------------------
+        Surface(
+          shape = RoundedCornerShape(14.dp),
+          color = DynoSurfaceContainer,
+          border = BorderStroke(1.5.dp, DynoBorderLight),
+          modifier = Modifier
+            .weight(1f)
+            .height(64.dp)
+            .testTag("btn_cancel_test")
+            .clickable {
+              if (runState == DynoRunState.AGUARDANDO_INICIO || runState == DynoRunState.MEDINDO) {
+                showCancelConfirmDialog = true
+              } else {
+                onNavigateHomeOrBack(onNavigateToHome, onNavigateBack)
+              }
+            }
         ) {
-          LinearProgressIndicator(
-            progress = { (progressPercent / 100f).coerceIn(0f, 1f) },
-            modifier = Modifier.fillMaxWidth().height(8.dp),
-            color = MaterialTheme.colorScheme.primary,
-            trackColor = MaterialTheme.colorScheme.surfaceContainer
-          )
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-          ) {
-            Text(
-              text = "Calibrando… $progressPercent%",
-              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-              color = MaterialTheme.colorScheme.primary
-            )
-            Text(
-              text = "Mantenha parado",
-              style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
-              color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-          }
-        }
-      } else {
-        if (!isCalibrated) {
-          Button(
-            onClick = onStartCalibration,
-            enabled = !isVehicleMoving,
-            modifier = Modifier
-              .fillMaxWidth()
-              .height(46.dp)
-              .testTag("btn_calibrate_phone"),
-            shape = RoundedCornerShape(10.dp),
-            colors = ButtonDefaults.buttonColors(
-              containerColor = MaterialTheme.colorScheme.primary,
-              contentColor = MaterialTheme.colorScheme.onPrimary
-            )
-          ) {
-            Icon(
-              imageVector = Icons.Outlined.Refresh,
-              contentDescription = null,
-              modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-              text = "CALIBRAR CELULAR",
-              style = MaterialTheme.typography.labelLarge.copy(
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.5.sp,
-                letterSpacing = 0.5.sp
-              )
-            )
-          }
-        } else {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
-          ) {
-            TextButton(
-              onClick = onStartCalibration,
-              contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-              modifier = Modifier.testTag("btn_recalibrate_phone")
+          Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 8.dp)) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
               Icon(
-                imageVector = Icons.Outlined.Refresh,
+                imageVector = Icons.Default.Close,
                 contentDescription = null,
-                modifier = Modifier.size(14.dp)
+                tint = DynoTextPrimary,
+                modifier = Modifier.size(20.dp)
               )
-              Spacer(modifier = Modifier.width(4.dp))
               Text(
-                text = "Calibrar novamente",
-                style = MaterialTheme.typography.labelSmall.copy(
+                text = "CANCELAR",
+                style = MaterialTheme.typography.labelLarge.copy(
                   fontWeight = FontWeight.Bold,
-                  fontSize = 11.5.sp
+                  fontSize = 14.sp,
+                  letterSpacing = 0.5.sp
                 ),
-                color = MaterialTheme.colorScheme.primary
+                color = DynoTextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
               )
             }
           }
@@ -1594,222 +1685,15 @@ private fun CalibrationCard(
   }
 }
 
-// -----------------------------------------------------------------------------------------
-// COMPONENT 4: VELOCIDADE DE INÍCIO AUTOMÁTICO
-// -----------------------------------------------------------------------------------------
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Velocímetro semicircular customizado para o painel horizontal
+ */
 @Composable
-private fun StartSpeedTriggerCard(
-  selectedSpeedKmh: Float,
-  onSelectSpeed: (Float) -> Unit,
-  modifier: Modifier = Modifier
-) {
-  Card(
-    modifier = modifier.fillMaxWidth().testTag("card_start_speed_trigger"),
-    shape = RoundedCornerShape(16.dp),
-    colors = CardDefaults.cardColors(
-      containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-    ),
-    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-  ) {
-    Column(
-      modifier = Modifier.padding(16.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-      ) {
-        Icon(
-          imageVector = Icons.Outlined.Speed,
-          contentDescription = null,
-          tint = MaterialTheme.colorScheme.primary,
-          modifier = Modifier.size(20.dp)
-        )
-        Text(
-          text = "INÍCIO AUTOMÁTICO",
-          style = MaterialTheme.typography.labelSmall.copy(
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.8.sp,
-            fontSize = 12.sp
-          ),
-          color = MaterialTheme.colorScheme.primary
-        )
-      }
-
-      Text(
-        text = "Escolha a velocidade em que a medição começará.",
-        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.5.sp),
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-      )
-
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-      ) {
-        listOf(40.0f, 50.0f, 60.0f).forEach { speed ->
-          val isSelected = selectedSpeedKmh == speed
-          FilterChip(
-            selected = isSelected,
-            onClick = { onSelectSpeed(speed) },
-            label = {
-              Text(
-                text = "${speed.toInt()} km/h",
-                style = MaterialTheme.typography.bodyMedium.copy(
-                  fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                ),
-                modifier = Modifier.padding(vertical = 4.dp)
-              )
-            },
-            modifier = Modifier.weight(1f).testTag("chip_trigger_${speed.toInt()}"),
-            shape = RoundedCornerShape(10.dp),
-            colors = FilterChipDefaults.filterChipColors(
-              selectedContainerColor = MaterialTheme.colorScheme.primary,
-              selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-              containerColor = MaterialTheme.colorScheme.surfaceContainer
-            )
-          )
-        }
-      }
-
-      Text(
-        text = "O teste começa automaticamente quando o GPS atingir a velocidade escolhida.",
-        style = MaterialTheme.typography.bodySmall.copy(
-          fontSize = 11.5.sp,
-          color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
-        )
-      )
-    }
-  }
-}
-
-// -----------------------------------------------------------------------------------------
-// COMPONENT 5: VERIFICAÇÃO AUTOMÁTICA
-// -----------------------------------------------------------------------------------------
-@Composable
-private fun ReadinessChecklistCard(
-  isVehicleConfigured: Boolean,
-  isCalibrated: Boolean,
-  isPhoneStable: Boolean,
-  isGpsReady: Boolean,
-  gpsStatusText: String,
-  modifier: Modifier = Modifier
-) {
-  Card(
-    modifier = modifier.fillMaxWidth().testTag("card_readiness_checklist"),
-    shape = RoundedCornerShape(16.dp),
-    colors = CardDefaults.cardColors(
-      containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-    ),
-    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-  ) {
-    Column(
-      modifier = Modifier.padding(16.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-      ) {
-        Icon(
-          imageVector = Icons.Outlined.CheckCircle,
-          contentDescription = null,
-          tint = MaterialTheme.colorScheme.primary,
-          modifier = Modifier.size(20.dp)
-        )
-        Text(
-          text = "PRONTO PARA O TESTE",
-          style = MaterialTheme.typography.labelSmall.copy(
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.8.sp,
-            fontSize = 12.sp
-          ),
-          color = MaterialTheme.colorScheme.primary
-        )
-      }
-
-      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        CheckItemRow(
-          title = "Veículo configurado",
-          isOk = isVehicleConfigured,
-          statusText = if (isVehicleConfigured) "Pronto" else "Pendente"
-        )
-        CheckItemRow(
-          title = "Celular calibrado",
-          isOk = isCalibrated,
-          statusText = if (isCalibrated) "Calibrado" else "Pendente"
-        )
-        CheckItemRow(
-          title = "Celular estável no suporte",
-          isOk = isPhoneStable,
-          statusText = if (isPhoneStable) "Estável" else "Verificando"
-        )
-        CheckItemRow(
-          title = "GPS disponível",
-          isOk = isGpsReady,
-          statusText = gpsStatusText
-        )
-      }
-    }
-  }
-}
-
-@Composable
-private fun CheckItemRow(
-  title: String,
-  isOk: Boolean,
-  statusText: String
-) {
-  val iconColor = if (isOk) Color(0xFF10B981) else Color(0xFFF59E0B)
-  val iconBg = if (isOk) Color(0xFF10B981).copy(alpha = 0.15f) else Color(0xFFF59E0B).copy(alpha = 0.15f)
-
-  Row(
-    modifier = Modifier.fillMaxWidth(),
-    horizontalArrangement = Arrangement.SpaceBetween,
-    verticalAlignment = Alignment.CenterVertically
-  ) {
-    Row(
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-      Surface(
-        shape = CircleShape,
-        color = iconBg,
-        modifier = Modifier.size(20.dp)
-      ) {
-        Icon(
-          imageVector = if (isOk) Icons.Filled.Check else Icons.Filled.Warning,
-          contentDescription = null,
-          tint = iconColor,
-          modifier = Modifier.padding(3.dp)
-        )
-      }
-      Text(
-        text = title,
-        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-        color = MaterialTheme.colorScheme.onSurface
-      )
-    }
-
-    Text(
-      text = statusText,
-      style = MaterialTheme.typography.labelSmall.copy(
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 11.5.sp
-      ),
-      color = iconColor
-    )
-  }
-}
-
-// -----------------------------------------------------------------------------------------
-// COMPONENT 6: VELOCÍMETRO DIGITAL SEMICIRCULAR
-// -----------------------------------------------------------------------------------------
-@Composable
-private fun SemicircularSpeedometer(
+private fun HorizontalDynoSpeedometer(
   currentSpeedKmh: Float,
   targetTriggerSpeedKmh: Float,
-  isMeasuring: Boolean = false,
+  isMeasuring: Boolean,
+  maxSpeedKmh: Float,
   modifier: Modifier = Modifier
 ) {
   val density = LocalDensity.current
@@ -1817,14 +1701,14 @@ private fun SemicircularSpeedometer(
   val progressFraction = (visualSpeed / 200f).coerceIn(0f, 1f)
   val progressSweep = progressFraction * 220f
 
-  val primaryColor = if (isMeasuring) Color(0xFF10B981) else Color(0xFF38BDF8)
-  val triggerHighlightColor = Color(0xFF38BDF8)
-  val trackColor = Color(0xFF222834)
-  val normalTickColor = Color(0xFF4B5563)
-  val normalTextColor = Color(0xFF9CA3AF).toArgb()
+  val primaryColor = if (isMeasuring) DynoSuccessGreen else DynoBluePrimary
+  val triggerHighlightColor = DynoBlueLight
+  val trackColor = DynoSurfaceElevated
+  val normalTickColor = DynoTextMuted
+  val normalTextColor = DynoTextSecondary.toArgb()
   val highlightTextColor = triggerHighlightColor.toArgb()
 
-  val tickSteps = remember { listOf(0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200) }
+  val tickSteps = remember { listOf(0, 40, 80, 120, 160, 200) }
 
   val textPaint = remember {
     android.graphics.Paint().apply {
@@ -1833,26 +1717,24 @@ private fun SemicircularSpeedometer(
     }
   }
 
-  val accessibleDescription = "Velocidade GPS: ${String.format(Locale.US, "%.0f", visualSpeed)} km/h"
-
   Box(
     modifier = modifier
-      .size(300.dp, 250.dp)
-      .semantics { contentDescription = accessibleDescription }
-      .testTag("semicircular_speedometer"),
+      .size(270.dp, 165.dp)
+      .semantics { contentDescription = "Velocidade GPS: ${visualSpeed.toInt()} km/h" }
+      .testTag("dyno_speedometer"),
     contentAlignment = Alignment.Center
   ) {
     Canvas(modifier = Modifier.fillMaxSize()) {
       val canvasWidth = size.width
       val canvasHeight = size.height
       val centerX = canvasWidth / 2f
-      val centerY = canvasHeight * 0.52f
+      val centerY = canvasHeight * 0.72f
 
-      val arcRadius = with(density) { 98.dp.toPx() }
-      val strokeWidthPx = with(density) { 14.dp.toPx() }
-      val labelRadius = arcRadius + with(density) { 20.dp.toPx() }
-      val tickInnerRadius = arcRadius - with(density) { 9.dp.toPx() }
-      val tickOuterRadius = arcRadius - with(density) { 3.dp.toPx() }
+      val arcRadius = with(density) { 84.dp.toPx() }
+      val strokeWidthPx = with(density) { 11.dp.toPx() }
+      val labelRadius = arcRadius + with(density) { 16.dp.toPx() }
+      val tickInnerRadius = arcRadius - with(density) { 7.dp.toPx() }
+      val tickOuterRadius = arcRadius - with(density) { 2.dp.toPx() }
 
       val arcRect = Rect(
         left = centerX - arcRadius,
@@ -1861,7 +1743,7 @@ private fun SemicircularSpeedometer(
         bottom = centerY + arcRadius
       )
 
-      // 1. Background Arc (220 degrees starting at 160 degrees)
+      // 1. Trilho de Fundo
       drawArc(
         color = trackColor,
         startAngle = 160f,
@@ -1872,7 +1754,7 @@ private fun SemicircularSpeedometer(
         style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round)
       )
 
-      // 2. Dynamic Progress Arc
+      // 2. Arco Dinâmico
       if (progressSweep > 0.5f) {
         drawArc(
           color = primaryColor,
@@ -1885,8 +1767,8 @@ private fun SemicircularSpeedometer(
         )
       }
 
-      // 3. Ticks and Labels
-      val labelTextSizePx = with(density) { 10.5.sp.toPx() }
+      // 3. Marcadores de Escala e Números
+      val labelTextSizePx = with(density) { 9.5.sp.toPx() }
       textPaint.textSize = labelTextSizePx
 
       tickSteps.forEach { step ->
@@ -1899,11 +1781,10 @@ private fun SemicircularSpeedometer(
 
         val isTrigger = step == targetTriggerSpeedKmh.toInt()
 
-        // Tick line
-        val tOuter = if (isTrigger) arcRadius - with(density) { 1.dp.toPx() } else tickOuterRadius
-        val tInner = if (isTrigger) arcRadius - with(density) { 13.dp.toPx() } else tickInnerRadius
+        val tOuter = if (isTrigger) arcRadius else tickOuterRadius
+        val tInner = if (isTrigger) arcRadius - with(density) { 10.dp.toPx() } else tickInnerRadius
         val tColor = if (isTrigger) triggerHighlightColor else normalTickColor
-        val tStroke = with(density) { (if (isTrigger) 2.5.dp else 1.2.dp).toPx() }
+        val tStroke = with(density) { (if (isTrigger) 2.2.dp else 1.dp).toPx() }
 
         drawLine(
           color = tColor,
@@ -1913,7 +1794,6 @@ private fun SemicircularSpeedometer(
           cap = StrokeCap.Round
         )
 
-        // Numbers along the arc perimeter
         val lx = centerX + labelRadius * cosA
         val ly = centerY + labelRadius * sinA + (labelTextSizePx * 0.35f)
 
@@ -1924,39 +1804,43 @@ private fun SemicircularSpeedometer(
         }
       }
 
-      // 4. Dot indicator at initial trigger speed during measurement
-      if (isMeasuring && targetTriggerSpeedKmh > 0f) {
+      // 4. Marcador do Gatilho Selecionado (Ponto destacado)
+      if (targetTriggerSpeedKmh > 0f) {
         val trigFraction = (targetTriggerSpeedKmh / 200f).coerceIn(0f, 1f)
         val trigAngleDeg = 160f + trigFraction * 220f
         val trigAngleRad = Math.toRadians(trigAngleDeg.toDouble())
         val tx = centerX + arcRadius * cos(trigAngleRad).toFloat()
         val ty = centerY + arcRadius * sin(trigAngleRad).toFloat()
         drawCircle(
-          color = Color.White,
-          radius = with(density) { 4.dp.toPx() },
+          color = if (isMeasuring) DynoPowerCyan else DynoBlueLight,
+          radius = with(density) { 3.5.dp.toPx() },
           center = Offset(tx, ty)
+        )
+      }
+
+      // 5. Marcador da Velocidade Máxima Atingida
+      if (maxSpeedKmh > 5f) {
+        val maxFraction = (maxSpeedKmh / 200f).coerceIn(0f, 1f)
+        val maxAngleDeg = 160f + maxFraction * 220f
+        val maxAngleRad = Math.toRadians(maxAngleDeg.toDouble())
+        val mx = centerX + arcRadius * cos(maxAngleRad).toFloat()
+        val my = centerY + arcRadius * sin(maxAngleRad).toFloat()
+        drawCircle(
+          color = DynoTorqueOrange,
+          radius = with(density) { 4.dp.toPx() },
+          center = Offset(mx, my)
         )
       }
     }
 
-    // Center Display Content
+    // Centro do Velocímetro: Velocidade GPS Grande e "km/h"
     Column(
       horizontalAlignment = Alignment.CenterHorizontally,
       verticalArrangement = Arrangement.Center,
       modifier = Modifier
-        .padding(top = 18.dp)
         .align(Alignment.Center)
+        .padding(top = 18.dp)
     ) {
-      Text(
-        text = "VELOCIDADE GPS",
-        style = MaterialTheme.typography.labelSmall.copy(
-          fontWeight = FontWeight.Bold,
-          letterSpacing = 1.1.sp,
-          fontSize = 11.sp
-        ),
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-      )
-
       val formattedSpeed = if (visualSpeed < 10f && visualSpeed > 0f && (visualSpeed % 1.0f != 0f)) {
         String.format(Locale.US, "%.1f", visualSpeed)
       } else {
@@ -1967,307 +1851,33 @@ private fun SemicircularSpeedometer(
         text = formattedSpeed,
         style = MaterialTheme.typography.displayLarge.copy(
           fontWeight = FontWeight.Black,
-          fontSize = 54.sp,
+          fontSize = 48.sp,
+          fontFamily = FontFamily.Monospace,
           letterSpacing = (-1).sp
         ),
-        color = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.padding(vertical = 0.dp)
+        color = DynoTextPrimary,
+        modifier = Modifier.padding(0.dp)
       )
 
       Text(
         text = "km/h",
         style = MaterialTheme.typography.titleMedium.copy(
-          fontWeight = FontWeight.Bold,
-          fontSize = 15.sp,
-          letterSpacing = 0.5.sp
-        ),
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-      )
-
-      if (!isMeasuring) {
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-          text = "Início automático: ${targetTriggerSpeedKmh.toInt()} km/h",
-          style = MaterialTheme.typography.labelSmall.copy(
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 11.sp
-          ),
-          color = Color(0xFF38BDF8)
-        )
-      }
-    }
-  }
-}
-
-// -----------------------------------------------------------------------------------------
-// COMPONENT 7: TELA ENQUANTO AGUARDA (DRIVING HUD)
-// -----------------------------------------------------------------------------------------
-@Composable
-private fun ArmedDrivingHud(
-  currentSpeedKmh: Float,
-  targetTriggerSpeedKmh: Float,
-  gpsStatusText: String,
-  onCancel: () -> Unit,
-  modifier: Modifier = Modifier
-) {
-  val remainingKmh = (targetTriggerSpeedKmh - currentSpeedKmh).coerceAtLeast(0f)
-  val isCloseToTrigger = currentSpeedKmh >= (targetTriggerSpeedKmh - 3.0f) && currentSpeedKmh < targetTriggerSpeedKmh
-
-  Column(
-    modifier = modifier
-      .fillMaxSize()
-      .padding(20.dp)
-      .widthIn(max = 480.dp),
-    horizontalAlignment = Alignment.CenterHorizontally,
-    verticalArrangement = Arrangement.SpaceBetween
-  ) {
-    // Top Status
-    Column(
-      horizontalAlignment = Alignment.CenterHorizontally,
-      verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-      DynoStatusBadge(
-        text = "TESTE ARMADO",
-        status = DynoBadgeStatus.INFO
-      )
-
-      Text(
-        text = "Acelere na marcha selecionada",
-        style = MaterialTheme.typography.bodyLarge.copy(
           fontWeight = FontWeight.Medium,
-          textAlign = TextAlign.Center
+          fontSize = 13.5.sp
         ),
-        color = DynoTextPrimary
-      )
-    }
-
-    // Center Speed HUD with DynoSpeedometer
-    DynoCard(
-      modifier = Modifier
-        .fillMaxWidth()
-        .padding(vertical = 10.dp)
-    ) {
-      Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-      ) {
-        DynoSpeedometer(
-          currentSpeedKmh = currentSpeedKmh,
-          targetTriggerSpeedKmh = targetTriggerSpeedKmh,
-          isMeasuring = false
-        )
-
-        // Remaining speed indicator or "PREPARE-SE"
-        if (isCloseToTrigger) {
-          DynoStatusBadge(
-            text = "PREPARE-SE PARA ACELERAR",
-            status = DynoBadgeStatus.WARNING
-          )
-        } else {
-          Surface(
-            shape = RoundedCornerShape(10.dp),
-            color = DynoSurfaceElevated
-          ) {
-            Text(
-              text = if (remainingKmh > 0f) "FALTAM ${remainingKmh.toInt()} km/h PARA INICIAR" else "INICIANDO MEDIÇÃO...",
-              style = MaterialTheme.typography.labelSmall.copy(
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.6.sp,
-                fontSize = 12.sp
-              ),
-              color = DynoBlueLight,
-              modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
-            )
-          }
-        }
-      }
-    }
-
-    // Bottom Action & GPS indicator
-    Column(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalAlignment = Alignment.CenterHorizontally,
-      verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-      Surface(
-        shape = CircleShape,
-        color = DynoSurfaceContainer
-      ) {
-        Row(
-          modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-          Icon(
-            imageVector = Icons.Outlined.LocationOn,
-            contentDescription = null,
-            tint = DynoSuccessGreen,
-            modifier = Modifier.size(14.dp)
-          )
-          Text(
-            text = gpsStatusText,
-            style = MaterialTheme.typography.labelSmall.copy(
-              fontWeight = FontWeight.SemiBold,
-              fontSize = 11.5.sp
-            ),
-            color = DynoTextPrimary
-          )
-        }
-      }
-
-      DynoDangerButton(
-        text = "CANCELAR TESTE",
-        onClick = onCancel,
-        icon = Icons.Default.Close,
-        isOutlined = true,
-        modifier = Modifier.fillMaxWidth(),
-        testTag = "btn_cancel_armed_test"
+        color = DynoTextSecondary
       )
     }
   }
 }
 
-// -----------------------------------------------------------------------------------------
-// COMPONENT 8: TELA DURANTE A MEDIÇÃO (MEDINDO)
-// -----------------------------------------------------------------------------------------
-@Composable
-private fun MeasuringHud(
-  currentSpeedKmh: Float,
-  elapsedSeconds: Float,
-  targetTriggerSpeedKmh: Float,
-  maxSpeedKmh: Float,
-  onEmergencyStop: () -> Unit,
-  modifier: Modifier = Modifier
-) {
-  Column(
-    modifier = modifier
-      .fillMaxSize()
-      .padding(20.dp)
-      .widthIn(max = 480.dp),
-    horizontalAlignment = Alignment.CenterHorizontally,
-    verticalArrangement = Arrangement.SpaceBetween
-  ) {
-    // Top Status
-    DynoStatusBadge(
-      text = "MEDIÇÃO EM ANDAMENTO",
-      status = DynoBadgeStatus.SUCCESS
-    )
-
-    // Center Speed & Stats HUD with DynoSpeedometer
-    DynoCard(
-      modifier = Modifier
-        .fillMaxWidth()
-        .padding(vertical = 10.dp),
-      borderColor = DynoSuccessGreen.copy(alpha = 0.5f)
-    ) {
-      Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-      ) {
-        DynoSpeedometer(
-          currentSpeedKmh = currentSpeedKmh,
-          targetTriggerSpeedKmh = targetTriggerSpeedKmh,
-          isMeasuring = true
-        )
-
-        // Stats panel: Tempo, Início, Velocidade máxima
-        Surface(
-          shape = RoundedCornerShape(12.dp),
-          color = DynoSurfaceElevated,
-          modifier = Modifier.fillMaxWidth()
-        ) {
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .padding(horizontal = 14.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceAround,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-              Text(
-                text = "Tempo",
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                color = DynoTextSecondary
-              )
-              Text(
-                text = String.format(Locale.US, "%.2f s", elapsedSeconds),
-                style = MaterialTheme.typography.bodyMedium.copy(
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 14.sp
-                ),
-                color = DynoTextPrimary
-              )
-            }
-
-            Surface(
-              modifier = Modifier
-                .height(24.dp)
-                .width(1.dp),
-              color = DynoDivider
-            ) {}
-
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-              Text(
-                text = "Início",
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                color = DynoTextSecondary
-              )
-              Text(
-                text = "${targetTriggerSpeedKmh.toInt()} km/h",
-                style = MaterialTheme.typography.bodyMedium.copy(
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 14.sp
-                ),
-                color = DynoTextPrimary
-              )
-            }
-
-            Surface(
-              modifier = Modifier
-                .height(24.dp)
-                .width(1.dp),
-              color = DynoDivider
-            ) {}
-
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-              Text(
-                text = "Vel. máxima",
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                color = DynoTextSecondary
-              )
-              Text(
-                text = String.format(Locale.US, "%.1f km/h", max(maxSpeedKmh, currentSpeedKmh)),
-                style = MaterialTheme.typography.bodyMedium.copy(
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 14.sp
-                ),
-                color = DynoSuccessGreen
-              )
-            }
-          }
-        }
-
-        Text(
-          text = "Mantenha o pé cravado na mesma marcha.",
-          style = MaterialTheme.typography.bodyMedium.copy(
-            fontWeight = FontWeight.SemiBold,
-            textAlign = TextAlign.Center,
-            fontSize = 13.sp
-          ),
-          color = DynoSuccessGreen
-        )
-      }
-    }
-
-    // Bottom Action: Emergency stop
-    DynoDangerButton(
-      text = "ENCERRAR TESTE",
-      onClick = onEmergencyStop,
-      icon = Icons.Default.Stop,
-      modifier = Modifier.fillMaxWidth(),
-      testTag = "btn_stop_measuring_emergency"
-    )
+/**
+ * Função utilitária para retorno seguro à Home ou voltar
+ */
+private fun onNavigateHomeOrBack(onNavigateToHome: () -> Unit, onNavigateBack: () -> Unit) {
+  try {
+    onNavigateToHome()
+  } catch (e: Exception) {
+    onNavigateBack()
   }
 }
