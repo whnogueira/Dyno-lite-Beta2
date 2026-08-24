@@ -28,18 +28,38 @@ data class RunResult(
   val maximumCalculatedSpeedKmh: Float = 40.0f,
   val finalGpsSpeedKmh: Float = 0f,
   val finalCalculatedSpeedKmh: Float = 0f,
+  val speedGainKmh: Float = 0f,
+  val estimatedPowerCv: Float = 0f,
+  val estimatedTorqueKgfm: Float = 0f,
+  val wheelPowerCv: Float = 0f,
+  val enginePowerCv: Float = 0f,
+  val wheelTorqueKgfm: Float = 0f,
+  val engineTorqueKgfm: Float = 0f,
+  val peakLongitudinalG: Float = 0f,
+  val averageLongitudinalG: Float = 0f,
+  val peakPowerRpm: Int? = null,
+  val peakTorqueRpm: Int? = null,
+  val peakPowerSpeedKmh: Float = 0f,
+  val peakTorqueSpeedKmh: Float = 0f,
+  val totalVehicleMassKg: Float = 0f,
+  val drivetrainLossPercent: Float = 15f,
+  val estimatedMarginPercent: Float = 10f,
+  val gearUsed: String = "2ª",
+  val isAerodynamicsEstimated: Boolean = true,
   val elapsedSeconds: Float = 0f,
   val gpsAccuracyMeters: Float = 0f,
   val totalSamples: Int = 0,
   val rejectedSamples: Int = 0,
   val validSamplesCount: Int = 0,
+  val validGpsLocationsCount: Int = 0,
   val averageSamplingRateHz: Float = 0f,
+  val averageGpsFrequencyHz: Float = 0f,
   val quality: String = "BOA",
-  val finishReason: String = FinishReason.SENSOR_DECELERATION.code,
+  val finishReason: String = FinishReason.GPS_DECELERATION.code,
   val averageSpeedDifferenceKmh: Float = 0f,
   val maximumSpeedDifferenceKmh: Float = 0f,
   val invalidationReason: String? = null,
-  val appVersion: String = "0.19.1",
+  val appVersion: String = "0.20.0",
   val samples: List<RunSample> = emptyList()
 ) {
   val peakSpeedDifferenceKmh: Float
@@ -49,13 +69,11 @@ data class RunResult(
     if (!invalidationReason.isNullOrBlank()) return invalidationReason
     if (quality != "INVÁLIDA" && quality != "INVALID") return ""
     return when {
-      elapsedSeconds < 1.5f -> "Duração do teste muito curta (${String.format(java.util.Locale.US, "%.2f", elapsedSeconds)} s) para validação."
+      elapsedSeconds < 4.0f -> "Duração do teste insuficiente (${String.format(java.util.Locale.US, "%.2f", elapsedSeconds)} s < 4.00 s) para validação."
+      validGpsLocationsCount < 4 -> "Poucas leituras de GPS válidas ($validGpsLocationsCount < 4) durante a medição."
       finishReason == FinishReason.TIMEOUT.code -> "Tempo limite de medição atingido (> 25 s)."
-      peakSpeedDifferenceKmh > 10.0f -> "Divergência entre velocidade máxima GPS (${String.format(java.util.Locale.US, "%.1f", maximumGpsSpeedKmh)} km/h) e calculada (${String.format(java.util.Locale.US, "%.1f", maximumCalculatedSpeedKmh)} km/h)."
-      averageSpeedDifferenceKmh > 10.0f -> "Diferença média entre GPS e aceleração inercial elevada (±${String.format(java.util.Locale.US, "%.1f", averageSpeedDifferenceKmh)} km/h)."
-      maximumSpeedDifferenceKmh > 18.0f -> "Pico de divergência momentânea excessivo (${String.format(java.util.Locale.US, "%.1f", maximumSpeedDifferenceKmh)} km/h)."
-      maximumGpsSpeedKmh < (runStartGpsSpeedKmh + 5f) -> "Velocidade máxima atingida insuficiente para teste de aceleração."
-      else -> "Inconsistência na detecção inercial ou dados insuficientes de GPS."
+      maximumGpsSpeedKmh < (runStartGpsSpeedKmh + 10f) -> "Ganho de velocidade GPS insuficiente (${String.format(java.util.Locale.US, "%.1f", maximumGpsSpeedKmh - runStartGpsSpeedKmh)} km/h < 10.0 km/h)."
+      else -> "Sinal GPS insuficiente, perda de dados ou movimentação grave do celular."
     }
   }
 }

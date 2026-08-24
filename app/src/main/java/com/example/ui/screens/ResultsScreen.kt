@@ -332,12 +332,12 @@ fun ResultsScreen(
               }
             }
 
-            // 4. RESUMO DAS VELOCIDADES
+            // 4. RESUMO DAS VELOCIDADES (OFICIAL GPS)
             Row(
               modifier = Modifier.fillMaxWidth(),
               horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-              // Velocidade Máxima GPS
+              // Velocidade Máxima Oficial (GPS)
               Card(
                 modifier = Modifier
                   .weight(1f)
@@ -353,7 +353,7 @@ fun ResultsScreen(
                   verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                   Text(
-                    text = "MÁXIMA GPS",
+                    text = "VELOCIDADE MÁXIMA",
                     style = MaterialTheme.typography.labelSmall.copy(
                       fontWeight = FontWeight.Bold,
                       fontSize = 10.sp
@@ -371,11 +371,11 @@ fun ResultsScreen(
                 }
               }
 
-              // Velocidade Máxima Calculada
+              // Ganho de Velocidade
               Card(
                 modifier = Modifier
                   .weight(1f)
-                  .testTag("card_speed_max_calc"),
+                  .testTag("card_speed_gain"),
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(
                   containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
@@ -387,15 +387,16 @@ fun ResultsScreen(
                   verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                   Text(
-                    text = "MÁX. CALCULADA",
+                    text = "GANHO VELOCIDADE",
                     style = MaterialTheme.typography.labelSmall.copy(
                       fontWeight = FontWeight.Bold,
                       fontSize = 10.sp
                     ),
                     color = Color(0xFF38BDF8)
                   )
+                  val gain = if (run.speedGainKmh > 0f) run.speedGainKmh else (run.maximumGpsSpeedKmh - run.runStartGpsSpeedKmh).coerceAtLeast(0f)
                   Text(
-                    text = String.format(Locale.US, "%.1f km/h", run.maximumCalculatedSpeedKmh),
+                    text = String.format(Locale.US, "+%.1f km/h", gain),
                     style = MaterialTheme.typography.titleMedium.copy(
                       fontWeight = FontWeight.Black,
                       fontFamily = FontFamily.Monospace
@@ -440,7 +441,7 @@ fun ResultsScreen(
               }
             }
 
-            // 5. QUALIDADE E DIFERENÇAS (Diferença no pico, Média e Máxima)
+            // 5. QUALIDADE E CONFIABILIDADE DO SINAL
             Card(
               modifier = Modifier
                 .fillMaxWidth()
@@ -461,7 +462,7 @@ fun ResultsScreen(
                   verticalAlignment = Alignment.CenterVertically
                 ) {
                   Text(
-                    text = "QUALIDADE E DIFERENÇAS",
+                    text = "QUALIDADE DO SINAL E ESTABILIDADE",
                     style = MaterialTheme.typography.labelMedium.copy(
                       fontWeight = FontWeight.Bold,
                       letterSpacing = 0.5.sp
@@ -491,25 +492,16 @@ fun ResultsScreen(
                 )
 
                 DetailRow(
-                  label = "Diferença no pico",
-                  value = String.format(Locale.US, "%.1f km/h", run.peakSpeedDifferenceKmh)
+                  label = "Precisão do GPS",
+                  value = String.format(Locale.US, "±%.1f m", run.gpsAccuracyMeters)
                 )
                 DetailRow(
-                  label = "Diferença média sincronizada",
-                  value = String.format(Locale.US, "±%.1f km/h", run.averageSpeedDifferenceKmh)
+                  label = "Leituras de GPS válidas",
+                  value = "${run.validGpsLocationsCount} atualizações"
                 )
                 DetailRow(
-                  label = "Maior diferença sincronizada",
-                  value = String.format(Locale.US, "%.1f km/h", run.maximumSpeedDifferenceKmh)
-                )
-
-                Text(
-                  text = "Diferenças sincronizadas calculadas estritamente durante a aceleração plena antes da confirmação de desaceleração.",
-                  style = MaterialTheme.typography.bodySmall.copy(
-                    fontSize = 11.sp,
-                    lineHeight = 16.sp
-                  ),
-                  color = MaterialTheme.colorScheme.onSurfaceVariant
+                  label = "Amostras inerciais",
+                  value = "${run.validSamplesCount} válidas (${run.rejectedSamples} descartadas)"
                 )
               }
             }
@@ -601,7 +593,7 @@ fun ResultsScreen(
               }
             }
 
-            // 2. RESUMO DAS VELOCIDADES
+            // 2. RESUMO DAS VELOCIDADES (OFICIAL GPS)
             Row(
               modifier = Modifier.fillMaxWidth(),
               horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -613,7 +605,7 @@ fun ResultsScreen(
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
               ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                  Text("MÁXIMA GPS", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp), color = MaterialTheme.colorScheme.primary)
+                  Text("VELOCIDADE MÁXIMA", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp), color = MaterialTheme.colorScheme.primary)
                   Text(String.format(Locale.US, "%.1f km/h", run.maximumGpsSpeedKmh), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace))
                 }
               }
@@ -625,8 +617,9 @@ fun ResultsScreen(
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
               ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                  Text("MÁX. CALCULADA", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp), color = Color(0xFF38BDF8))
-                  Text(String.format(Locale.US, "%.1f km/h", run.maximumCalculatedSpeedKmh), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace))
+                  Text("GANHO VELOCIDADE", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp), color = Color(0xFF38BDF8))
+                  val gain = if (run.speedGainKmh > 0f) run.speedGainKmh else (run.maximumGpsSpeedKmh - run.runStartGpsSpeedKmh).coerceAtLeast(0f)
+                  Text(String.format(Locale.US, "+%.1f km/h", gain), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace))
                 }
               }
 
@@ -643,44 +636,145 @@ fun ResultsScreen(
               }
             }
 
-            // 3. CARTÃO COMPACTO: "Passagem salva. Cálculo de potência ainda não disponível."
-            Card(
-              modifier = Modifier
-                .fillMaxWidth()
-                .testTag("card_valid_power_pending"),
-              shape = RoundedCornerShape(14.dp),
-              colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-              ),
-              border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
-            ) {
-              Row(
-                modifier = Modifier.padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            // 3. CARTÕES DE POTÊNCIA, TORQUE E FORÇA G (ESTIMADOS)
+            if (run.estimatedPowerCv > 0f || run.peakLongitudinalG > 0f) {
+              Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                  // Potência Motor
+                  Card(
+                    modifier = Modifier.weight(1f).testTag("card_power_engine"),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
+                    border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.5f))
+                  ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                      Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                      ) {
+                        Text("POTÊNCIA MOTOR", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.5.sp), color = Color(0xFF38BDF8))
+                        Text("est.", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                      }
+                      val pCv = if (run.enginePowerCv > 0f) run.enginePowerCv else run.estimatedPowerCv
+                      Text(String.format(Locale.US, "%.1f cv", pCv), style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace), color = MaterialTheme.colorScheme.onSurface)
+                      if (run.wheelPowerCv > 0f) {
+                        Text(String.format(Locale.US, "Roda: %.1f cv", run.wheelPowerCv), style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                      }
+                    }
+                  }
+
+                  // Torque Motor
+                  Card(
+                    modifier = Modifier.weight(1f).testTag("card_torque_engine"),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
+                    border = BorderStroke(1.dp, Color(0xFFFB923C).copy(alpha = 0.5f))
+                  ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                      Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                      ) {
+                        Text("TORQUE MOTOR", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.5.sp), color = Color(0xFFFB923C))
+                        Text("est.", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                      }
+                      val tKgfm = if (run.engineTorqueKgfm > 0f) run.engineTorqueKgfm else run.estimatedTorqueKgfm
+                      Text(String.format(Locale.US, "%.1f kgfm", tKgfm), style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace), color = MaterialTheme.colorScheme.onSurface)
+                      if (run.wheelTorqueKgfm > 0f) {
+                        Text(String.format(Locale.US, "Roda: %.1f kgfm", run.wheelTorqueKgfm), style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                      }
+                    }
+                  }
+
+                  // Força G Pico
+                  Card(
+                    modifier = Modifier.weight(0.95f).testTag("card_g_force"),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
+                    border = BorderStroke(1.dp, DynoPowerCyan.copy(alpha = 0.5f))
+                  ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                      Text("FORÇA G PICO", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.5.sp), color = DynoPowerCyan)
+                      val gPeak = if (run.peakLongitudinalG > 0f) run.peakLongitudinalG else 0f
+                      Text(String.format(Locale.US, "%+.2f G", gPeak), style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace), color = MaterialTheme.colorScheme.onSurface)
+                      if (run.averageLongitudinalG > 0f) {
+                        Text(String.format(Locale.US, "Média: %+.2f G", run.averageLongitudinalG), style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                      }
+                    }
+                  }
+                }
+
+                // Aviso e Margem Técnica
+                Surface(
+                  shape = RoundedCornerShape(10.dp),
+                  color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                  border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                  modifier = Modifier.fillMaxWidth()
+                ) {
+                  Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                  ) {
+                    Icon(
+                      imageVector = Icons.Outlined.Info,
+                      contentDescription = null,
+                      modifier = Modifier.size(16.dp),
+                      tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                      text = "Estimativa Dyno Lite (margem ±${run.estimatedMarginPercent.toInt()}% com base em peso e arrasto). Não substitui dinamômetro certificado.",
+                      style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, lineHeight = 15.sp),
+                      color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                  }
+                }
+              }
+            } else {
+              // Passagem sem perfil veicular completo
+              Card(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .testTag("card_valid_power_pending"),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(
+                  containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
               ) {
-                Icon(
-                  imageVector = Icons.Outlined.ShowChart,
-                  contentDescription = null,
-                  tint = MaterialTheme.colorScheme.primary,
-                  modifier = Modifier.size(24.dp)
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                  Text(
-                    text = "Passagem salva. Cálculo de potência ainda não disponível.",
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface
+                Row(
+                  modifier = Modifier.padding(14.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                  Icon(
+                    imageVector = Icons.Outlined.ShowChart,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
                   )
-                  Text(
-                    text = "Curva disponível após implementar o cálculo de potência e torque.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                  )
+                  Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                      text = "Passagem concluída com sucesso.",
+                      style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                      color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                      text = "Dados oficiais sincronizados por GPS e acelerômetro.",
+                      style = MaterialTheme.typography.bodySmall,
+                      color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                  }
                 }
               }
             }
 
-            // 4. QUALIDADE E DIFERENÇAS
+            // 4. QUALIDADE E CONFIABILIDADE DO SINAL
             Card(
               modifier = Modifier.fillMaxWidth(),
               shape = RoundedCornerShape(14.dp),
@@ -696,7 +790,7 @@ fun ResultsScreen(
                   horizontalArrangement = Arrangement.SpaceBetween,
                   verticalAlignment = Alignment.CenterVertically
                 ) {
-                  Text("QUALIDADE E DIFERENÇAS", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp))
+                  Text("QUALIDADE DO SINAL E ESTABILIDADE", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp))
                   Surface(
                     shape = CircleShape,
                     color = if (run.quality == "BOA") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.tertiaryContainer
@@ -710,9 +804,9 @@ fun ResultsScreen(
                   }
                 }
                 HorizontalDivider(thickness = 0.6.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                DetailRow("Diferença no pico", String.format(Locale.US, "%.1f km/h", run.peakSpeedDifferenceKmh))
-                DetailRow("Diferença média sincronizada", String.format(Locale.US, "±%.1f km/h", run.averageSpeedDifferenceKmh))
-                DetailRow("Maior diferença sincronizada", String.format(Locale.US, "%.1f km/h", run.maximumSpeedDifferenceKmh))
+                DetailRow("Precisão do GPS", String.format(Locale.US, "±%.1f m", run.gpsAccuracyMeters))
+                DetailRow("Leituras de GPS válidas", "${run.validGpsLocationsCount} atualizações")
+                DetailRow("Amostras inerciais", "${run.validSamplesCount} válidas (${run.rejectedSamples} descartadas)")
               }
             }
 
@@ -1166,17 +1260,31 @@ private fun MeasurementDetailsCard(
           )
 
           // Detalhes solicitados:
-          DetailRow("Velocidade inicial", String.format(Locale.US, "%.1f km/h", run.runStartCalculatedSpeedKmh))
-          DetailRow("Máxima GPS", String.format(Locale.US, "%.1f km/h", run.maximumGpsSpeedKmh))
-          DetailRow("Máxima calculada", String.format(Locale.US, "%.1f km/h", run.maximumCalculatedSpeedKmh))
-          DetailRow("Diferença média", String.format(Locale.US, "±%.1f km/h", run.averageSpeedDifferenceKmh))
-          DetailRow("Maior diferença", String.format(Locale.US, "%.1f km/h", run.maximumSpeedDifferenceKmh))
-          DetailRow("Duração", String.format(Locale.US, "%.2f s", run.elapsedSeconds))
+          DetailRow("Velocidade inicial (GPS)", String.format(Locale.US, "%.1f km/h", run.runStartGpsSpeedKmh))
+          DetailRow("Velocidade máxima (GPS)", String.format(Locale.US, "%.1f km/h", run.maximumGpsSpeedKmh))
+          val gain = if (run.speedGainKmh > 0f) run.speedGainKmh else (run.maximumGpsSpeedKmh - run.runStartGpsSpeedKmh).coerceAtLeast(0f)
+          DetailRow("Ganho de velocidade", String.format(Locale.US, "+%.1f km/h", gain))
+          DetailRow("Duração da janela válida", String.format(Locale.US, "%.2f s", run.elapsedSeconds))
+          DetailRow("Precisão média GPS", String.format(Locale.US, "±%.1f m", run.gpsAccuracyMeters))
+          DetailRow("Fixes de GPS registrados", "${run.validGpsLocationsCount} atualizações")
+
+          if (run.peakLongitudinalG > 0f) {
+            DetailRow("Força G de pico (longitudinal)", String.format(Locale.US, "%+.2f G", run.peakLongitudinalG))
+          }
+          if (run.averageLongitudinalG > 0f) {
+            DetailRow("Força G média (longitudinal)", String.format(Locale.US, "%+.2f G", run.averageLongitudinalG))
+          }
+          if (run.totalVehicleMassKg > 0f) {
+            DetailRow("Peso total do veículo", String.format(Locale.US, "%.0f kg", run.totalVehicleMassKg))
+          }
+          if (run.drivetrainLossPercent > 0f) {
+            DetailRow("Perda de transmissão", String.format(Locale.US, "%.1f%%", run.drivetrainLossPercent))
+          }
 
           val totalCount = if (run.totalSamples > 0) run.totalSamples else orderedSamples.size
-          DetailRow("Quantidade de amostras", "$totalCount amostras")
-          DetailRow("Qualidade", run.quality)
-          DetailRow("Motivo da finalização", finishReasonEnum.displayName)
+          DetailRow("Amostras inerciais", "$totalCount (${run.rejectedSamples} descartadas)")
+          DetailRow("Classificação da passagem", run.quality)
+          DetailRow("Motivo do encerramento", finishReasonEnum.displayName)
 
           // Subseção de Amostras Gravadas da Passagem (opcional para análise técnica)
           if (orderedSamples.isNotEmpty()) {
@@ -1232,9 +1340,9 @@ private fun MeasurementDetailsCard(
                       horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                       Text("Tempo", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f))
-                      Text("Acel. Z", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f), textAlign = TextAlign.End)
-                      Text("GPS", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f), textAlign = TextAlign.End)
-                      Text("Calc", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f), textAlign = TextAlign.End)
+                      Text("Força G", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f), textAlign = TextAlign.End)
+                      Text("GPS km/h", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1.1f), textAlign = TextAlign.End)
+                      Text("Pot. cv", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f), textAlign = TextAlign.End)
                     }
 
                     Box(
@@ -1632,6 +1740,13 @@ private fun DetailRow(label: String, value: String) {
 @Composable
 private fun SampleTableRow(sample: RunSample) {
   val timeSec = sample.elapsedTimeMs / 1000.0
+  val gValue = if (sample.longitudinalG != 0f) sample.longitudinalG else (sample.filteredAccelerationZ / 9.80665f)
+  val powerDisplay = if (sample.enginePowerCv > 0f) {
+    String.format(Locale.US, "%.0f", sample.enginePowerCv)
+  } else {
+    String.format(Locale.US, "%.1f", sample.calculatedSpeedKmh)
+  }
+
   Row(
     modifier = Modifier
       .fillMaxWidth()
@@ -1646,9 +1761,9 @@ private fun SampleTableRow(sample: RunSample) {
       modifier = Modifier.weight(1f)
     )
     Text(
-      text = String.format(Locale.US, "%+.2f", sample.filteredAccelerationZ),
+      text = String.format(Locale.US, "%+.2f", gValue),
       style = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp, fontFamily = FontFamily.Monospace),
-      color = MaterialTheme.colorScheme.onSurface,
+      color = DynoPowerCyan,
       modifier = Modifier.weight(1f),
       textAlign = TextAlign.End
     )
@@ -1656,11 +1771,11 @@ private fun SampleTableRow(sample: RunSample) {
       text = String.format(Locale.US, "%.1f", sample.gpsSpeedKmh),
       style = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp, fontFamily = FontFamily.Monospace),
       color = MaterialTheme.colorScheme.primary,
-      modifier = Modifier.weight(1f),
+      modifier = Modifier.weight(1.1f),
       textAlign = TextAlign.End
     )
     Text(
-      text = String.format(Locale.US, "%.1f", sample.calculatedSpeedKmh),
+      text = powerDisplay,
       style = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp, fontFamily = FontFamily.Monospace),
       color = MaterialTheme.colorScheme.onSurface,
       modifier = Modifier.weight(1f),

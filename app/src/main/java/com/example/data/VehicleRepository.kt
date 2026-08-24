@@ -139,6 +139,9 @@ class VehicleRepository(context: Context) {
     obj.put("removedWeightKg", v.removedWeightKg.toDouble())
     if (v.measuredTotalWeightKg != null) obj.put("measuredTotalWeightKg", v.measuredTotalWeightKg.toDouble())
     obj.put("useMeasuredWeight", v.useMeasuredWeight)
+    obj.put("frontalAreaM2", v.frontalAreaM2.toDouble())
+    obj.put("dragCoefficient", v.dragCoefficient.toDouble())
+    obj.put("rollingResistanceCoeff", v.rollingResistanceCoeff.toDouble())
     obj.put("isPrimary", v.isPrimary)
     obj.put("isCustom", v.isCustom)
     return obj
@@ -176,6 +179,9 @@ class VehicleRepository(context: Context) {
       removedWeightKg = obj.optDouble("removedWeightKg", 0.0).toFloat(),
       measuredTotalWeightKg = if (obj.has("measuredTotalWeightKg")) obj.getDouble("measuredTotalWeightKg").toFloat() else null,
       useMeasuredWeight = obj.optBoolean("useMeasuredWeight", false),
+      frontalAreaM2 = obj.optDouble("frontalAreaM2", 2.15).toFloat(),
+      dragCoefficient = obj.optDouble("dragCoefficient", 0.32).toFloat(),
+      rollingResistanceCoeff = obj.optDouble("rollingResistanceCoeff", 0.015).toFloat(),
       isPrimary = obj.optBoolean("isPrimary", false),
       isCustom = obj.optBoolean("isCustom", false)
     )

@@ -139,12 +139,32 @@ class RunResultRepository(context: Context) {
     obj.put("maximumCalculatedSpeedKmh", r.maximumCalculatedSpeedKmh.toDouble())
     obj.put("finalGpsSpeedKmh", r.finalGpsSpeedKmh.toDouble())
     obj.put("finalCalculatedSpeedKmh", r.finalCalculatedSpeedKmh.toDouble())
+    obj.put("speedGainKmh", r.speedGainKmh.toDouble())
+    obj.put("estimatedPowerCv", r.estimatedPowerCv.toDouble())
+    obj.put("estimatedTorqueKgfm", r.estimatedTorqueKgfm.toDouble())
+    obj.put("wheelPowerCv", r.wheelPowerCv.toDouble())
+    obj.put("enginePowerCv", r.enginePowerCv.toDouble())
+    obj.put("wheelTorqueKgfm", r.wheelTorqueKgfm.toDouble())
+    obj.put("engineTorqueKgfm", r.engineTorqueKgfm.toDouble())
+    obj.put("peakLongitudinalG", r.peakLongitudinalG.toDouble())
+    obj.put("averageLongitudinalG", r.averageLongitudinalG.toDouble())
+    if (r.peakPowerRpm != null) obj.put("peakPowerRpm", r.peakPowerRpm)
+    if (r.peakTorqueRpm != null) obj.put("peakTorqueRpm", r.peakTorqueRpm)
+    obj.put("peakPowerSpeedKmh", r.peakPowerSpeedKmh.toDouble())
+    obj.put("peakTorqueSpeedKmh", r.peakTorqueSpeedKmh.toDouble())
+    obj.put("totalVehicleMassKg", r.totalVehicleMassKg.toDouble())
+    obj.put("drivetrainLossPercent", r.drivetrainLossPercent.toDouble())
+    obj.put("estimatedMarginPercent", r.estimatedMarginPercent.toDouble())
+    obj.put("gearUsed", r.gearUsed)
+    obj.put("isAerodynamicsEstimated", r.isAerodynamicsEstimated)
     obj.put("elapsedSeconds", r.elapsedSeconds.toDouble())
     obj.put("gpsAccuracyMeters", r.gpsAccuracyMeters.toDouble())
     obj.put("totalSamples", r.totalSamples)
     obj.put("rejectedSamples", r.rejectedSamples)
     obj.put("validSamplesCount", r.validSamplesCount)
+    obj.put("validGpsLocationsCount", r.validGpsLocationsCount)
     obj.put("averageSamplingRateHz", r.averageSamplingRateHz.toDouble())
+    obj.put("averageGpsFrequencyHz", r.averageGpsFrequencyHz.toDouble())
     obj.put("quality", r.quality)
     obj.put("finishReason", r.finishReason)
     obj.put("averageSpeedDifferenceKmh", r.averageSpeedDifferenceKmh.toDouble())
@@ -161,11 +181,17 @@ class RunResultRepository(context: Context) {
         sObj.put("t", s.elapsedTimeMs)
         sObj.put("az", s.filteredAccelerationZ.toDouble())
         sObj.put("cz", s.correctedAccelerationZ.toDouble())
+        sObj.put("g", s.longitudinalG.toDouble())
         sObj.put("gps", s.gpsSpeedKmh.toDouble())
         sObj.put("calc", s.calculatedSpeedKmh.toDouble())
         sObj.put("diff", s.speedDifferenceKmh.toDouble())
         sObj.put("acc", s.gpsAccuracyMeters.toDouble())
         sObj.put("gyro", s.gyroMagnitude.toDouble())
+        sObj.put("wp", s.wheelPowerCv.toDouble())
+        sObj.put("ep", s.enginePowerCv.toDouble())
+        sObj.put("wt", s.wheelTorqueKgfm.toDouble())
+        sObj.put("et", s.engineTorqueKgfm.toDouble())
+        if (s.engineRpm != null) sObj.put("rpm", s.engineRpm)
         sObj.put("val", s.isValid)
         if (s.rejectionReason != null) sObj.put("rej", s.rejectionReason)
         samplesArray.put(sObj)
@@ -182,16 +208,23 @@ class RunResultRepository(context: Context) {
       val samplesArray = obj.getJSONArray("samples")
       for (j in 0 until samplesArray.length()) {
         val sObj = samplesArray.getJSONObject(j)
+        val filtAz = sObj.optDouble("az", 0.0).toFloat()
         samplesList.add(
           RunSample(
             elapsedTimeMs = sObj.optLong("t", 0L),
-            filteredAccelerationZ = sObj.optDouble("az", 0.0).toFloat(),
+            filteredAccelerationZ = filtAz,
             correctedAccelerationZ = sObj.optDouble("cz", 0.0).toFloat(),
+            longitudinalG = sObj.optDouble("g", (filtAz / 9.80665).toDouble()).toFloat(),
             gpsSpeedKmh = sObj.optDouble("gps", 0.0).toFloat(),
             calculatedSpeedKmh = sObj.optDouble("calc", 0.0).toFloat(),
             speedDifferenceKmh = sObj.optDouble("diff", 0.0).toFloat(),
             gpsAccuracyMeters = sObj.optDouble("acc", 0.0).toFloat(),
             gyroMagnitude = sObj.optDouble("gyro", 0.0).toFloat(),
+            wheelPowerCv = sObj.optDouble("wp", 0.0).toFloat(),
+            enginePowerCv = sObj.optDouble("ep", 0.0).toFloat(),
+            wheelTorqueKgfm = sObj.optDouble("wt", 0.0).toFloat(),
+            engineTorqueKgfm = sObj.optDouble("et", 0.0).toFloat(),
+            engineRpm = if (sObj.has("rpm")) sObj.getInt("rpm") else null,
             isValid = sObj.optBoolean("val", true),
             rejectionReason = if (sObj.has("rej")) sObj.getString("rej") else null
           )
@@ -202,6 +235,10 @@ class RunResultRepository(context: Context) {
     val total = obj.optInt("totalSamples", samplesList.size)
     val rej = obj.optInt("rejectedSamples", samplesList.count { !it.isValid })
     val valid = obj.optInt("validSamplesCount", if (total >= rej) total - rej else 0)
+    val maxGps = obj.optDouble("maximumGpsSpeedKmh", 0.0).toFloat()
+    val startGps = obj.optDouble("runStartGpsSpeedKmh", 0.0).toFloat()
+    val estPower = obj.optDouble("estimatedPowerCv", 0.0).toFloat()
+    val estTorque = obj.optDouble("estimatedTorqueKgfm", 0.0).toFloat()
 
     return RunResult(
       id = obj.optString("id"),
@@ -209,23 +246,43 @@ class RunResultRepository(context: Context) {
       vehicleId = if (obj.has("vehicleId")) obj.getString("vehicleId") else null,
       vehicleName = obj.optString("vehicleName", ""),
       runStartCalculatedSpeedKmh = obj.optDouble("runStartCalculatedSpeedKmh", 40.0).toFloat(),
-      runStartGpsSpeedKmh = obj.optDouble("runStartGpsSpeedKmh", 0.0).toFloat(),
-      maximumGpsSpeedKmh = obj.optDouble("maximumGpsSpeedKmh", 0.0).toFloat(),
+      runStartGpsSpeedKmh = startGps,
+      maximumGpsSpeedKmh = maxGps,
       maximumCalculatedSpeedKmh = obj.optDouble("maximumCalculatedSpeedKmh", 40.0).toFloat(),
       finalGpsSpeedKmh = obj.optDouble("finalGpsSpeedKmh", 0.0).toFloat(),
       finalCalculatedSpeedKmh = obj.optDouble("finalCalculatedSpeedKmh", 0.0).toFloat(),
+      speedGainKmh = obj.optDouble("speedGainKmh", (maxGps - startGps).coerceAtLeast(0f).toDouble()).toFloat(),
+      estimatedPowerCv = estPower,
+      estimatedTorqueKgfm = estTorque,
+      wheelPowerCv = obj.optDouble("wheelPowerCv", (estPower * 0.85).toDouble()).toFloat(),
+      enginePowerCv = obj.optDouble("enginePowerCv", estPower.toDouble()).toFloat(),
+      wheelTorqueKgfm = obj.optDouble("wheelTorqueKgfm", (estTorque * 0.85).toDouble()).toFloat(),
+      engineTorqueKgfm = obj.optDouble("engineTorqueKgfm", estTorque.toDouble()).toFloat(),
+      peakLongitudinalG = obj.optDouble("peakLongitudinalG", 0.0).toFloat(),
+      averageLongitudinalG = obj.optDouble("averageLongitudinalG", 0.0).toFloat(),
+      peakPowerRpm = if (obj.has("peakPowerRpm")) obj.getInt("peakPowerRpm") else null,
+      peakTorqueRpm = if (obj.has("peakTorqueRpm")) obj.getInt("peakTorqueRpm") else null,
+      peakPowerSpeedKmh = obj.optDouble("peakPowerSpeedKmh", maxGps.toDouble()).toFloat(),
+      peakTorqueSpeedKmh = obj.optDouble("peakTorqueSpeedKmh", (startGps + (maxGps - startGps) * 0.45).toDouble()).toFloat(),
+      totalVehicleMassKg = obj.optDouble("totalVehicleMassKg", 0.0).toFloat(),
+      drivetrainLossPercent = obj.optDouble("drivetrainLossPercent", 15.0).toFloat(),
+      estimatedMarginPercent = obj.optDouble("estimatedMarginPercent", 10.0).toFloat(),
+      gearUsed = obj.optString("gearUsed", "2ª"),
+      isAerodynamicsEstimated = obj.optBoolean("isAerodynamicsEstimated", true),
       elapsedSeconds = obj.optDouble("elapsedSeconds", 0.0).toFloat(),
       gpsAccuracyMeters = obj.optDouble("gpsAccuracyMeters", 0.0).toFloat(),
       totalSamples = total,
       rejectedSamples = rej,
       validSamplesCount = valid,
+      validGpsLocationsCount = obj.optInt("validGpsLocationsCount", 4),
       averageSamplingRateHz = obj.optDouble("averageSamplingRateHz", 0.0).toFloat(),
+      averageGpsFrequencyHz = obj.optDouble("averageGpsFrequencyHz", 0.0).toFloat(),
       quality = obj.optString("quality", "BOA"),
-      finishReason = obj.optString("finishReason", "SENSOR_DECELERATION"),
+      finishReason = obj.optString("finishReason", "GPS_DECELERATION"),
       averageSpeedDifferenceKmh = obj.optDouble("averageSpeedDifferenceKmh", 0.0).toFloat(),
       maximumSpeedDifferenceKmh = obj.optDouble("maximumSpeedDifferenceKmh", 0.0).toFloat(),
       invalidationReason = if (obj.has("invalidationReason")) obj.getString("invalidationReason") else null,
-      appVersion = obj.optString("appVersion", "0.19.1"),
+      appVersion = obj.optString("appVersion", "0.20.0"),
       samples = samplesList
     )
   }

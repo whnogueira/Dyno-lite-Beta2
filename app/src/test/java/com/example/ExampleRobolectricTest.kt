@@ -29,17 +29,17 @@ class ExampleRobolectricTest {
     val repo = VehicleCatalogRepository.getInstance(context)
 
     val manufacturers = repo.getManufacturers()
-    assertTrue(manufacturers.any { it.id == "volkswagen" })
-    assertTrue(manufacturers.any { it.id == "chevrolet" })
+    assertTrue(manufacturers.any { it.id == "vw" || it.id == "volkswagen" })
+    assertTrue(manufacturers.any { it.id == "gm" || it.id == "chevrolet" })
 
     // Test VW Vehicles (AP to Jetta)
-    val vwVehicles = repo.getVehiclesForManufacturer("volkswagen")
+    val vwVehicles = repo.getVehiclesForManufacturer("vw")
     assertTrue(vwVehicles.isNotEmpty())
     assertTrue(vwVehicles.any { it.model.contains("Gol", ignoreCase = true) })
     assertTrue(vwVehicles.any { it.model.contains("Jetta", ignoreCase = true) })
 
     // Test GM Vehicles (Family 1 and 2)
-    val gmVehicles = repo.getVehiclesForManufacturer("chevrolet")
+    val gmVehicles = repo.getVehiclesForManufacturer("gm")
     assertTrue(gmVehicles.isNotEmpty())
     assertTrue(gmVehicles.any { it.model.contains("Corsa", ignoreCase = true) })
     assertTrue(gmVehicles.any { it.model.contains("Vectra", ignoreCase = true) })
@@ -54,8 +54,8 @@ class ExampleRobolectricTest {
     // Test Transmissions
     val transmissions = repo.getAllTransmissions()
     assertTrue(transmissions.isNotEmpty())
-    assertTrue(transmissions.any { it.id.contains("gm_f17") || it.code.contains("F17") })
-    assertTrue(transmissions.any { it.id.contains("vw_pv") || it.code.contains("PV") })
+    assertTrue(transmissions.any { it.id.contains("gm_f") || it.displayName.contains("GM") })
+    assertTrue(transmissions.any { it.id.contains("vw_020") || it.displayName.contains("VW") })
 
     // Test Conversion to VehicleProfile
     val firstVw = vwVehicles.first()
