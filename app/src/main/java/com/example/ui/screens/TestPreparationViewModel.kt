@@ -234,14 +234,14 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
   private var isGpsLocationCallbackActive = false
   private var isSensorListenerActive = false
 
-  private var onRunCompletedCallback: (() -> Unit)? = null
+  private var onRunCompletedCallback: ((Boolean) -> Unit)? = null
 
   init {
     screenStabilizedTimestampMs = SystemClock.elapsedRealtime()
     startDisplaySpeedUpdateLoop()
   }
 
-  fun setOnRunCompletedCallback(callback: () -> Unit) {
+  fun setOnRunCompletedCallback(callback: (Boolean) -> Unit) {
     this.onRunCompletedCallback = callback
   }
 
@@ -1223,7 +1223,7 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
         resultSaved = true
       }
 
-      onRunCompletedCallback?.invoke()
+      onRunCompletedCallback?.invoke(resultSaved)
     }
   }
 

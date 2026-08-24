@@ -18,6 +18,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.DirectionsCar
@@ -26,8 +28,11 @@ import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -57,6 +62,7 @@ import com.example.ui.components.DynoStatusBadge
 import com.example.ui.theme.DynoBlueLight
 import com.example.ui.theme.DynoBluePrimary
 import com.example.ui.theme.DynoDivider
+import com.example.ui.theme.DynoErrorRed
 import com.example.ui.theme.DynoPowerCyan
 import com.example.ui.theme.DynoSuccessGreen
 import com.example.ui.theme.DynoSurfaceElevated
@@ -71,10 +77,11 @@ import java.util.Locale
 fun HomeScreen(
   primaryVehicle: VehicleProfile?,
   lastRunResult: RunResult? = null,
+  feedbackMessage: String? = null,
+  onDismissFeedback: () -> Unit = {},
   onNavigateToWizard: () -> Unit,
   onNavigateToGarage: () -> Unit,
   onNavigateToTestPrep: () -> Unit,
-  onNavigateToResults: () -> Unit = {},
   onNavigateToSettings: () -> Unit,
   onNavigateToGuide: () -> Unit = {},
   modifier: Modifier = Modifier
@@ -104,6 +111,70 @@ fun HomeScreen(
         subtitleText = "Desempenho do seu carro de forma simples",
         modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
       )
+
+      // Feedback Message Banner (ex: após término da passagem)
+      if (feedbackMessage != null) {
+        Card(
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("banner_feedback_message"),
+          shape = RoundedCornerShape(12.dp),
+          colors = CardDefaults.cardColors(
+            containerColor = if (feedbackMessage.contains("Não foi possível", ignoreCase = true))
+              DynoErrorRed.copy(alpha = 0.15f)
+            else
+              DynoSuccessGreen.copy(alpha = 0.15f)
+          ),
+          border = BorderStroke(
+            1.dp,
+            if (feedbackMessage.contains("Não foi possível", ignoreCase = true))
+              DynoErrorRed.copy(alpha = 0.5f)
+            else
+              DynoSuccessGreen.copy(alpha = 0.5f)
+          )
+        ) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+          ) {
+            Icon(
+              imageVector = if (feedbackMessage.contains("Não foi possível", ignoreCase = true))
+                Icons.Default.Close
+              else
+                Icons.Default.Check,
+              contentDescription = null,
+              tint = if (feedbackMessage.contains("Não foi possível", ignoreCase = true))
+                DynoErrorRed
+              else
+                DynoSuccessGreen,
+              modifier = Modifier.size(22.dp)
+            )
+            Text(
+              text = feedbackMessage,
+              style = MaterialTheme.typography.bodyMedium.copy(
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 13.5.sp
+              ),
+              color = DynoTextPrimary,
+              modifier = Modifier.weight(1f)
+            )
+            IconButton(
+              onClick = onDismissFeedback,
+              modifier = Modifier.size(24.dp)
+            ) {
+              Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Fechar aviso",
+                tint = DynoTextSecondary,
+                modifier = Modifier.size(16.dp)
+              )
+            }
+          }
+        }
+      }
 
       if (primaryVehicle == null) {
         // -------------------------------------------------------------
@@ -442,19 +513,19 @@ fun HomeScreen(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
           ) {
             DynoSecondaryButton(
-              text = "VER RESULTADOS",
-              onClick = onNavigateToResults,
-              icon = Icons.Outlined.Visibility,
-              modifier = Modifier.weight(1f),
-              testTag = "btn_view_last_result"
-            )
-
-            DynoSecondaryButton(
               text = "DADOS DO CARRO",
               onClick = onNavigateToGarage,
               icon = Icons.Outlined.DirectionsCar,
               modifier = Modifier.weight(1f),
               testTag = "btn_view_vehicle_data"
+            )
+
+            DynoSecondaryButton(
+              text = "GUIA DO TESTE",
+              onClick = onNavigateToGuide,
+              icon = Icons.Outlined.MenuBook,
+              modifier = Modifier.weight(1f),
+              testTag = "btn_home_guide"
             )
           }
         }

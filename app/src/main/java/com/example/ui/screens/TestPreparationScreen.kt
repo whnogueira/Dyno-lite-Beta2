@@ -150,8 +150,7 @@ fun LockScreenOrientation(orientation: Int) {
 @Composable
 fun TestPreparationScreen(
   vehicle: VehicleProfile,
-  onNavigateToResults: () -> Unit,
-  onNavigateToHome: () -> Unit,
+  onNavigateToHome: (saved: Boolean) -> Unit,
   onSwitchVehicle: () -> Unit,
   onEditVehicle: () -> Unit,
   onNavigateBack: () -> Unit,
@@ -213,8 +212,8 @@ fun TestPreparationScreen(
       viewModel.startLocationUpdates()
     }
     viewModel.startSensorUpdates()
-    viewModel.setOnRunCompletedCallback {
-      onNavigateToResults()
+    viewModel.setOnRunCompletedCallback { saved ->
+      onNavigateToHome(saved)
     }
   }
 
@@ -1344,9 +1343,9 @@ private fun HorizontalDynoSpeedometer(
 /**
  * Função utilitária para retorno seguro à Home ou voltar
  */
-private fun onNavigateHomeOrBack(onNavigateToHome: () -> Unit, onNavigateBack: () -> Unit) {
+private fun onNavigateHomeOrBack(onNavigateToHome: (Boolean) -> Unit, onNavigateBack: () -> Unit) {
   try {
-    onNavigateToHome()
+    onNavigateToHome(false)
   } catch (e: Exception) {
     onNavigateBack()
   }

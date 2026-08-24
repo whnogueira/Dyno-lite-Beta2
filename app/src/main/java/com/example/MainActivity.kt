@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.VehicleRepository
 import com.example.model.VehicleProfile
 import com.example.ui.components.DynoBottomNavigation
+import com.example.ui.components.DynoTab
 import com.example.ui.components.DynoTopBar
 import com.example.ui.screens.AccuracyGuideScreen
 import com.example.ui.screens.GarageScreen
@@ -91,11 +92,12 @@ fun DynoLiteApp() {
   }
 
   var vehicles by remember { mutableStateOf(repository.getVehicles()) }
-  var currentDestination by rememberSaveable { mutableStateOf(AppDestination.MAIN_TABS) }
-  var previousDestination by rememberSaveable { mutableStateOf<AppDestination?>(null) }
-  var selectedTabIndex by rememberSaveable { mutableIntStateOf(0) }
+  var currentDestination by remember { mutableStateOf(AppDestination.MAIN_TABS) }
+  var previousDestination by remember { mutableStateOf<AppDestination?>(null) }
+  var selectedTab by remember { mutableStateOf(DynoTab.HOME) }
   var vehicleToEdit by remember { mutableStateOf<VehicleProfile?>(null) }
   var activeTestVehicle by remember { mutableStateOf<VehicleProfile?>(null) }
+  var homeFeedbackMessage by remember { mutableStateOf<String?>(null) }
 
   // Onboarding presentation dialog state for version 0.16.0
   var showOnboardingDialog by remember {
@@ -105,15 +107,16 @@ fun DynoLiteApp() {
   val primaryVehicle = repository.getPrimaryVehicle()
 
   // Hardware / gesture back navigation handler
-  BackHandler(enabled = currentDestination != AppDestination.MAIN_TABS || selectedTabIndex != 0) {
+  BackHandler(enabled = currentDestination != AppDestination.MAIN_TABS || selectedTab != DynoTab.HOME) {
     if (currentDestination != AppDestination.MAIN_TABS) {
       if (currentDestination == AppDestination.ACCURACY_GUIDE) {
         currentDestination = previousDestination ?: AppDestination.MAIN_TABS
       } else {
         currentDestination = AppDestination.MAIN_TABS
+        selectedTab = DynoTab.HOME
       }
-    } else if (selectedTabIndex != 0) {
-      selectedTabIndex = 0
+    } else if (selectedTab != DynoTab.HOME) {
+      selectedTab = DynoTab.HOME
     }
   }
 
@@ -158,21 +161,30 @@ fun DynoLiteApp() {
         },
         bottomBar = {
           DynoBottomNavigation(
-            selectedTabIndex = selectedTabIndex,
-            onTabSelected = { selectedTabIndex = it }
+            selectedTab = selectedTab,
+            onTabSelected = { clickedTab ->
+              // Limpa feedback se o usuário navega voluntariamente
+              if (clickedTab != DynoTab.HOME) {
+                homeFeedbackMessage = null
+              }
+              selectedTab = clickedTab
+            }
           )
         }
       ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding)) {
-          when (selectedTabIndex) {
-            0 -> HomeScreen(
+          when (selectedTab) {
+            DynoTab.HOME -> HomeScreen(
               primaryVehicle = primaryVehicle,
+              feedbackMessage = homeFeedbackMessage,
+              onDismissFeedback = { homeFeedbackMessage = null },
               onNavigateToWizard = {
                 vehicleToEdit = null
                 currentDestination = AppDestination.VEHICLE_WIZARD
               },
-              onNavigateToGarage = { selectedTabIndex = 1 },
+              onNavigateToGarage = { selectedTab = DynoTab.GARAGE },
               onNavigateToTestPrep = {
+                homeFeedbackMessage = null
                 if (primaryVehicle != null) {
                   activeTestVehicle = primaryVehicle
                   currentDestination = AppDestination.TEST_PREPARATION
@@ -187,7 +199,7 @@ fun DynoLiteApp() {
                 currentDestination = AppDestination.ACCURACY_GUIDE
               }
             )
-            1 -> GarageScreen(
+            DynoTab.GARAGE -> GarageScreen(
               vehicles = vehicles,
               onAddVehicle = {
                 vehicleToEdit = null
@@ -213,19 +225,21 @@ fun DynoLiteApp() {
                 repository.setPrimaryVehicle(veh.id)
                 vehicles = repository.getVehicles()
                 activeTestVehicle = veh
+                homeFeedbackMessage = null
                 currentDestination = AppDestination.TEST_PREPARATION
               },
               onNavigateToHome = {
-                selectedTabIndex = 0
+                selectedTab = DynoTab.HOME
               }
             )
-            2 -> ResultsScreen(
+            DynoTab.RESULTS -> ResultsScreen(
               onStartNewTest = { vehicleId ->
                 val targetVeh = vehicleId?.let { id -> vehicles.find { it.id == id } }
                   ?: primaryVehicle
                   ?: vehicles.firstOrNull()
                 if (targetVeh != null) {
                   activeTestVehicle = targetVeh
+                  homeFeedbackMessage = null
                   currentDestination = AppDestination.TEST_PREPARATION
                 } else {
                   vehicleToEdit = null
@@ -246,6 +260,7 @@ fun DynoLiteApp() {
           repository.setPrimaryVehicle(savedVeh.id)
           vehicles = repository.getVehicles()
           activeTestVehicle = savedVeh
+          homeFeedbackMessage = null
           currentDestination = AppDestination.TEST_PREPARATION
         },
         onCancel = {
@@ -253,6 +268,7 @@ fun DynoLiteApp() {
             currentDestination = AppDestination.TEST_PREPARATION
           } else {
             currentDestination = AppDestination.MAIN_TABS
+            selectedTab = DynoTab.HOME
           }
         }
       )
@@ -263,20 +279,20 @@ fun DynoLiteApp() {
       if (veh != null) {
         TestPreparationScreen(
           vehicle = veh,
-          onNavigateToResults = {
+          onNavigateToHome = { saved ->
             activeTestVehicle = null
             currentDestination = AppDestination.MAIN_TABS
-            selectedTabIndex = 2
-          },
-          onNavigateToHome = {
-            activeTestVehicle = null
-            currentDestination = AppDestination.MAIN_TABS
-            selectedTabIndex = 0
+            selectedTab = DynoTab.HOME
+            if (saved) {
+              homeFeedbackMessage = "Passagem salva. Veja o resultado na aba Resultados."
+            } else {
+              homeFeedbackMessage = "Não foi possível salvar a passagem."
+            }
           },
           onSwitchVehicle = {
             activeTestVehicle = null
             currentDestination = AppDestination.MAIN_TABS
-            selectedTabIndex = 1
+            selectedTab = DynoTab.GARAGE
           },
           onEditVehicle = {
             vehicleToEdit = veh
@@ -285,11 +301,14 @@ fun DynoLiteApp() {
           },
           onNavigateBack = {
             activeTestVehicle = null
+            homeFeedbackMessage = null
             currentDestination = AppDestination.MAIN_TABS
+            selectedTab = DynoTab.HOME
           }
         )
       } else {
         currentDestination = AppDestination.MAIN_TABS
+        selectedTab = DynoTab.HOME
       }
     }
 
@@ -308,6 +327,7 @@ fun DynoLiteApp() {
         },
         onNavigateBack = {
           currentDestination = AppDestination.MAIN_TABS
+          selectedTab = DynoTab.HOME
         }
       )
     }
@@ -324,10 +344,11 @@ fun DynoLiteApp() {
       SensorScreen(
         onNavigateBack = {
           currentDestination = AppDestination.MAIN_TABS
+          selectedTab = DynoTab.HOME
         },
         onNavigateToResults = {
           currentDestination = AppDestination.MAIN_TABS
-          selectedTabIndex = 2
+          selectedTab = DynoTab.RESULTS
         }
       )
     }

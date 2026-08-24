@@ -821,14 +821,20 @@ fun DynoTopBar(
   )
 }
 
+enum class DynoTab {
+  HOME,
+  GARAGE,
+  RESULTS
+}
+
 // =========================================================================================
 // 7. BOTTOM NAVIGATION PADRONIZADA (DYNO BOTTOM NAVIGATION)
 // =========================================================================================
 
 @Composable
 fun DynoBottomNavigation(
-  selectedTabIndex: Int,
-  onTabSelected: (Int) -> Unit,
+  selectedTab: DynoTab,
+  onTabSelected: (DynoTab) -> Unit,
   modifier: Modifier = Modifier
 ) {
   Column(modifier = modifier) {
@@ -840,11 +846,11 @@ fun DynoBottomNavigation(
     ) {
       // 1. INÍCIO
       NavigationBarItem(
-        selected = selectedTabIndex == 0,
-        onClick = { onTabSelected(0) },
+        selected = selectedTab == DynoTab.HOME,
+        onClick = { onTabSelected(DynoTab.HOME) },
         icon = {
           Icon(
-            imageVector = if (selectedTabIndex == 0) Icons.Default.Home else Icons.Outlined.Home,
+            imageVector = if (selectedTab == DynoTab.HOME) Icons.Default.Home else Icons.Outlined.Home,
             contentDescription = "Início",
             modifier = Modifier.size(24.dp)
           )
@@ -853,7 +859,7 @@ fun DynoBottomNavigation(
           Text(
             text = "INÍCIO",
             style = MaterialTheme.typography.labelSmall.copy(
-              fontWeight = if (selectedTabIndex == 0) FontWeight.Bold else FontWeight.Medium,
+              fontWeight = if (selectedTab == DynoTab.HOME) FontWeight.Bold else FontWeight.Medium,
               fontSize = 11.sp
             )
           )
@@ -870,11 +876,11 @@ fun DynoBottomNavigation(
 
       // 2. GARAGEM
       NavigationBarItem(
-        selected = selectedTabIndex == 1,
-        onClick = { onTabSelected(1) },
+        selected = selectedTab == DynoTab.GARAGE,
+        onClick = { onTabSelected(DynoTab.GARAGE) },
         icon = {
           Icon(
-            imageVector = if (selectedTabIndex == 1) Icons.Default.DirectionsCar else Icons.Outlined.DirectionsCar,
+            imageVector = if (selectedTab == DynoTab.GARAGE) Icons.Default.DirectionsCar else Icons.Outlined.DirectionsCar,
             contentDescription = "Garagem",
             modifier = Modifier.size(24.dp)
           )
@@ -883,7 +889,7 @@ fun DynoBottomNavigation(
           Text(
             text = "GARAGEM",
             style = MaterialTheme.typography.labelSmall.copy(
-              fontWeight = if (selectedTabIndex == 1) FontWeight.Bold else FontWeight.Medium,
+              fontWeight = if (selectedTab == DynoTab.GARAGE) FontWeight.Bold else FontWeight.Medium,
               fontSize = 11.sp
             )
           )
@@ -898,13 +904,13 @@ fun DynoBottomNavigation(
         modifier = Modifier.testTag("nav_tab_garage")
       )
 
-      // 3. RESULTADOS
+      // 3. RESULTADOS (Resultados abre exclusivamente por toque manual do usuário nesta aba)
       NavigationBarItem(
-        selected = selectedTabIndex == 2,
-        onClick = { onTabSelected(2) },
+        selected = selectedTab == DynoTab.RESULTS,
+        onClick = { onTabSelected(DynoTab.RESULTS) },
         icon = {
           Icon(
-            imageVector = if (selectedTabIndex == 2) Icons.Default.Assessment else Icons.Outlined.Assessment,
+            imageVector = if (selectedTab == DynoTab.RESULTS) Icons.Default.Assessment else Icons.Outlined.Assessment,
             contentDescription = "Resultados",
             modifier = Modifier.size(24.dp)
           )
@@ -913,7 +919,7 @@ fun DynoBottomNavigation(
           Text(
             text = "RESULTADOS",
             style = MaterialTheme.typography.labelSmall.copy(
-              fontWeight = if (selectedTabIndex == 2) FontWeight.Bold else FontWeight.Medium,
+              fontWeight = if (selectedTab == DynoTab.RESULTS) FontWeight.Bold else FontWeight.Medium,
               fontSize = 11.sp
             )
           )
