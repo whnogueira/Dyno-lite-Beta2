@@ -61,9 +61,13 @@ data class VehicleProfile(
   val drivetrain: String = "Dianteira",
   val transmissionId: String? = null,
   val customTransmissionName: String? = null,
+  val gearRatio: Float? = null,
+  val finalDriveRatio: Float? = null,
+  val customDrivetrainLossPercent: Float? = null,
   val tireWidthMm: Int = 185,
   val tireAspectRatio: Int = 70,
   val wheelDiameterInches: Int = 14,
+  val tireCorrectionPercent: Float = 0.0f,
   val driverWeightKg: Float = 0f,
   val passengerWeightKg: Float = 0f,
   val cargoWeightKg: Float = 0f,
@@ -74,9 +78,12 @@ data class VehicleProfile(
   val removedWeightKg: Float = 0f,
   val measuredTotalWeightKg: Float? = null,
   val useMeasuredWeight: Boolean = false,
-  val frontalAreaM2: Float = 2.15f,
-  val dragCoefficient: Float = 0.32f,
+  val frontalAreaM2: Float = 2.10f,
+  val dragCoefficient: Float = 0.34f,
   val rollingResistanceCoeff: Float = 0.015f,
+  val airDensityKgM3: Float = 1.225f,
+  val slopeMode: String = "IGNORE", // "IGNORE", "ESTIMATED", "MANUAL"
+  val manualSlopePercent: Float = 0.0f,
   val isPrimary: Boolean = false,
   val isCustom: Boolean = false
 ) {
@@ -108,24 +115,30 @@ object VehicleCalculations {
   const val WATTS_PER_CV = 735.49875f
   const val AIR_DENSITY_SEA_LEVEL = 1.225f
   const val DEFAULT_CRR = 0.015f
-  const val DEFAULT_CD = 0.32f
-  const val DEFAULT_FRONTAL_AREA = 2.15f
+  const val DEFAULT_CD = 0.34f
+  const val DEFAULT_FRONTAL_AREA = 2.10f
 
   fun mps2ToG(mps2: Float): Float = mps2 / STANDARD_GRAVITY
 
   fun gToMps2(g: Float): Float = g * STANDARD_GRAVITY
 
-  fun calculateTireDimensions(widthMm: Int, aspectRatio: Int, rimInches: Int): TireCalculation {
+  fun calculateTireDimensions(
+    widthMm: Int,
+    aspectRatio: Int,
+    rimInches: Int,
+    tireCorrectionPercent: Float = 0.0f
+  ): TireCalculation {
     val lateralHeight = widthMm * (aspectRatio / 100.0)
     val rimDiameter = rimInches * 25.4
     val totalDiameter = rimDiameter + 2.0 * lateralHeight
-    val circumference = (PI * totalDiameter) / 1000.0
+    val baseCircumference = (PI * totalDiameter) / 1000.0
+    val correctedCircumference = baseCircumference * (1.0 + (tireCorrectionPercent / 100.0))
 
     return TireCalculation(
       lateralHeightMm = lateralHeight,
       rimDiameterMm = rimDiameter,
       totalDiameterMm = totalDiameter,
-      circumferenceM = circumference,
+      circumferenceM = correctedCircumference,
       formattedMeasure = "$widthMm/${aspectRatio} R$rimInches"
     )
   }
@@ -183,6 +196,12 @@ object VehicleCalculations {
     return (0.5f * airDensity * cd * frontalAreaM2 * v * v).coerceAtLeast(0f)
   }
 
+  fun calculateSlopeForce(totalMassKg: Float, slopePercent: Float): Float {
+    if (slopePercent == 0f) return 0f
+    val angleRad = kotlin.math.atan(slopePercent / 100.0)
+    return (totalMassKg * STANDARD_GRAVITY * kotlin.math.sin(angleRad)).toFloat()
+  }
+
   fun calculateAccelerationForce(
     totalMassKg: Float,
     accelerationMps2: Float
@@ -193,9 +212,19 @@ object VehicleCalculations {
   fun calculateTractiveForce(
     accelForceN: Float,
     rollForceN: Float,
-    aeroForceN: Float
+    aeroForceN: Float,
+    slopeForceN: Float = 0f
   ): Float {
-    return (accelForceN + rollForceN + aeroForceN).coerceAtLeast(0f)
+    return (accelForceN + rollForceN + aeroForceN + slopeForceN).coerceAtLeast(0f)
+  }
+
+  fun calculateTotalTractiveForce(
+    accelForceN: Float,
+    rollForceN: Float,
+    aeroForceN: Float,
+    slopeForceN: Float = 0f
+  ): Float {
+    return calculateTractiveForce(accelForceN, rollForceN, aeroForceN, slopeForceN)
   }
 
   fun calculateWheelPowerWatts(
@@ -213,22 +242,39 @@ object VehicleCalculations {
     return (powerCv * WATTS_PER_CV).coerceAtLeast(0f)
   }
 
-  fun getDrivetrainEfficiency(drivetrain: String?): Float {
-    return when (drivetrain?.lowercase()) {
-      "dianteira", "fwd" -> 0.85f // 15% perda
-      "traseira", "rwd" -> 0.82f  // 18% perda
-      "integral", "4x4", "awd", "4wd" -> 0.75f // 25% perda
-      else -> 0.85f
+  fun getDrivetrainEfficiency(
+    drivetrain: String?,
+    customLossPercent: Float? = null
+  ): Float {
+    if (customLossPercent != null && customLossPercent in 0f..50f) {
+      return (1.0f - (customLossPercent / 100f)).coerceIn(0.5f, 1.0f)
+    }
+    return when (drivetrain?.lowercase()?.trim()) {
+      "dianteira", "fwd" -> 0.88f // 12% perda
+      "traseira", "rwd" -> 0.85f  // 15% perda
+      "integral", "4x4", "awd", "4wd" -> 0.80f // 20% perda
+      else -> 0.88f
     }
   }
 
-  fun getDrivetrainLossPercent(drivetrain: String?): Float {
-    val efficiency = getDrivetrainEfficiency(drivetrain)
+  fun getDrivetrainLossPercent(
+    drivetrain: String?,
+    customLossPercent: Float? = null
+  ): Float {
+    if (customLossPercent != null && customLossPercent in 0f..50f) {
+      return customLossPercent
+    }
+    val efficiency = getDrivetrainEfficiency(drivetrain, null)
     return (1.0f - efficiency) * 100f
   }
 
-  fun calculateEnginePowerCv(wheelPowerCv: Float, drivetrain: String?): Float {
-    val efficiency = getDrivetrainEfficiency(drivetrain)
+  fun calculateEnginePowerCv(
+    wheelPowerCv: Float,
+    drivetrain: String?,
+    customLossPercent: Float? = null
+  ): Float {
+    val efficiency = getDrivetrainEfficiency(drivetrain, customLossPercent)
+    if (efficiency <= 0f) return wheelPowerCv
     return (wheelPowerCv / efficiency).coerceAtLeast(0f)
   }
 
@@ -242,21 +288,24 @@ object VehicleCalculations {
     val wheelRps = velocityMps / tireCircumferenceM
     val wheelRpm = wheelRps * 60.0
     val engineRpm = (wheelRpm * gearRatio * finalDriveRatio).toFloat()
-    return if (engineRpm in 500f..12000f) engineRpm else null
+    return if (engineRpm in 400f..14000f) engineRpm else null
   }
 
   fun calculateTorqueKgfm(powerCv: Float, rpm: Float): Float? {
-    if (rpm <= 100f || powerCv <= 0f) return null
+    if (rpm <= 500f || powerCv <= 0f) return null
     // T (kgf.m) = (P (cv) * 716.2) / RPM
     val torque = (powerCv * 716.2f) / rpm
-    return if (torque in 0.5f..500f) torque else null
+    return if (torque in 0.1f..1000f) torque else null
   }
 
-  fun calculateTorqueNm(powerWatts: Float, rpm: Float): Float? {
-    if (rpm <= 100f || powerWatts <= 0f) return null
-    // omega = rpm * 2 * PI / 60 = rpm * PI / 30
+  fun calculateTorqueNm(torqueKgfm: Float): Float {
+    return torqueKgfm * STANDARD_GRAVITY
+  }
+
+  fun calculateTorqueNmFromPower(powerWatts: Float, rpm: Float): Float? {
+    if (rpm <= 500f || powerWatts <= 0f) return null
     val omega = (rpm * PI / 30.0).toFloat()
     val torqueNm = powerWatts / omega
-    return if (torqueNm in 5f..5000f) torqueNm else null
+    return if (torqueNm in 1f..10000f) torqueNm else null
   }
 }

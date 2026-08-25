@@ -126,9 +126,13 @@ class VehicleRepository(context: Context) {
     obj.put("drivetrain", v.drivetrain)
     if (v.transmissionId != null) obj.put("transmissionId", v.transmissionId)
     if (v.customTransmissionName != null) obj.put("customTransmissionName", v.customTransmissionName)
+    if (v.gearRatio != null) obj.put("gearRatio", v.gearRatio.toDouble())
+    if (v.finalDriveRatio != null) obj.put("finalDriveRatio", v.finalDriveRatio.toDouble())
+    if (v.customDrivetrainLossPercent != null) obj.put("customDrivetrainLossPercent", v.customDrivetrainLossPercent.toDouble())
     obj.put("tireWidthMm", v.tireWidthMm)
     obj.put("tireAspectRatio", v.tireAspectRatio)
     obj.put("wheelDiameterInches", v.wheelDiameterInches)
+    obj.put("tireCorrectionPercent", v.tireCorrectionPercent.toDouble())
     obj.put("driverWeightKg", v.driverWeightKg.toDouble())
     obj.put("passengerWeightKg", v.passengerWeightKg.toDouble())
     obj.put("cargoWeightKg", v.cargoWeightKg.toDouble())
@@ -142,6 +146,9 @@ class VehicleRepository(context: Context) {
     obj.put("frontalAreaM2", v.frontalAreaM2.toDouble())
     obj.put("dragCoefficient", v.dragCoefficient.toDouble())
     obj.put("rollingResistanceCoeff", v.rollingResistanceCoeff.toDouble())
+    obj.put("airDensityKgM3", v.airDensityKgM3.toDouble())
+    obj.put("slopeMode", v.slopeMode)
+    obj.put("manualSlopePercent", v.manualSlopePercent.toDouble())
     obj.put("isPrimary", v.isPrimary)
     obj.put("isCustom", v.isCustom)
     return obj
@@ -162,9 +169,13 @@ class VehicleRepository(context: Context) {
       drivetrain = obj.optString("drivetrain", "Dianteira"),
       transmissionId = if (obj.has("transmissionId")) obj.getString("transmissionId") else null,
       customTransmissionName = if (obj.has("customTransmissionName")) obj.getString("customTransmissionName") else null,
+      gearRatio = if (obj.has("gearRatio")) obj.getDouble("gearRatio").toFloat() else null,
+      finalDriveRatio = if (obj.has("finalDriveRatio")) obj.getDouble("finalDriveRatio").toFloat() else null,
+      customDrivetrainLossPercent = if (obj.has("customDrivetrainLossPercent")) obj.getDouble("customDrivetrainLossPercent").toFloat() else null,
       tireWidthMm = obj.optInt("tireWidthMm", 185),
       tireAspectRatio = obj.optInt("tireAspectRatio", 70),
       wheelDiameterInches = obj.optInt("wheelDiameterInches", 14),
+      tireCorrectionPercent = obj.optDouble("tireCorrectionPercent", 0.0).toFloat(),
       driverWeightKg = obj.optDouble("driverWeightKg", 0.0).toFloat(),
       passengerWeightKg = obj.optDouble("passengerWeightKg", 0.0).toFloat(),
       cargoWeightKg = obj.optDouble("cargoWeightKg", 0.0).toFloat(),
@@ -179,9 +190,12 @@ class VehicleRepository(context: Context) {
       removedWeightKg = obj.optDouble("removedWeightKg", 0.0).toFloat(),
       measuredTotalWeightKg = if (obj.has("measuredTotalWeightKg")) obj.getDouble("measuredTotalWeightKg").toFloat() else null,
       useMeasuredWeight = obj.optBoolean("useMeasuredWeight", false),
-      frontalAreaM2 = obj.optDouble("frontalAreaM2", 2.15).toFloat(),
-      dragCoefficient = obj.optDouble("dragCoefficient", 0.32).toFloat(),
+      frontalAreaM2 = obj.optDouble("frontalAreaM2", 2.10).toFloat(),
+      dragCoefficient = obj.optDouble("dragCoefficient", 0.34).toFloat(),
       rollingResistanceCoeff = obj.optDouble("rollingResistanceCoeff", 0.015).toFloat(),
+      airDensityKgM3 = obj.optDouble("airDensityKgM3", 1.225).toFloat(),
+      slopeMode = obj.optString("slopeMode", "IGNORE"),
+      manualSlopePercent = obj.optDouble("manualSlopePercent", 0.0).toFloat(),
       isPrimary = obj.optBoolean("isPrimary", false),
       isCustom = obj.optBoolean("isCustom", false)
     )

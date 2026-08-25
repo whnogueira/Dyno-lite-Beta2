@@ -638,6 +638,8 @@ fun ResultsScreen(
 
             // 3. CARTÕES DE POTÊNCIA, TORQUE E FORÇA G (ESTIMADOS)
             if (run.estimatedPowerCv > 0f || run.peakLongitudinalG > 0f) {
+              val runSamples = remember(run.id) { runResultRepository.getOrderedRunSamples(run.id) }
+
               Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
                   modifier = Modifier.fillMaxWidth(),
@@ -707,6 +709,21 @@ fun ResultsScreen(
                       }
                     }
                   }
+                }
+
+                // Gráfico Dinamômetro com Curva de Potência e Torque
+                DynoPowerTorqueGraphCard(
+                  samples = runSamples,
+                  hasVehicleConfig = true,
+                  peakPowerCv = if (run.enginePowerCv > 0f) run.enginePowerCv else run.estimatedPowerCv,
+                  peakTorqueKgfm = if (run.engineTorqueKgfm > 0f) run.engineTorqueKgfm else run.estimatedTorqueKgfm,
+                  modifier = Modifier.fillMaxWidth()
+                )
+                DynoGraphLegend(modifier = Modifier.fillMaxWidth())
+
+                // Splits de Aceleração (se houver tempos registrados)
+                if (hasAnySplits(run)) {
+                  AccelerationSplitsCard(run = run, modifier = Modifier.fillMaxWidth())
                 }
 
                 // Aviso e Margem Técnica
@@ -959,21 +976,179 @@ fun ResultsScreen(
   }
 }
 
+fun hasAnySplits(run: RunResult): Boolean {
+  return (run.time0to60Kmh ?: 0f) > 0f ||
+    (run.time0to100Kmh ?: 0f) > 0f ||
+    (run.time60to100Kmh ?: 0f) > 0f ||
+    (run.time80to120Kmh ?: 0f) > 0f ||
+    (run.time100to200Kmh ?: 0f) > 0f ||
+    (run.time60Feet ?: 0f) > 0f ||
+    (run.time100M ?: 0f) > 0f ||
+    (run.time201M ?: 0f) > 0f ||
+    (run.time402M ?: 0f) > 0f
+}
+
+/**
+ * Cartão com os Splits de Aceleração e Distância
+ */
+@Composable
+private fun AccelerationSplitsCard(
+  run: RunResult,
+  modifier: Modifier = Modifier
+) {
+  Card(
+    modifier = modifier.testTag("card_acceleration_splits"),
+    shape = RoundedCornerShape(16.dp),
+    colors = CardDefaults.cardColors(
+      containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    ),
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(14.dp),
+      verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          Icon(
+            imageVector = Icons.Default.Speed,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(18.dp)
+          )
+          Text(
+            text = "PARCIAIS DE ACELERAÇÃO (SPLITS)",
+            style = MaterialTheme.typography.labelMedium.copy(
+              fontWeight = FontWeight.Bold,
+              letterSpacing = 0.5.sp
+            ),
+            color = MaterialTheme.colorScheme.onSurface
+          )
+        }
+      }
+
+      HorizontalDivider(
+        thickness = 0.6.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+      )
+
+      // Splits de Velocidade
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+      ) {
+        if ((run.time0to60Kmh ?: 0f) > 0f) {
+          SplitMetricItem(label = "0-60 km/h", value = String.format(Locale.US, "%.2fs", run.time0to60Kmh), modifier = Modifier.weight(1f))
+        }
+        if ((run.time0to100Kmh ?: 0f) > 0f) {
+          SplitMetricItem(label = "0-100 km/h", value = String.format(Locale.US, "%.2fs", run.time0to100Kmh), modifier = Modifier.weight(1f), isHighlight = true)
+        }
+        if ((run.time60to100Kmh ?: 0f) > 0f) {
+          SplitMetricItem(label = "60-100 km/h", value = String.format(Locale.US, "%.2fs", run.time60to100Kmh), modifier = Modifier.weight(1f))
+        }
+        if ((run.time80to120Kmh ?: 0f) > 0f) {
+          SplitMetricItem(label = "80-120 km/h", value = String.format(Locale.US, "%.2fs", run.time80to120Kmh), modifier = Modifier.weight(1f))
+        }
+        if ((run.time100to200Kmh ?: 0f) > 0f) {
+          SplitMetricItem(label = "100-200 km/h", value = String.format(Locale.US, "%.2fs", run.time100to200Kmh), modifier = Modifier.weight(1f))
+        }
+      }
+
+      // Splits de Distância (se existirem)
+      if ((run.time60Feet ?: 0f) > 0f || (run.time100M ?: 0f) > 0f || (run.time201M ?: 0f) > 0f || (run.time402M ?: 0f) > 0f) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          if ((run.time60Feet ?: 0f) > 0f) {
+            SplitMetricItem(label = "60 pés (18m)", value = String.format(Locale.US, "%.2fs", run.time60Feet), modifier = Modifier.weight(1f))
+          }
+          if ((run.time100M ?: 0f) > 0f) {
+            SplitMetricItem(label = "100 metros", value = String.format(Locale.US, "%.2fs", run.time100M), modifier = Modifier.weight(1f))
+          }
+          if ((run.time201M ?: 0f) > 0f) {
+            SplitMetricItem(label = "1/8 mi (201m)", value = String.format(Locale.US, "%.2fs", run.time201M), modifier = Modifier.weight(1f))
+          }
+          if ((run.time402M ?: 0f) > 0f) {
+            SplitMetricItem(label = "1/4 mi (402m)", value = String.format(Locale.US, "%.2fs", run.time402M), modifier = Modifier.weight(1f), isHighlight = true)
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun SplitMetricItem(
+  label: String,
+  value: String,
+  modifier: Modifier = Modifier,
+  isHighlight: Boolean = false
+) {
+  Surface(
+    modifier = modifier,
+    shape = RoundedCornerShape(10.dp),
+    color = if (isHighlight) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+    border = BorderStroke(1.dp, if (isHighlight) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+  ) {
+    Column(
+      modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+      Text(
+        text = label,
+        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.SemiBold),
+        color = if (isHighlight) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1
+      )
+      Text(
+        text = value,
+        style = MaterialTheme.typography.bodyMedium.copy(
+          fontWeight = FontWeight.Black,
+          fontFamily = FontFamily.Monospace,
+          fontSize = 12.sp
+        ),
+        color = MaterialTheme.colorScheme.onSurface
+      )
+    }
+  }
+}
+
 /**
  * 4. Card Grande do Gráfico de Potência e Torque
- * - Altura entre 260 e 320 dp (280 dp)
+ * - Altura entre 260 e 320 dp (290 dp)
  * - Cantos arredondados
  * - Tema escuro
- * - Eixo horizontal: RPM
+ * - Eixo horizontal: RPM (ou km/h se RPM indisponível)
  * - Eixo vertical esquerdo: cv
  * - Eixo vertical direito: kgfm
- * - Exibe moldura com eixos e a mensagem quando ainda não configurado, sem inventar dados falsos.
+ * - Desenha as curvas reais a partir dos pontos calculados em telemetria
  */
 @Composable
 private fun DynoPowerTorqueGraphCard(
-  hasVehicleConfig: Boolean,
+  samples: List<RunSample> = emptyList(),
+  hasVehicleConfig: Boolean = true,
+  peakPowerCv: Float = 0f,
+  peakTorqueKgfm: Float = 0f,
   modifier: Modifier = Modifier
 ) {
+  // Filtra amostras com potência válida para o gráfico
+  val powerPoints = remember(samples) {
+    samples.filter { (it.enginePowerCv > 0f || it.wheelPowerCv > 0f) && it.filteredSpeedKmh > 0f }
+  }
+
+  val hasValidPlotData = powerPoints.size >= 3
+
   Card(
     modifier = modifier
       .height(290.dp)
@@ -994,8 +1169,8 @@ private fun DynoPowerTorqueGraphCard(
         val gridColor = Color(0xFF1E293B)
         val axisColor = Color(0xFF475569)
 
-        val paddingLeft = 32.dp.toPx()
-        val paddingRight = 32.dp.toPx()
+        val paddingLeft = 34.dp.toPx()
+        val paddingRight = 34.dp.toPx()
         val paddingTop = 24.dp.toPx()
         val paddingBottom = 28.dp.toPx()
 
@@ -1027,6 +1202,83 @@ private fun DynoPowerTorqueGraphCard(
             pathEffect = if (i == 0 || i == verticalSteps) null else PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
           )
         }
+
+        // Se houver dados reais de potência e torque, traçamos as curvas
+        if (hasValidPlotData) {
+          val hasRpm = powerPoints.any { (it.engineRpm ?: 0) > 500 }
+          val maxPower = maxOf(peakPowerCv, powerPoints.maxOfOrNull { it.enginePowerCv } ?: 100f) * 1.15f
+          val maxTorque = maxOf(peakTorqueKgfm, powerPoints.maxOfOrNull { it.engineTorqueKgfm } ?: 20f) * 1.15f
+
+          val minX = if (hasRpm) {
+            powerPoints.minOfOrNull { (it.engineRpm ?: 2000).toFloat() } ?: 1500f
+          } else {
+            powerPoints.minOfOrNull { it.filteredSpeedKmh } ?: 20f
+          }
+
+          val maxX = if (hasRpm) {
+            powerPoints.maxOfOrNull { (it.engineRpm ?: 6000).toFloat() } ?: 6500f
+          } else {
+            powerPoints.maxOfOrNull { it.filteredSpeedKmh } ?: 120f
+          }
+
+          val rangeX = (maxX - minX).coerceAtLeast(1f)
+
+          // Curva de Potência (Azul / Ciano)
+          val powerPath = androidx.compose.ui.graphics.Path()
+          var isFirstPower = true
+
+          powerPoints.forEach { sample ->
+            val pVal = if (sample.enginePowerCv > 0f) sample.enginePowerCv else sample.wheelPowerCv
+            val xVal = if (hasRpm) (sample.engineRpm ?: 2000).toFloat() else sample.filteredSpeedKmh
+            val normX = ((xVal - minX) / rangeX).coerceIn(0f, 1f)
+            val normY = (pVal / maxPower.coerceAtLeast(1f)).coerceIn(0f, 1f)
+
+            val px = paddingLeft + normX * graphWidth
+            val py = size.height - paddingBottom - normY * graphHeight
+
+            if (isFirstPower) {
+              powerPath.moveTo(px, py)
+              isFirstPower = false
+            } else {
+              powerPath.lineTo(px, py)
+            }
+          }
+
+          drawPath(
+            path = powerPath,
+            color = Color(0xFF38BDF8),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+          )
+
+          // Curva de Torque (Laranja)
+          val torquePath = androidx.compose.ui.graphics.Path()
+          var isFirstTorque = true
+
+          powerPoints.forEach { sample ->
+            val tVal = if (sample.engineTorqueKgfm > 0f) sample.engineTorqueKgfm else sample.wheelTorqueKgfm
+            if (tVal > 0f) {
+              val xVal = if (hasRpm) (sample.engineRpm ?: 2000).toFloat() else sample.filteredSpeedKmh
+              val normX = ((xVal - minX) / rangeX).coerceIn(0f, 1f)
+              val normY = (tVal / maxTorque.coerceAtLeast(1f)).coerceIn(0f, 1f)
+
+              val px = paddingLeft + normX * graphWidth
+              val py = size.height - paddingBottom - normY * graphHeight
+
+              if (isFirstTorque) {
+                torquePath.moveTo(px, py)
+                isFirstTorque = false
+              } else {
+                torquePath.lineTo(px, py)
+              }
+            }
+          }
+
+          drawPath(
+            path = torquePath,
+            color = Color(0xFFFB923C),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+          )
+        }
       }
 
       // Left Axis Label: cv
@@ -1055,7 +1307,7 @@ private fun DynoPowerTorqueGraphCard(
           .padding(end = 2.dp, top = 2.dp)
       )
 
-      // Bottom Axis Label: RPM
+      // Bottom Axis Label: RPM ou km/h
       Text(
         text = "RPM",
         style = MaterialTheme.typography.labelSmall.copy(
@@ -1069,38 +1321,40 @@ private fun DynoPowerTorqueGraphCard(
           .padding(bottom = 2.dp)
       )
 
-      // Center Notification Overlay (When power and torque calculation is pending configuration)
-      Column(
-        modifier = Modifier
-          .align(Alignment.Center)
-          .padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-      ) {
-        Surface(
-          shape = CircleShape,
-          color = Color(0xFF1E293B)
+      // Se não houver pontos suficientes, exibe a moldura informativa
+      if (!hasValidPlotData) {
+        Column(
+          modifier = Modifier
+            .align(Alignment.Center)
+            .padding(horizontal = 24.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-          Icon(
-            imageVector = Icons.Outlined.ShowChart,
-            contentDescription = null,
-            tint = Color(0xFF38BDF8),
-            modifier = Modifier
-              .padding(10.dp)
-              .size(24.dp)
+          Surface(
+            shape = CircleShape,
+            color = Color(0xFF1E293B)
+          ) {
+            Icon(
+              imageVector = Icons.Outlined.ShowChart,
+              contentDescription = null,
+              tint = Color(0xFF38BDF8),
+              modifier = Modifier
+                .padding(10.dp)
+                .size(24.dp)
+            )
+          }
+
+          Text(
+            text = "Curva calculada com base na telemetria GPS e inercial.",
+            style = MaterialTheme.typography.bodySmall.copy(
+              fontSize = 12.sp,
+              lineHeight = 18.sp,
+              fontWeight = FontWeight.Medium
+            ),
+            color = Color(0xFFCBD5E1),
+            textAlign = TextAlign.Center
           )
         }
-
-        Text(
-          text = "Curva disponível após implementar o cálculo de potência e torque.",
-          style = MaterialTheme.typography.bodySmall.copy(
-            fontSize = 12.sp,
-            lineHeight = 18.sp,
-            fontWeight = FontWeight.Medium
-          ),
-          color = Color(0xFFCBD5E1),
-          textAlign = TextAlign.Center
-        )
       }
     }
   }

@@ -6,6 +6,7 @@ enum class FinishReason(val code: String, val displayName: String) {
   USER_STOP("USER_STOP", "Teste encerrado manualmente"),
   SENSOR_DECELERATION("SENSOR_DECELERATION", "Fim da aceleração confirmado"),
   GPS_DECELERATION("GPS_DECELERATION", "Desaceleração confirmada pelo GPS"),
+  TARGET_REACHED("TARGET_REACHED", "Velocidade/RPM alvo atingida"),
   GPS_LOST("GPS_LOST", "Sinal GPS perdido"),
   TIMEOUT("TIMEOUT", "Tempo máximo atingido"),
   CANCELLED("CANCELLED", "Passagem cancelada");
@@ -22,19 +23,26 @@ data class RunResult(
   val timestamp: Long = System.currentTimeMillis(),
   val vehicleId: String? = null,
   val vehicleName: String = "",
-  val runStartCalculatedSpeedKmh: Float = 40.0f,
+  val runStartCalculatedSpeedKmh: Float = 0f,
   val runStartGpsSpeedKmh: Float = 0f,
+  val startSpeedKmh: Float = 0f,
   val maximumGpsSpeedKmh: Float = 0f,
-  val maximumCalculatedSpeedKmh: Float = 40.0f,
+  val maximumCalculatedSpeedKmh: Float = 0f,
   val finalGpsSpeedKmh: Float = 0f,
   val finalCalculatedSpeedKmh: Float = 0f,
+  val finalSpeedKmh: Float = 0f,
   val speedGainKmh: Float = 0f,
+  val totalDistanceMeters: Float = 0f,
   val estimatedPowerCv: Float = 0f,
   val estimatedTorqueKgfm: Float = 0f,
-  val wheelPowerCv: Float = 0f,
-  val enginePowerCv: Float = 0f,
-  val wheelTorqueKgfm: Float = 0f,
-  val engineTorqueKgfm: Float = 0f,
+  val wheelPowerCv: Float = 0f, // Potência nas rodas (cv)
+  val enginePowerCv: Float = 0f, // Potência estimada no motor (cv)
+  val wheelPowerKw: Float = 0f, // Potência nas rodas (kW)
+  val enginePowerKw: Float = 0f, // Potência estimada no motor (kW)
+  val wheelTorqueKgfm: Float = 0f, // Torque nas rodas (kgfm)
+  val engineTorqueKgfm: Float = 0f, // Torque estimado no motor (kgfm)
+  val wheelTorqueNm: Float = 0f, // Torque nas rodas (Nm)
+  val engineTorqueNm: Float = 0f, // Torque estimado no motor (Nm)
   val peakLongitudinalG: Float = 0f,
   val averageLongitudinalG: Float = 0f,
   val peakPowerRpm: Int? = null,
@@ -42,12 +50,22 @@ data class RunResult(
   val peakPowerSpeedKmh: Float = 0f,
   val peakTorqueSpeedKmh: Float = 0f,
   val totalVehicleMassKg: Float = 0f,
-  val drivetrainLossPercent: Float = 15f,
+  val drivetrainLossPercent: Float = 12f,
   val estimatedMarginPercent: Float = 10f,
   val gearUsed: String = "2ª",
+  val gearRatioUsed: Float = 1.95f,
+  val finalDriveUsed: Float = 4.10f,
   val isAerodynamicsEstimated: Boolean = true,
+  val cdUsed: Float = 0.34f,
+  val frontalAreaUsed: Float = 2.10f,
+  val crrUsed: Float = 0.015f,
+  val airDensityUsed: Float = 1.225f,
+  val slopeModeUsed: String = "IGNORE",
+  val slopePercentUsed: Float = 0f,
+  val confidenceLevel: String = "ALTA", // "ALTA", "MEDIA", "BAIXA"
   val elapsedSeconds: Float = 0f,
   val gpsAccuracyMeters: Float = 0f,
+  val averageGpsAccuracyMeters: Float = 0f,
   val totalSamples: Int = 0,
   val rejectedSamples: Int = 0,
   val validSamplesCount: Int = 0,
@@ -60,20 +78,49 @@ data class RunResult(
   val maximumSpeedDifferenceKmh: Float = 0f,
   val invalidationReason: String? = null,
   val appVersion: String = "0.20.0",
+  // Tempos de aceleração (splits de velocidade)
+  val time0to60Kmh: Float? = null,
+  val time0to100Kmh: Float? = null,
+  val time60to100Kmh: Float? = null,
+  val time80to120Kmh: Float? = null,
+  val time100to200Kmh: Float? = null,
+  // Tempos de distância (splits de distância)
+  val time60Feet: Float? = null, // 18.288 m
+  val time100M: Float? = null,
+  val time201M: Float? = null, // 1/8 de milha
+  val time402M: Float? = null, // 1/4 de milha
   val samples: List<RunSample> = emptyList()
 ) {
   val peakSpeedDifferenceKmh: Float
     get() = kotlin.math.abs(maximumGpsSpeedKmh - maximumCalculatedSpeedKmh)
 
+  val peakWheelPowerCv: Float
+    get() = wheelPowerCv
+
+  val peakEnginePowerCv: Float
+    get() = enginePowerCv
+
+  val peakWheelTorqueKgfm: Float
+    get() = wheelTorqueKgfm
+
+  val peakEngineTorqueKgfm: Float
+    get() = engineTorqueKgfm
+
+  val peakWheelTorqueNm: Float
+    get() = if (wheelTorqueNm > 0f) wheelTorqueNm else wheelTorqueKgfm * 9.80665f
+
+  val peakEngineTorqueNm: Float
+    get() = if (engineTorqueNm > 0f) engineTorqueNm else engineTorqueKgfm * 9.80665f
+
   fun getEffectiveInvalidationReason(): String {
     if (!invalidationReason.isNullOrBlank()) return invalidationReason
     if (quality != "INVÁLIDA" && quality != "INVALID") return ""
     return when {
-      elapsedSeconds < 4.0f -> "Duração do teste insuficiente (${String.format(java.util.Locale.US, "%.2f", elapsedSeconds)} s < 4.00 s) para validação."
-      validGpsLocationsCount < 4 -> "Poucas leituras de GPS válidas ($validGpsLocationsCount < 4) durante a medição."
+      elapsedSeconds < 2.5f -> "Duração do teste insuficiente (${String.format(java.util.Locale.US, "%.2f", elapsedSeconds)} s < 2.50 s) para validação."
+      validGpsLocationsCount < 3 -> "Poucas leituras de GPS válidas ($validGpsLocationsCount < 3) durante a medição."
       finishReason == FinishReason.TIMEOUT.code -> "Tempo limite de medição atingido (> 25 s)."
-      maximumGpsSpeedKmh < (runStartGpsSpeedKmh + 10f) -> "Ganho de velocidade GPS insuficiente (${String.format(java.util.Locale.US, "%.1f", maximumGpsSpeedKmh - runStartGpsSpeedKmh)} km/h < 10.0 km/h)."
-      else -> "Sinal GPS insuficiente, perda de dados ou movimentação grave do celular."
+      maximumGpsSpeedKmh < (runStartGpsSpeedKmh + 8f) -> "Ganho de velocidade GPS insuficiente (${String.format(java.util.Locale.US, "%.1f", maximumGpsSpeedKmh - runStartGpsSpeedKmh)} km/h < 8.0 km/h)."
+      else -> "Sinal GPS insuficiente, perda de dados ou condições de pista desfavoráveis."
     }
   }
 }

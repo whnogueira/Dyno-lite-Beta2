@@ -30,6 +30,7 @@ import com.google.android.gms.location.Priority
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sqrt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,31 +41,38 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Configurações e constantes do algoritmo dinamométrico.
+ * Constantes de calibração e limiares de validação.
  */
 object DynoConfig {
-  const val ACCEL_DEAD_ZONE = 0.25f
-  const val START_PROTECTION_MS = 3000L
-  const val DECEL_SUSPECT_THRESHOLD = -0.30f
+  const val ACCEL_DEAD_ZONE = 0.15f
+  const val START_PROTECTION_MS = 2500L
+  const val DECEL_SUSPECT_THRESHOLD = -0.35f
   const val DECEL_SUSTAIN_MS = 800L
   const val DECEL_RECOVERY_THRESHOLD = -0.05f
   const val GPS_MIN_DROP_KMH = 3.0f
   const val GPS_STRONG_DROP_KMH = 5.0f
-  const val MIN_VALID_DURATION_MS = 4000L
-  const val MIN_VALID_SAMPLES = 80
-  const val MIN_GPS_UPDATES = 4
-  const val MIN_SPEED_GAIN_KMH = 10.0f
+  const val MIN_VALID_DURATION_MS = 2500L
+  const val MIN_VALID_SAMPLES = 40
+  const val MIN_GPS_UPDATES = 3
+  const val MIN_SPEED_GAIN_KMH = 8.0f
+  const val GPS_EXP_FILTER_ALPHA = 0.25f
+  const val FUSION_GPS_WEIGHT = 0.80f
+  const val FUSION_SENSOR_WEIGHT = 0.20f
 }
 
 /**
- * Registro de leitura de fix GPS para histórico de sincronização e detecção de desaceleração.
+ * Registro de leitura de fix GPS para histórico de sincronização e cálculo de aceleração.
  */
 data class GpsFixRecord(
   val timestampMs: Long,
   val speedKmh: Float,
+  val speedMps: Float,
   val accuracyM: Float,
+  val speedAccuracyMps: Float,
   val elapsedRealtimeNs: Long,
-  val runElapsedSec: Float
+  val runElapsedSec: Float,
+  val latitude: Double = 0.0,
+  val longitude: Double = 0.0
 )
 
 /**
@@ -88,6 +96,11 @@ data class DynoUiState(
   val longitudinalG: Float = 0f,
   val peakLongitudinalG: Float = 0f,
   val livePowerCv: Float = 0f,
+  val liveEnginePowerCv: Float = 0f,
+  val liveTorqueKgfm: Float = 0f,
+  val liveTorqueNm: Float = 0f,
+  val liveRpm: Int? = null,
+  val liveDistanceMeters: Float = 0f,
   val gpsAccuracyMeters: Float = 0f,
   val gpsTimestamp: Long = 0L,
   val gpsAgeMillis: Long = 0L,
@@ -111,7 +124,13 @@ data class DynoUiState(
   val hasPhoneMovedAfterCalib: Boolean = false,
   val runElapsedSeconds: Float = 0f,
   val startSpeedTriggerKmh: Float = 40.0f,
-  val calibrationStatusText: String = "Não calibrado"
+  val selectedGear: String = "2ª",
+  val selectedGearRatio: Float = 1.95f,
+  val selectedFinalDrive: Float = 4.10f,
+  val slopeMode: String = "IGNORE",
+  val manualSlopePercent: Float = 0.0f,
+  val calibrationStatusText: String = "Não calibrado",
+  val validationIssues: List<String> = emptyList()
 )
 
 class TestPreparationViewModel(application: Application) : AndroidViewModel(application) {
@@ -134,12 +153,17 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     DynoUiState(
       isCalibrated = prefs.getBoolean("is_calibrated", false),
       startSpeedTriggerKmh = prefs.getFloat("start_speed_trigger_kmh", 40.0f),
+      selectedGear = prefs.getString("selected_gear_name", "2ª") ?: "2ª",
+      selectedGearRatio = prefs.getFloat("selected_gear_ratio", 1.95f),
+      selectedFinalDrive = prefs.getFloat("selected_final_drive", 4.10f),
+      slopeMode = prefs.getString("slope_mode", "IGNORE") ?: "IGNORE",
+      manualSlopePercent = prefs.getFloat("manual_slope_percent", 0.0f),
       calibrationStatusText = if (prefs.getBoolean("is_calibrated", false)) "Calibração concluída" else "Não calibrado"
     )
   )
   val uiState: StateFlow<DynoUiState> = _uiState.asStateFlow()
 
-  // Calibração
+  // Calibração de offsets dos sensores
   private var offsetX = prefs.getFloat("offset_x", 0.0f)
   private var offsetY = prefs.getFloat("offset_y", 0.0f)
   private var offsetZ = prefs.getFloat("offset_z", 0.0f)
@@ -147,7 +171,7 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
   private var calibratedGyroDeviation = prefs.getFloat("calibrated_gyro", 0.08f)
   private var invertSignal = prefs.getBoolean("invert_longitudinal_signal", false)
 
-  // Sensores brutos
+  // Leituras brutas dos sensores
   private var linearX = 0f
   private var linearY = 0f
   private var linearZ = 0f
@@ -155,17 +179,24 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
   private var gyroY = 0f
   private var gyroZ = 0f
 
-  // Filtragem longitudinal
+  // Filtragem longitudinal do acelerômetro
   private val zMedianBuffer = mutableListOf<Float>()
   private var zFiltradoRun = 0f
 
-  // 1. TRÊS VELOCIDADES SEPARADAS
+  // 1. VELOCIDADES E RASTREAMENTO GPS (FONTE PRINCIPAL)
   @Volatile private var gpsSpeedKmh: Float = 0f
+  @Volatile private var gpsSpeedMs: Float = 0f
   @Volatile private var integratedSpeedKmh: Float = 0f
   @Volatile private var displaySpeedKmh: Float = 0f
   @Volatile private var lastGpsAnchorSpeedMps: Float = 0f
   @Volatile private var lastGpsAnchorNanoTime: Long = 0L
   @Volatile private var integralSpeedSinceLastGpsMps: Float = 0f
+
+  // Buffer de Média Móvel de Velocidade GPS (últimas 5 amostras)
+  private val gpsSpeedMovingAverageBuffer = mutableListOf<Float>()
+  private var previousGpsSpeedMs: Float = 0f
+  private var previousGpsElapsedNs: Long = 0L
+  private var filteredGpsAccelerationMps2: Float = 0f
 
   // GPS Tracking & Validação
   @Volatile private var lastProcessedGpsElapsedRealtimeNs: Long = 0L
@@ -174,18 +205,24 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
   @Volatile private var lastGpsIntervalMs: Long = 0L
   @Volatile private var locationUpdateCount: Int = 0
   @Volatile private var validGpsUpdatesDuringRunCount: Int = 0
-  @Volatile private var lastGpsAccuracyMeters: Float = 0f
+  @Volatile private var lastGpsAccuracyMeters: Float = 99f
+  @Volatile private var lastGpsSpeedAccuracyMps: Float = 99f
+  @Volatile private var lastLatitude: Double = 0.0
+  @Volatile private var lastLongitude: Double = 0.0
 
-  // Parado detection
+  // Detecção de Parado
   private var stoppedStartTimeMs: Long = SystemClock.elapsedRealtime()
 
-  // Run Tracking
+  // Run Tracking & Splits
   private var runStartTimeNs: Long = 0L
   private var runEndTimeNs: Long = 0L
   private var lastSensorTimestampNs: Long = 0L
   private var lastSampleRecordedNs: Long = 0L
   private var armedEstimatedSpeedMs: Float = 0f
   private var armedLastNanoTime: Long = 0L
+
+  private var positiveAccelDurationMs: Long = 0L
+  private var lastAccelCheckNs: Long = 0L
 
   private var startCalculatedKmh: Float = 40.0f
   private var startGpsKmh: Float = 0f
@@ -194,6 +231,31 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
   private var maxDisplaySpeedKmh: Float = 0f
   private var finalGpsKmh: Float = 0f
   private var finalCalcSpeedKmh: Float = 0f
+
+  // Integração Trapezoidal da Distância
+  private var totalRunDistanceMeters: Float = 0f
+  private var lastDistanceIntegrationNs: Long = 0L
+  private var lastDistanceSpeedMs: Float = 0f
+
+  // Splits de Aceleração por Faixa de Velocidade e Distância
+  private var splitTime0to60: Float? = null
+  private var splitTime0to100: Float? = null
+  private var splitCross60Ns: Long? = null
+  private var splitCross80Ns: Long? = null
+  private var splitCross100Ns: Long? = null
+  private var splitTime60to100: Float? = null
+  private var splitTime80to120: Float? = null
+  private var splitTime100to200: Float? = null
+
+  private var splitTime60Feet: Float? = null
+  private var splitTime100M: Float? = null
+  private var splitTime201M: Float? = null
+  private var splitTime402M: Float? = null
+
+  // Detecção de Queda Contínua de Velocidade e Desaceleração
+  private var speedDropStartTimeNs: Long? = null
+  private var lastMaxGpsSpeedCheckNs: Long = 0L
+  private var invalidContinuousAnomalyStartTimeNs: Long? = null
 
   private var suspectStartTimeNs: Long? = null
   private var suspectNegativeSampleCount: Int = 0
@@ -230,15 +292,34 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
   private var peakLongitudinalG: Float = 0f
   private var liveLongitudinalG: Float = 0f
 
-  // Listener GPS e Sensor Callbacks
+  // Callbacks de Hardware
   private var isGpsLocationCallbackActive = false
   private var isSensorListenerActive = false
-
   private var onRunCompletedCallback: ((Boolean) -> Unit)? = null
+
+  // Perfil do Veículo Atual em Uso
+  private var activeVehicleProfile: VehicleProfile? = null
 
   init {
     screenStabilizedTimestampMs = SystemClock.elapsedRealtime()
     startDisplaySpeedUpdateLoop()
+  }
+
+  fun setActiveVehicle(vehicle: VehicleProfile?) {
+    activeVehicleProfile = vehicle
+    if (vehicle != null) {
+      val ratio = vehicle.gearRatio ?: _uiState.value.selectedGearRatio
+      val finalDrive = vehicle.finalDriveRatio ?: _uiState.value.selectedFinalDrive
+      _uiState.update {
+        it.copy(
+          selectedGearRatio = ratio,
+          selectedFinalDrive = finalDrive,
+          slopeMode = vehicle.slopeMode,
+          manualSlopePercent = vehicle.manualSlopePercent
+        )
+      }
+      validatePreConditions(vehicle)
+    }
   }
 
   fun setOnRunCompletedCallback(callback: (Boolean) -> Unit) {
@@ -252,14 +333,74 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     }
   }
 
+  fun setSelectedGear(gearName: String, gearRatio: Float) {
+    if (_uiState.value.testState == DynoRunState.PARADO) {
+      prefs.edit()
+        .putString("selected_gear_name", gearName)
+        .putFloat("selected_gear_ratio", gearRatio)
+        .apply()
+      _uiState.update {
+        it.copy(selectedGear = gearName, selectedGearRatio = gearRatio)
+      }
+    }
+  }
+
+  fun setSlopeConfiguration(mode: String, percent: Float) {
+    prefs.edit()
+      .putString("slope_mode", mode)
+      .putFloat("manual_slope_percent", percent)
+      .apply()
+    _uiState.update {
+      it.copy(slopeMode = mode, manualSlopePercent = percent)
+    }
+  }
+
   /**
-   * 4. LOOP DE ATUALIZAÇÃO EM TEMPO REAL DO VELOCÍMETRO (10 a 20 Hz / ~60ms)
-   * displaySpeedKmh = displaySpeedKmh + alpha * (targetSpeed - displaySpeedKmh)
+   * Validação de pré-requisitos antes de liberar o botão Iniciar (Seção 20 da especificação).
+   */
+  fun validatePreConditions(vehicle: VehicleProfile?): List<String> {
+    val issues = mutableListOf<String>()
+    if (vehicle == null) {
+      issues.add("Nenhum veículo selecionado.")
+      _uiState.update { it.copy(validationIssues = issues) }
+      return issues
+    }
+
+    if (vehicle.totalWeightKg < 300f) {
+      issues.add("Massa total (${vehicle.totalWeightKg.toInt()} kg) é inferior ao mínimo de 300 kg.")
+    }
+    val gearRatio = _uiState.value.selectedGearRatio
+    if (gearRatio <= 0f) {
+      issues.add("Relação de marcha inválida (deve ser > 0).")
+    }
+    val finalDrive = _uiState.value.selectedFinalDrive
+    if (finalDrive <= 0f) {
+      issues.add("Relação do diferencial inválida (deve ser > 0).")
+    }
+    if (vehicle.tireWidthMm < 100 || vehicle.tireAspectRatio < 20 || vehicle.wheelDiameterInches < 10) {
+      issues.add("Dimensões do pneu inválidas.")
+    }
+    if (!_uiState.value.isGpsProviderEnabled || !_uiState.value.hasGpsFix) {
+      issues.add("Aguardando sinal e fix do GPS.")
+    } else if (lastGpsAccuracyMeters > 15.0f) {
+      issues.add("Precisão horizontal do GPS fraca (${String.format(Locale.US, "%.1f", lastGpsAccuracyMeters)} m > 15 m).")
+    }
+    if (!_uiState.value.isCalibrated) {
+      issues.add("Aparelho não calibrado na posição do suporte.")
+    }
+
+    _uiState.update { it.copy(validationIssues = issues) }
+    return issues
+  }
+
+  /**
+   * LOOP DE ATUALIZAÇÃO DO VELOCÍMETRO E TELEMETRIA EM TEMPO REAL (~16.6 Hz / ~60ms)
+   * Baseado diretamente na velocidade GPS em tempo real.
    */
   private fun startDisplaySpeedUpdateLoop() {
     viewModelScope.launch {
       while (isActive) {
-        delay(60L) // ~16.6 Hz
+        delay(60L)
 
         val nowNs = SystemClock.elapsedRealtimeNanos()
         val nowMs = SystemClock.elapsedRealtime()
@@ -271,30 +412,32 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
 
         val isStopped = gpsSpeedKmh < 1.0f && (nowMs - stoppedStartTimeMs >= 2000L)
 
+        // A velocidade exibida prioriza a velocidade GPS oficial do Android
         val targetSpeed: Float = when {
           isStopped -> 0f
-          currentState == DynoRunState.MEDINDO_PROTEGIDO || currentState == DynoRunState.MEDINDO -> {
-            // Durante medição: o velocímetro acompanha a integração inercial com suavização
-            integratedSpeedKmh
+          currentState == DynoRunState.MEDINDO_PROTEGIDO || currentState == DynoRunState.MEDINDO || currentState == DynoRunState.SUSPEITA_DESACELERACAO -> {
+            if (gpsAge < 1000L) {
+              gpsSpeedKmh * 0.85f + integratedSpeedKmh * 0.15f
+            } else {
+              integratedSpeedKmh
+            }
           }
           currentState == DynoRunState.AGUARDANDO_INICIO -> {
-            // Armado: combina último GPS com a evolução inercial desde a última leitura
             val predictedMps = (lastGpsAnchorSpeedMps + integralSpeedSinceLastGpsMps).coerceAtLeast(0f)
             val predictedKmh = predictedMps * 3.6f
             if (gpsAge < 1000L) {
-              gpsSpeedKmh * 0.70f + predictedKmh * 0.30f
+              gpsSpeedKmh * 0.80f + predictedKmh * 0.20f
             } else {
               predictedKmh
             }
           }
           else -> {
-            // Parado ou normal: acompanha o GPS suavemente
             if (gpsSpeedKmh < 0.8f) 0f else gpsSpeedKmh
           }
         }
 
-        // Correção visual suave com alpha entre 0.20 e 0.35
-        val alpha = if (isStopped) 0.40f else 0.28f
+        // Suavização visual moderada
+        val alpha = if (isStopped) 0.45f else 0.32f
         val newDisplaySpeed = (displaySpeedKmh + alpha * (targetSpeed - displaySpeedKmh)).coerceAtLeast(0f)
         val finalDisplaySpeed = if (isStopped && newDisplaySpeed < 0.5f) 0f else newDisplaySpeed
         displaySpeedKmh = finalDisplaySpeed
@@ -307,8 +450,45 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
         val avgDiff = if (syncDiffCount > 0) (syncDiffSum / syncDiffCount).toFloat() else 0f
 
         val currentGyroMag = sqrt(gyroX * gyroX + gyroY * gyroY + gyroZ * gyroZ)
-        val isPhoneStable = currentGyroMag <= 0.65f
+        val isPhoneStable = currentGyroMag <= 0.85f
         val isGpsReady = lastGpsAccuracyMeters in 0.1f..15.0f && gpsAge < 3000L && locationUpdateCount > 0
+
+        // Cálculos de Potência e RPM em tempo real para o display
+        var liveWheelPower = 0f
+        var liveEnginePower = 0f
+        var liveTorqueKg = 0f
+        var liveTorqueNmVal = 0f
+        var liveRpmVal: Int? = null
+
+        val vehicle = activeVehicleProfile
+        if (vehicle != null && (currentState == DynoRunState.MEDINDO_PROTEGIDO || currentState == DynoRunState.MEDINDO || currentState == DynoRunState.SUSPEITA_DESACELERACAO)) {
+          val vMs = (displaySpeedKmh / 3.6f).coerceAtLeast(0f)
+          val totalMass = vehicle.totalWeightKg
+          val cr = vehicle.rollingResistanceCoeff
+          val cd = vehicle.dragCoefficient
+          val area = vehicle.frontalAreaM2
+          val density = vehicle.airDensityKgM3
+          val slopePercent = if (_uiState.value.slopeMode == "MANUAL") _uiState.value.manualSlopePercent else 0f
+
+          val fAero = VehicleCalculations.calculateAerodynamicForce(vMs, cd, area, density)
+          val fRoll = VehicleCalculations.calculateRollingResistanceForce(totalMass, cr)
+          val fSlope = VehicleCalculations.calculateSlopeForce(totalMass, slopePercent)
+          val fAccel = VehicleCalculations.calculateAccelerationForce(totalMass, max(0f, zFiltradoRun))
+
+          val fTotal = VehicleCalculations.calculateTotalTractiveForce(fAccel, fRoll, fAero, fSlope)
+          val pWatts = VehicleCalculations.calculateWheelPowerWatts(fTotal, vMs)
+          liveWheelPower = VehicleCalculations.convertWattsToCv(pWatts)
+          liveEnginePower = VehicleCalculations.calculateEnginePowerCv(liveWheelPower, vehicle.drivetrain, vehicle.customDrivetrainLossPercent)
+
+          val tireCalc = VehicleCalculations.calculateTireDimensions(vehicle.tireWidthMm, vehicle.tireAspectRatio, vehicle.wheelDiameterInches, vehicle.tireCorrectionPercent)
+          liveRpmVal = VehicleCalculations.calculateRpmFromSpeed(vMs, tireCalc.circumferenceM, _uiState.value.selectedGearRatio, _uiState.value.selectedFinalDrive)?.toInt()
+
+          if (liveRpmVal != null && liveRpmVal > 500) {
+            val tEngine = VehicleCalculations.calculateTorqueKgfm(liveEnginePower, liveRpmVal.toFloat()) ?: 0f
+            liveTorqueKg = tEngine
+            liveTorqueNmVal = VehicleCalculations.calculateTorqueNm(tEngine)
+          }
+        }
 
         _uiState.update { current ->
           current.copy(
@@ -317,6 +497,12 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
             displaySpeedKmh = finalDisplaySpeed,
             longitudinalG = liveLongitudinalG,
             peakLongitudinalG = peakLongitudinalG,
+            livePowerCv = liveWheelPower,
+            liveEnginePowerCv = liveEnginePower,
+            liveTorqueKgfm = liveTorqueKg,
+            liveTorqueNm = liveTorqueNmVal,
+            liveRpm = liveRpmVal,
+            liveDistanceMeters = totalRunDistanceMeters,
             gpsAccuracyMeters = lastGpsAccuracyMeters,
             gpsTimestamp = lastProcessedGpsTimestamp,
             gpsAgeMillis = gpsAge,
@@ -359,7 +545,7 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
   fun startLocationUpdates() {
     if (isGpsLocationCallbackActive) return
 
-    val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 200L)
+    val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 150L)
       .setMinUpdateIntervalMillis(100L)
       .setMaxUpdateDelayMillis(0L)
       .setWaitForAccurateLocation(false)
@@ -384,41 +570,68 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
   }
 
   /**
-   * 3. VALIDAR LEITURA GPS NOVA
-   * Cada Location deve ser identificada por location.elapsedRealtimeNanos
+   * 3. PROCESSAMENTO DE LOCALIZAÇÃO GPS REAL (FONTE PRIMÁRIA DE VELOCIDADE)
    */
   private fun processNewLocation(location: Location) {
     val elapsedRealtimeNs = location.elapsedRealtimeNanos
     val locationTime = location.time
 
-    // Validar se a Location é estritamente mais nova que a anterior
+    // Ignorar leituras repetidas ou fora de ordem
     if (elapsedRealtimeNs <= lastProcessedGpsElapsedRealtimeNs && lastProcessedGpsElapsedRealtimeNs != 0L) {
-      return // Leitura repetida ou desordenada descartada
+      return
     }
 
     val nowWallMs = SystemClock.elapsedRealtime()
+    val nowNano = System.nanoTime()
+
     if (lastGpsArrivalWallTimeMs > 0L) {
       lastGpsIntervalMs = nowWallMs - lastGpsArrivalWallTimeMs
     }
     lastGpsArrivalWallTimeMs = nowWallMs
 
+    val rawSpeedMps = if (location.hasSpeed()) location.speed else 0f
+    val speedKmh = (rawSpeedMps * 3.6f).coerceAtLeast(0f)
+    val horizontalAccuracy = if (location.hasAccuracy()) location.accuracy else 99f
+    val speedAccuracyMps = if (location.hasSpeedAccuracy()) location.speedAccuracyMetersPerSecond else 99f
+
+    // Média móvel das últimas 5 amostras de velocidade GPS
+    gpsSpeedMovingAverageBuffer.add(speedKmh)
+    if (gpsSpeedMovingAverageBuffer.size > 5) {
+      gpsSpeedMovingAverageBuffer.removeAt(0)
+    }
+    val avgMovingSpeedKmh = gpsSpeedMovingAverageBuffer.average().toFloat()
+
+    // 3. CÁLCULO DA ACELERAÇÃO GPS POR TIMESTAMP REAL: (v2 - v1) / dt
+    if (previousGpsElapsedNs > 0L && previousGpsSpeedMs >= 0f) {
+      val dtSeconds = (elapsedRealtimeNs - previousGpsElapsedNs) / 1_000_000_000.0
+      if (dtSeconds in 0.05..1.5) {
+        val rawGpsAccel = ((rawSpeedMps - previousGpsSpeedMs) / dtSeconds).toFloat()
+        // Filtro exponencial: alpha * aAtual + (1 - alpha) * aAnterior
+        filteredGpsAccelerationMps2 = DynoConfig.GPS_EXP_FILTER_ALPHA * rawGpsAccel +
+          (1.0f - DynoConfig.GPS_EXP_FILTER_ALPHA) * filteredGpsAccelerationMps2
+      }
+    }
+    previousGpsSpeedMs = rawSpeedMps
+    previousGpsElapsedNs = elapsedRealtimeNs
+
     lastProcessedGpsElapsedRealtimeNs = elapsedRealtimeNs
     lastProcessedGpsTimestamp = locationTime
     locationUpdateCount++
+    lastGpsAccuracyMeters = horizontalAccuracy
+    lastGpsSpeedAccuracyMps = speedAccuracyMps
+    lastLatitude = location.latitude
+    lastLongitude = location.longitude
 
-    val rawSpeedMps = if (location.hasSpeed()) location.speed else 0f
-    val speedKmh = (rawSpeedMps * 3.6f).coerceAtLeast(0f)
+    gpsSpeedMs = rawSpeedMps
     gpsSpeedKmh = speedKmh
-    lastGpsAccuracyMeters = if (location.hasAccuracy()) location.accuracy else 99f
 
-    // Ancorar a velocidade inercial auxiliar estritamente na velocidade GPS real
-    if (speedKmh > 0f && lastGpsAccuracyMeters <= 15.0f) {
+    // Ancorar a velocidade inercial auxiliar na velocidade GPS real
+    if (speedKmh > 0f && horizontalAccuracy <= 15.0f) {
       integratedSpeedKmh = speedKmh
     }
 
-    // Atualiza âncora para previsão inercial entre GPS
     lastGpsAnchorSpeedMps = rawSpeedMps
-    lastGpsAnchorNanoTime = System.nanoTime()
+    lastGpsAnchorNanoTime = nowNano
     integralSpeedSinceLastGpsMps = 0f
 
     if (speedKmh >= 1.0f) {
@@ -427,13 +640,26 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
 
     val currentState = _uiState.value.testState
 
+    // 15. LÓGICA DE INÍCIO DA PASSADA
     if (currentState == DynoRunState.AGUARDANDO_INICIO) {
       val targetTrigger = _uiState.value.startSpeedTriggerKmh
       val isCalib = _uiState.value.isCalibrated
-      // Gatilho de início baseado estritamente na velocidade GPS oficial
-      if (speedKmh >= targetTrigger && lastGpsAccuracyMeters <= 12.0f && isCalib) {
-        val nowNs = System.nanoTime()
-        triggerOfficialRunStart(nowNs, speedKmh)
+
+      // Checa aceleração positiva por pelo menos 0.5s
+      val isPositiveAccel = (filteredGpsAccelerationMps2 > 0.3f) || (zFiltradoRun > 0.3f)
+      if (isPositiveAccel) {
+        if (lastAccelCheckNs == 0L) {
+          lastAccelCheckNs = nowNano
+        } else {
+          positiveAccelDurationMs = (nowNano - lastAccelCheckNs) / 1_000_000L
+        }
+      } else {
+        lastAccelCheckNs = nowNano
+        positiveAccelDurationMs = 0L
+      }
+
+      if (speedKmh >= targetTrigger && horizontalAccuracy <= 15.0f && isCalib && positiveAccelDurationMs >= 400L) {
+        triggerOfficialRunStart(nowNano, speedKmh)
       }
     } else if (currentState == DynoRunState.MEDINDO_PROTEGIDO ||
       currentState == DynoRunState.MEDINDO ||
@@ -445,40 +671,106 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
 
       val gpsAgeMillis = ((SystemClock.elapsedRealtimeNanos() - elapsedRealtimeNs) / 1_000_000L).coerceAtLeast(0L)
 
-      if (location.hasSpeed() && lastGpsAccuracyMeters <= 12.0f) {
+      if (location.hasSpeed() && horizontalAccuracy <= 15.0f) {
         validGpsUpdatesDuringRunCount++
         val runElapsedSec = ((System.nanoTime() - runStartTimeNs) / 1_000_000L) / 1000f
 
         val fixRecord = GpsFixRecord(
           timestampMs = locationTime,
           speedKmh = speedKmh,
-          accuracyM = lastGpsAccuracyMeters,
+          speedMps = rawSpeedMps,
+          accuracyM = horizontalAccuracy,
+          speedAccuracyMps = speedAccuracyMps,
           elapsedRealtimeNs = elapsedRealtimeNs,
-          runElapsedSec = runElapsedSec
+          runElapsedSec = runElapsedSec,
+          latitude = location.latitude,
+          longitude = location.longitude
         )
         gpsFixHistory.add(fixRecord)
 
-        // 7 e 8. SINCRONIZAÇÃO GPS x ACELERÔMETRO POR INTERPOLAÇÃO DE TIMESTAMP
-        // Executar comparação sincronizada apenas durante aceleração ativa (antes da suspeita confirmada de desaceleração)
-        if (currentState == DynoRunState.MEDINDO_PROTEGIDO || currentState == DynoRunState.MEDINDO) {
-          if (gpsAgeMillis <= 1500L) {
-            interpolateAndCompareGpsWithInertial(elapsedRealtimeNs, speedKmh)
-          }
+        // 4. FUSÃO GPS E ACELERÔMETRO (0.80 GPS / 0.20 SENSOR)
+        val finalFusionAccel = (DynoConfig.FUSION_GPS_WEIGHT * filteredGpsAccelerationMps2) +
+          (DynoConfig.FUSION_SENSOR_WEIGHT * zFiltradoRun)
+
+        // Interpolação e sincronização
+        if (gpsAgeMillis <= 1500L) {
+          interpolateAndCompareGpsWithInertial(elapsedRealtimeNs, speedKmh)
         }
 
-        // Checagem de Finalização Confirmada por GPS (apenas após o período protegido de 3 segundos)
+        // 17. INTEGRAÇÃO TRAPEZOIDAL DA DISTÂNCIA
+        if (lastDistanceIntegrationNs > 0L) {
+          val dtSec = (nowNano - lastDistanceIntegrationNs) / 1_000_000_000.0f
+          if (dtSec in 0.01f..1.5f) {
+            val distInc = ((lastDistanceSpeedMs + rawSpeedMps) / 2.0f) * dtSec
+            totalRunDistanceMeters += distInc
+            checkSplits(nowNano, speedKmh, totalRunDistanceMeters)
+          }
+        }
+        lastDistanceIntegrationNs = nowNano
+        lastDistanceSpeedMs = rawSpeedMps
+
+        // 16. DETECÇÃO DE FINAL DA PASSADA POR DESACELERAR MAIS DE 2s OU GPS PERDIDO
         val runDurationMs = ((System.nanoTime() - runStartTimeNs) / 1_000_000L)
         if (runDurationMs >= DynoConfig.START_PROTECTION_MS) {
-          checkGpsDecelerationConditions(speedKmh, locationTime)
+          checkGpsDecelerationConditions(speedKmh, locationTime, nowNano)
         }
       }
     }
   }
 
   /**
-   * 7. SINCRONIZAÇÃO GPS x ACELERÔMETRO POR INTERPOLAÇÃO
-   * Localiza as duas amostras calculadas imediatamente antes e depois do timestamp da Location
-   * e interpola a velocidade calculada naquele mesmo instante.
+   * Registro dos tempos intermediários (Splits de velocidade e distância).
+   */
+  private fun checkSplits(nowNs: Long, currentSpeedKmh: Float, totalDistM: Float) {
+    if (runStartTimeNs == 0L) return
+    val elapsedSec = ((nowNs - runStartTimeNs) / 1_000_000L) / 1000f
+
+    // 0-60 km/h e 0-100 km/h (válidos apenas se partida <= 15 km/h)
+    if (startGpsKmh <= 15.0f) {
+      if (splitTime0to60 == null && currentSpeedKmh >= 60.0f) {
+        splitTime0to60 = elapsedSec
+      }
+      if (splitTime0to100 == null && currentSpeedKmh >= 100.0f) {
+        splitTime0to100 = elapsedSec
+      }
+    }
+
+    if (splitCross60Ns == null && currentSpeedKmh >= 60.0f) {
+      splitCross60Ns = nowNs
+    }
+    if (splitCross80Ns == null && currentSpeedKmh >= 80.0f) {
+      splitCross80Ns = nowNs
+    }
+    if (splitCross100Ns == null && currentSpeedKmh >= 100.0f) {
+      splitCross100Ns = nowNs
+      if (splitCross60Ns != null && splitTime60to100 == null) {
+        splitTime60to100 = ((nowNs - splitCross60Ns!!) / 1_000_000L) / 1000f
+      }
+    }
+    if (splitTime80to120 == null && currentSpeedKmh >= 120.0f && splitCross80Ns != null) {
+      splitTime80to120 = ((nowNs - splitCross80Ns!!) / 1_000_000L) / 1000f
+    }
+    if (splitTime100to200 == null && currentSpeedKmh >= 200.0f && splitCross100Ns != null) {
+      splitTime100to200 = ((nowNs - splitCross100Ns!!) / 1_000_000L) / 1000f
+    }
+
+    // Splits de distância
+    if (splitTime60Feet == null && totalDistM >= 18.288f && startGpsKmh <= 10.0f) {
+      splitTime60Feet = elapsedSec
+    }
+    if (splitTime100M == null && totalDistM >= 100.0f) {
+      splitTime100M = elapsedSec
+    }
+    if (splitTime201M == null && totalDistM >= 201.168f) {
+      splitTime201M = elapsedSec
+    }
+    if (splitTime402M == null && totalDistM >= 402.336f) {
+      splitTime402M = elapsedSec
+    }
+  }
+
+  /**
+   * Sincronização GPS x Acelerômetro por interpolação temporal.
    */
   private fun interpolateAndCompareGpsWithInertial(gpsElapsedRealtimeNs: Long, gpsSpeedKmh: Float) {
     if (inertialHistory.size < 2) return
@@ -486,7 +778,6 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     var sampleBefore: InertialPoint? = null
     var sampleAfter: InertialPoint? = null
 
-    // Procura as amostras que circundam o timestamp exato do GPS
     for (i in 0 until inertialHistory.size - 1) {
       val p1 = inertialHistory[i]
       val p2 = inertialHistory[i + 1]
@@ -509,65 +800,33 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
         if (diff > maxSyncDiff) {
           maxSyncDiff = diff
         }
-        diagnosticLogs.add("Sincronização GPS: gpsSpeed=${String.format(Locale.US, "%.1f", gpsSpeedKmh)} km/h, calcSpeed=${String.format(Locale.US, "%.1f", calculatedSpeedAtGpsTime)} km/h, diff=${String.format(Locale.US, "%.2f", diff)} km/h")
       }
     }
   }
 
-  private fun checkGpsDecelerationConditions(currentGpsKmh: Float, locationTimeMs: Long) {
-    val history = gpsFixHistory
-    val historySize = history.size
-
-    var conditionAMet = false
-    if (historySize >= 3) {
-      val lastFix = history[historySize - 1]
-      val prevFix = history[historySize - 2]
-      val prevPrevFix = history[historySize - 3]
-
-      val isConsecutiveDecreasing = (lastFix.speedKmh < prevFix.speedKmh) && (prevFix.speedKmh <= prevPrevFix.speedKmh)
-      val dropFromPrevPrev = prevPrevFix.speedKmh - lastFix.speedKmh
-      val timeIntervalMs = lastFix.timestampMs - prevPrevFix.timestampMs
-
-      if (isConsecutiveDecreasing && dropFromPrevPrev >= DynoConfig.GPS_MIN_DROP_KMH && timeIntervalMs >= 600L) {
-        conditionAMet = true
-        diagnosticLogs.add("Condição A satisfeita: queda=${dropFromPrevPrev}km/h em ${timeIntervalMs}ms")
-      }
-    } else if (historySize == 2) {
-      val lastFix = history[historySize - 1]
-      val prevFix = history[historySize - 2]
-      val drop = prevFix.speedKmh - lastFix.speedKmh
-      val timeIntervalMs = lastFix.timestampMs - prevFix.timestampMs
-      if (drop >= DynoConfig.GPS_MIN_DROP_KMH && timeIntervalMs >= 600L) {
-        conditionAMet = true
-        diagnosticLogs.add("Condição A satisfeita (2 fixes): queda=${drop}km/h em ${timeIntervalMs}ms")
-      }
-    }
-
-    var conditionBMet = false
+  /**
+   * Checagem de desaceleração contínua por mais de 2 segundos.
+   */
+  private fun checkGpsDecelerationConditions(currentGpsKmh: Float, locationTimeMs: Long, nowNs: Long) {
     val dropFromMax = maxGpsSpeedKmh - currentGpsKmh
-    if (dropFromMax >= DynoConfig.GPS_STRONG_DROP_KMH) {
-      if (historySize >= 2) {
-        val lastFix = history[historySize - 1]
-        val prevFix = history[historySize - 2]
-        if (lastFix.speedKmh <= prevFix.speedKmh + 0.5f) {
-          conditionBMet = true
-          diagnosticLogs.add("Condição B satisfeita: queda=${dropFromMax}km/h de max ($maxGpsSpeedKmh -> $currentGpsKmh)")
-        }
-      } else {
-        conditionBMet = true
-        diagnosticLogs.add("Condição B satisfeita: queda=${dropFromMax}km/h de max")
-      }
-    }
 
-    val currentState = _uiState.value.testState
-    if ((conditionAMet || conditionBMet) && (currentState == DynoRunState.SUSPEITA_DESACELERACAO || zFiltradoRun <= 0.05f)) {
-      _uiState.update { it.copy(testState = DynoRunState.FINALIZANDO) }
-      diagnosticLogs.add("GPS confirmou desaceleração (CondA=$conditionAMet, CondB=$conditionBMet). Finalizando teste.")
-      finalizeRun(FinishReason.GPS_DECELERATION)
+    if (dropFromMax >= DynoConfig.GPS_MIN_DROP_KMH) {
+      if (speedDropStartTimeNs == null) {
+        speedDropStartTimeNs = nowNs
+      } else {
+        val dropDurationMs = (nowNs - speedDropStartTimeNs!!) / 1_000_000L
+        if (dropDurationMs >= 2000L) {
+          _uiState.update { it.copy(testState = DynoRunState.FINALIZANDO) }
+          diagnosticLogs.add("Desaceleração contínua confirmada por ${dropDurationMs}ms (queda de ${dropFromMax} km/h). Finalizando.")
+          finalizeRun(FinishReason.GPS_DECELERATION, activeVehicleProfile)
+        }
+      }
+    } else {
+      speedDropStartTimeNs = null
     }
   }
 
-  // SENSORES (ACELERÔMETRO E GIROSCÓPIO)
+  // 4. SENSORES DE APOIO (ACELERÔMETRO E GIROSCÓPIO)
   private val sensorEventListener = object : SensorEventListener {
     override fun onSensorChanged(event: SensorEvent?) {
       when (event?.sensor?.type) {
@@ -580,7 +839,7 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
             val rawLinearZ = event.values[2]
             val rawCorrigidoZ = (rawLinearZ - offsetZ) * (if (invertSignal) -1f else 1f)
 
-            // Filtro mediano de 5 amostras
+            // Filtro mediano
             zMedianBuffer.add(rawCorrigidoZ)
             if (zMedianBuffer.size > 5) {
               zMedianBuffer.removeAt(0)
@@ -589,11 +848,9 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
             val medianaZ = if (sortedZ.isNotEmpty()) sortedZ[sortedZ.size / 2] else 0f
 
             // Filtro passa-baixas (~350ms)
-            zFiltradoRun += 0.12f * (medianaZ - zFiltradoRun)
+            zFiltradoRun += 0.15f * (medianaZ - zFiltradoRun)
 
-            // Zona morta no eixo longitudinal [-0.25, +0.25] m/s²
             val zDeadZone = if (abs(zFiltradoRun) <= DynoConfig.ACCEL_DEAD_ZONE) 0f else zFiltradoRun
-
             val currentG = zFiltradoRun / 9.80665f
             liveLongitudinalG = currentG
             if (currentG > peakLongitudinalG && (_uiState.value.testState == DynoRunState.MEDINDO_PROTEGIDO || _uiState.value.testState == DynoRunState.MEDINDO)) {
@@ -603,13 +860,13 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
             val nowNs = System.nanoTime()
             val elapsedRealtimeNs = SystemClock.elapsedRealtimeNanos()
 
-            // Detecção de movimentação física do aparelho pós-calibração
+            // Detecção de movimentação física do aparelho
             val isScreenStable = (SystemClock.elapsedRealtime() - screenStabilizedTimestampMs) > 1500L
             if (_uiState.value.isCalibrated && !isCalibrating && _uiState.value.testState == DynoRunState.PARADO && gpsSpeedKmh < 3f && isScreenStable) {
               val gMag = sqrt(gyroX * gyroX + gyroY * gyroY + gyroZ * gyroZ)
-              if (gMag > 3.2f) {
+              if (gMag > 3.8f) {
                 persistentMovementCount++
-                if (persistentMovementCount >= 25) {
+                if (persistentMovementCount >= 30) {
                   hasPhoneMovedAfterCalib = true
                   persistentMovementCount = 0
                   _uiState.update { it.copy(isCalibrated = false, hasPhoneMovedAfterCalib = true, calibrationStatusText = "O celular mudou de posição. Calibre novamente.") }
@@ -631,13 +888,6 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
                 }
               }
               armedLastNanoTime = nowNs
-
-              val targetTrigger = _uiState.value.startSpeedTriggerKmh
-              val isCalib = _uiState.value.isCalibrated
-              // Gatilho oficial baseado estritamente na velocidade GPS
-              if (gpsSpeedKmh >= targetTrigger && lastGpsAccuracyMeters <= 12.0f && isCalib) {
-                triggerOfficialRunStart(nowNs, gpsSpeedKmh)
-              }
             } else if (currentState == DynoRunState.MEDINDO_PROTEGIDO ||
               currentState == DynoRunState.MEDINDO ||
               currentState == DynoRunState.SUSPEITA_DESACELERACAO) {
@@ -645,7 +895,7 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
               val runDurationMs = (nowNs - runStartTimeNs) / 1_000_000L
               val elapsedSec = runDurationMs / 1000f
 
-              // Integração inercial contínua da velocidade
+              // Estimativa inercial limitada a no máximo 1.0s caso o GPS atrase
               var currentCalcKmh = integratedSpeedKmh
               var currentVelocityMs = integratedSpeedKmh / 3.6f
 
@@ -668,8 +918,8 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
               val corrX = abs(event.values[0] - offsetX)
               val corrY = abs(event.values[1] - offsetY)
               val gyroMag = sqrt(gyroX * gyroX + gyroY * gyroY + gyroZ * gyroZ)
-              val maxNormalVib = max(3.5f, calibratedNormalVibration * 2.5f)
-              val maxNormalGyro = max(2.5f, calibratedGyroDeviation * 3.0f)
+              val maxNormalVib = max(4.0f, calibratedNormalVibration * 2.8f)
+              val maxNormalGyro = max(3.0f, calibratedGyroDeviation * 3.2f)
 
               totalInertialSamples++
               val isSampleValid = !(corrX > maxNormalVib || corrY > maxNormalVib || gyroMag > maxNormalGyro)
@@ -677,7 +927,7 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
                 rejectedInertialSamples++
               }
 
-              // Salva ponto inercial de alta resolução para interpolação GPS
+              // Salva ponto inercial de alta resolução
               inertialHistory.add(
                 InertialPoint(
                   elapsedRealtimeNs = elapsedRealtimeNs,
@@ -691,8 +941,8 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
                 inertialHistory.removeAt(0)
               }
 
-              // Gravação da série temporal (~20 Hz)
-              if (nowNs - lastSampleRecordedNs >= 50_000_000L && recordedSamples.size < 500) {
+              // Gravação da série temporal de telemetria (~20 Hz)
+              if (nowNs - lastSampleRecordedNs >= 50_000_000L && recordedSamples.size < 600) {
                 lastSampleRecordedNs = nowNs
                 val diff = abs(currentCalcKmh - gpsSpeedKmh)
 
@@ -704,37 +954,106 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
                   }
                 } else null
 
+                val gpsAgeNs = elapsedRealtimeNs - lastProcessedGpsElapsedRealtimeNs
+                val isGpsRecent = gpsAgeNs in 0..1_000_000_000L
+                val confidence = if (isGpsRecent && lastGpsAccuracyMeters <= 8f && isSampleValid) "ALTA" else if (isGpsRecent && lastGpsAccuracyMeters <= 14f) "MEDIA" else "BAIXA"
+
+                val fusionAccel = if (isGpsRecent) {
+                  (DynoConfig.FUSION_GPS_WEIGHT * filteredGpsAccelerationMps2) + (DynoConfig.FUSION_SENSOR_WEIGHT * zFiltradoRun)
+                } else {
+                  zFiltradoRun
+                }
+
+                // Cálculo das Forças e Potência para a Amostra
+                val vehicle = activeVehicleProfile
+                val totalMass = vehicle?.totalWeightKg ?: 1100f
+                val cd = vehicle?.dragCoefficient ?: 0.34f
+                val area = vehicle?.frontalAreaM2 ?: 2.10f
+                val density = vehicle?.airDensityKgM3 ?: 1.225f
+                val cr = vehicle?.rollingResistanceCoeff ?: 0.015f
+                val slopePercent = if (_uiState.value.slopeMode == "MANUAL") _uiState.value.manualSlopePercent else 0f
+
+                val vMs = (gpsSpeedKmh / 3.6f).coerceAtLeast(0f)
+                val fAccel = VehicleCalculations.calculateAccelerationForce(totalMass, max(0f, fusionAccel))
+                val fAero = VehicleCalculations.calculateAerodynamicForce(vMs, cd, area, density)
+                val fRoll = VehicleCalculations.calculateRollingResistanceForce(totalMass, cr)
+                val fSlope = VehicleCalculations.calculateSlopeForce(totalMass, slopePercent)
+                val fTotal = VehicleCalculations.calculateTotalTractiveForce(fAccel, fRoll, fAero, fSlope)
+
+                val pWatts = VehicleCalculations.calculateWheelPowerWatts(fTotal, vMs)
+                val pWheelCv = VehicleCalculations.convertWattsToCv(pWatts)
+                val pEngineCv = VehicleCalculations.calculateEnginePowerCv(pWheelCv, vehicle?.drivetrain, vehicle?.customDrivetrainLossPercent)
+
+                val tireCalc = if (vehicle != null) {
+                  VehicleCalculations.calculateTireDimensions(vehicle.tireWidthMm, vehicle.tireAspectRatio, vehicle.wheelDiameterInches, vehicle.tireCorrectionPercent)
+                } else null
+                val sampleRpm = if (tireCalc != null) {
+                  VehicleCalculations.calculateRpmFromSpeed(vMs, tireCalc.circumferenceM, _uiState.value.selectedGearRatio, _uiState.value.selectedFinalDrive)?.toInt()
+                } else null
+
+                val sampleEngineTorqueKgfm = if (sampleRpm != null && sampleRpm > 500) {
+                  VehicleCalculations.calculateTorqueKgfm(pEngineCv, sampleRpm.toFloat()) ?: 0f
+                } else 0f
+                val sampleWheelTorqueKgfm = if (sampleRpm != null && sampleRpm > 500) {
+                  VehicleCalculations.calculateTorqueKgfm(pWheelCv, sampleRpm.toFloat()) ?: 0f
+                } else 0f
+
                 val samplePoint = RunSample(
+                  timestampMs = lastProcessedGpsTimestamp,
                   elapsedTimeMs = runDurationMs,
-                  filteredAccelerationZ = zFiltradoRun,
-                  correctedAccelerationZ = rawCorrigidoZ,
-                  longitudinalG = currentG,
+                  latitude = lastLatitude,
+                  longitude = lastLongitude,
+                  rawGpsSpeedMs = gpsSpeedMs,
+                  rawGpsSpeedKmh = gpsSpeedKmh,
+                  filteredSpeedMs = vMs,
+                  filteredSpeedKmh = gpsSpeedKmh,
                   gpsSpeedKmh = gpsSpeedKmh,
                   calculatedSpeedKmh = currentCalcKmh,
                   speedDifferenceKmh = diff,
                   gpsAccuracyMeters = lastGpsAccuracyMeters,
+                  gpsSpeedAccuracyMps = lastGpsSpeedAccuracyMps,
+                  gpsAccelerationMps2 = filteredGpsAccelerationMps2,
+                  sensorAccelerationMps2 = zFiltradoRun,
+                  finalAccelerationMps2 = fusionAccel,
+                  filteredAccelerationZ = zFiltradoRun,
+                  correctedAccelerationZ = rawCorrigidoZ,
+                  longitudinalG = currentG,
                   gyroMagnitude = gyroMag,
+                  distanceMeters = totalRunDistanceMeters,
+                  engineRpm = sampleRpm,
+                  accelerationForceN = fAccel,
+                  aerodynamicForceN = fAero,
+                  rollingForceN = fRoll,
+                  slopeForceN = fSlope,
+                  totalForceN = fTotal,
+                  wheelPowerWatts = pWatts,
+                  wheelPowerKw = pWatts / 1000f,
+                  wheelPowerCv = pWheelCv,
+                  enginePowerCv = pEngineCv,
+                  wheelTorqueKgfm = sampleWheelTorqueKgfm,
+                  engineTorqueKgfm = sampleEngineTorqueKgfm,
+                  wheelTorqueNm = sampleWheelTorqueKgfm * 9.80665f,
+                  engineTorqueNm = sampleEngineTorqueKgfm * 9.80665f,
+                  confidenceLevel = confidence,
                   isValid = isSampleValid,
                   rejectionReason = rejReason
                 )
                 recordedSamples.add(samplePoint)
               }
 
-              // 2. PERÍODO DE PROTEÇÃO DE INÍCIO (3 SEGUNDOS)
+              // Proteção de início
               if (runDurationMs < DynoConfig.START_PROTECTION_MS) {
                 if (currentState != DynoRunState.MEDINDO_PROTEGIDO) {
                   _uiState.update { it.copy(testState = DynoRunState.MEDINDO_PROTEGIDO) }
                 }
                 suspectStartTimeNs = null
                 suspectNegativeSampleCount = 0
-                clutchStartTimeNs = null
               } else {
                 if (currentState == DynoRunState.MEDINDO_PROTEGIDO) {
                   _uiState.update { it.copy(testState = DynoRunState.MEDINDO) }
-                  diagnosticLogs.add("Período de proteção (3s) concluído. Estado: MEDINDO")
                 }
 
-                // 4. SUSPEITA DE DESACELERAÇÃO
+                // Suspeita de desaceleração inercial
                 if (currentState == DynoRunState.MEDINDO) {
                   if (zDeadZone < DynoConfig.DECEL_SUSPECT_THRESHOLD) {
                     suspectNegativeSampleCount++
@@ -744,7 +1063,6 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
                       val suspectMs = (nowNs - suspectStartTimeNs!!) / 1_000_000L
                       if (suspectMs >= DynoConfig.DECEL_SUSTAIN_MS && suspectNegativeSampleCount >= 15) {
                         _uiState.update { it.copy(testState = DynoRunState.SUSPEITA_DESACELERACAO) }
-                        diagnosticLogs.add("SUSPEITA DE DESACELERAÇÃO: z=$zFiltradoRun, amostras=$suspectNegativeSampleCount, dur=${suspectMs}ms")
                       }
                     }
                   } else if (zDeadZone > DynoConfig.DECEL_RECOVERY_THRESHOLD) {
@@ -756,27 +1074,17 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
                     _uiState.update { it.copy(testState = DynoRunState.MEDINDO) }
                     suspectStartTimeNs = null
                     suspectNegativeSampleCount = 0
-                    diagnosticLogs.add("Recuperação da aceleração (z=$zFiltradoRun > ${DynoConfig.DECEL_RECOVERY_THRESHOLD}). Retornando para MEDINDO.")
                   }
                 }
               }
 
-              // Detecção de embreagem
-              val wasAccelerating = maxGpsSpeedKmh >= (startGpsKmh + 3.0f)
-              if (wasAccelerating && zDeadZone < DynoConfig.DECEL_SUSPECT_THRESHOLD && gpsSpeedKmh <= maxGpsSpeedKmh) {
-                if (clutchStartTimeNs == null) clutchStartTimeNs = nowNs
-              } else if (gpsSpeedKmh > maxGpsSpeedKmh) {
-                clutchStartTimeNs = null
-              }
-
               // Timeout de segurança após 25 segundos
               if (elapsedSec > 25.0f) {
-                diagnosticLogs.add("Timeout de segurança de 25s atingido.")
-                finalizeRun(FinishReason.TIMEOUT)
+                finalizeRun(FinishReason.TIMEOUT, activeVehicleProfile)
               }
             }
 
-            // Calibração
+            // Calibração dos Sensores
             if (isCalibrating) {
               val count = calibSampleCount
               if (count > 10) {
@@ -785,10 +1093,10 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
                 val partialAvgZ = (calibSumZ / count).toFloat()
                 val gyroMag = sqrt(gyroX * gyroX + gyroY * gyroY + gyroZ * gyroZ)
 
-                if (abs(event.values[0] - partialAvgX) > 2.2f ||
-                  abs(event.values[1] - partialAvgY) > 2.2f ||
-                  abs(event.values[2] - partialAvgZ) > 2.2f ||
-                  gyroMag > 2.0f) {
+                if (abs(event.values[0] - partialAvgX) > 2.5f ||
+                  abs(event.values[1] - partialAvgY) > 2.5f ||
+                  abs(event.values[2] - partialAvgZ) > 2.5f ||
+                  gyroMag > 2.2f) {
                   resetCalibrationCollector()
                   isCalibrating = false
                   _uiState.update { it.copy(isCalibrating = false, calibrationStatusText = "O aparelho se moveu durante a calibração") }
@@ -914,6 +1222,8 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
       _uiState.update { it.copy(testState = DynoRunState.AGUARDANDO_INICIO) }
       armedEstimatedSpeedMs = 0f
       armedLastNanoTime = System.nanoTime()
+      positiveAccelDurationMs = 0L
+      lastAccelCheckNs = 0L
       resultSaved = false
     }
   }
@@ -929,7 +1239,10 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     runStartTimeNs = nowNs
     lastSensorTimestampNs = nowNs
     lastSampleRecordedNs = nowNs
+    lastDistanceIntegrationNs = nowNs
+    lastDistanceSpeedMs = actualGpsSpeed / 3.6f
 
+    totalRunDistanceMeters = 0f
     startCalculatedKmh = actualGpsSpeed
     startGpsKmh = actualGpsSpeed
     integratedSpeedKmh = actualGpsSpeed
@@ -937,9 +1250,23 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     maxGpsSpeedKmh = actualGpsSpeed
     maxDisplaySpeedKmh = actualGpsSpeed
 
+    splitTime0to60 = null
+    splitTime0to100 = null
+    splitCross60Ns = null
+    splitCross80Ns = null
+    splitCross100Ns = null
+    splitTime60to100 = null
+    splitTime80to120 = null
+    splitTime100to200 = null
+    splitTime60Feet = null
+    splitTime100M = null
+    splitTime201M = null
+    splitTime402M = null
+
     suspectStartTimeNs = null
     suspectNegativeSampleCount = 0
     clutchStartTimeNs = null
+    speedDropStartTimeNs = null
 
     gpsFixHistory.clear()
     diagnosticLogs.clear()
@@ -954,20 +1281,6 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     resultSaved = false
     recordedSamples.clear()
     inertialHistory.clear()
-
-    val firstSample = RunSample(
-      elapsedTimeMs = 0L,
-      filteredAccelerationZ = zFiltradoRun,
-      correctedAccelerationZ = (linearZ - offsetZ) * (if (invertSignal) -1f else 1f),
-      gpsSpeedKmh = actualGpsSpeed,
-      calculatedSpeedKmh = actualGpsSpeed,
-      speedDifferenceKmh = 0.0f,
-      gpsAccuracyMeters = lastGpsAccuracyMeters,
-      gyroMagnitude = sqrt(gyroX * gyroX + gyroY * gyroY + gyroZ * gyroZ),
-      isValid = true
-    )
-    recordedSamples.add(firstSample)
-    totalInertialSamples++
 
     _uiState.update { it.copy(testState = DynoRunState.MEDINDO_PROTEGIDO) }
   }
@@ -987,13 +1300,16 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
       _uiState.update { it.copy(testState = DynoRunState.FINALIZADO) }
 
       val elapsedSec = if (runStartTimeNs > 0L) ((nowNs - runStartTimeNs) / 1_000_000L) / 1000f else 0f
-      diagnosticLogs.add("Finalizando teste: motivo=${reason.displayName}, tempo=${elapsedSec}s, maxGps=$maxGpsSpeedKmh km/h, maxCalc=$maxIntegratedSpeedKmh km/h")
-
-      // 10. DIFERENÇA NO PICO: abs(maxGpsSpeedKmh - maxIntegratedSpeedKmh)
       val peakDiff = abs(maxGpsSpeedKmh - maxIntegratedSpeedKmh)
       val avgDiff = if (syncDiffCount > 0) (syncDiffSum / syncDiffCount).toFloat() else 0f
 
-      val finalSamples = recordedSamples.take(500).toList()
+      // Descartar o primeiro e o último ponto se forem transientes de início/corte
+      val rawSamples = recordedSamples.take(500)
+      val trimmedSamples = if (rawSamples.size > 4) {
+        rawSamples.subList(1, rawSamples.size - 1)
+      } else rawSamples
+
+      val finalSamples = trimmedSamples.toList()
       val validCount = finalSamples.count { it.isValid }
       val rejectedCount = finalSamples.count { !it.isValid }
       val rejectionRatio = if (totalInertialSamples > 0) rejectedInertialSamples.toFloat() / totalInertialSamples.toFloat() else 0f
@@ -1006,68 +1322,39 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
         validGpsUpdatesDuringRunCount >= DynoConfig.MIN_GPS_UPDATES &&
         speedGainKmh >= DynoConfig.MIN_SPEED_GAIN_KMH
 
-      // 13. CLASSIFICAÇÃO DA PASSAGEM
       val runQualityStr = when {
         reason == FinishReason.CANCELLED || (reason == FinishReason.USER_STOP && !isCompletePass) -> {
-          invalidReasonText = "Teste encerrado manualmente antes de atingir os critérios mínimos de validação."
+          invalidReasonText = "Teste encerrado antes dos critérios mínimos de validação."
           "INVÁLIDA"
         }
         reason == FinishReason.TIMEOUT -> {
-          invalidReasonText = "Tempo de passagem excessivo (> 25s)."
+          invalidReasonText = "Tempo limite de medição atingido (> 25s)."
           "INVÁLIDA"
         }
         elapsedSec < (DynoConfig.MIN_VALID_DURATION_MS / 1000f) -> {
-          invalidReasonText = "Duração insuficiente (${String.format(Locale.US, "%.2f", elapsedSec)}s < 4.00s) para registrar curva de potência completa."
+          invalidReasonText = "Duração insuficiente (${String.format(Locale.US, "%.2f", elapsedSec)}s < 2.50s) para registrar curva completa."
           "INVÁLIDA"
         }
         speedGainKmh < DynoConfig.MIN_SPEED_GAIN_KMH -> {
-          invalidReasonText = "Ganho de velocidade GPS insuficiente (${String.format(Locale.US, "%.1f", speedGainKmh)} km/h < 10.0 km/h) após o gatilho."
-          "INVÁLIDA"
-        }
-        validCount < DynoConfig.MIN_VALID_SAMPLES -> {
-          invalidReasonText = "Quantidade insuficiente de amostras válidas ($validCount < ${DynoConfig.MIN_VALID_SAMPLES})."
+          invalidReasonText = "Ganho de velocidade GPS insuficiente (${String.format(Locale.US, "%.1f", speedGainKmh)} km/h < 8.0 km/h)."
           "INVÁLIDA"
         }
         validGpsUpdatesDuringRunCount < DynoConfig.MIN_GPS_UPDATES -> {
-          invalidReasonText = "Poucas leituras de GPS válidas ($validGpsUpdatesDuringRunCount < ${DynoConfig.MIN_GPS_UPDATES}) durante a medição."
+          invalidReasonText = "Poucas leituras de GPS válidas ($validGpsUpdatesDuringRunCount < ${DynoConfig.MIN_GPS_UPDATES})."
           "INVÁLIDA"
         }
-        lastGpsAccuracyMeters > 12f -> {
-          invalidReasonText = "Precisão do GPS insuficiente (${String.format(Locale.US, "%.1f", lastGpsAccuracyMeters)}m > 12m)."
+        lastGpsAccuracyMeters > 15f -> {
+          invalidReasonText = "Precisão horizontal do GPS insuficiente (${String.format(Locale.US, "%.1f", lastGpsAccuracyMeters)}m > 15m)."
           "INVÁLIDA"
         }
-        rejectionRatio > 0.25f -> {
-          invalidReasonText = "Mais de 25% das amostras rejeitadas por vibração excessiva."
-          "INVÁLIDA"
-        }
-        peakDiff > 16.0f -> {
-          invalidReasonText = "Divergência entre velocidade máxima GPS (${String.format(Locale.US, "%.1f", maxGpsSpeedKmh)} km/h) e calculada (${String.format(Locale.US, "%.1f", maxIntegratedSpeedKmh)} km/h)."
-          "INVÁLIDA"
-        }
-        // Se houver menos de 4 pares sincronizados: qualidade DADOS INSUFICIENTES ou REGULAR (não acusa média elevada artificial)
-        syncDiffCount < 4 -> {
-          invalidReasonText = "Poucos pares sincronizados GPS × Acelerômetro ($syncDiffCount < 4) para cálculo estatístico de precisão."
-          "REGULAR"
-        }
-        avgDiff > 12.0f -> {
-          invalidReasonText = "Diferença média sincronizada entre GPS e acelerômetro elevada (±${String.format(Locale.US, "%.1f", avgDiff)} km/h)."
-          "INVÁLIDA"
-        }
-        // Passagem BOA
-        avgDiff <= 6.0f && maxSyncDiff <= 12.0f && peakDiff <= 10.0f &&
-          validGpsUpdatesDuringRunCount >= DynoConfig.MIN_GPS_UPDATES &&
-          lastGpsAccuracyMeters <= 6f && elapsedSec in 4f..20f && rejectionRatio <= 0.10f &&
-          speedGainKmh >= DynoConfig.MIN_SPEED_GAIN_KMH -> "BOA"
+        avgDiff <= 6.0f && lastGpsAccuracyMeters <= 8f && rejectionRatio <= 0.15f -> "BOA"
+        else -> "REGULAR"
+      }
 
-        // Passagem REGULAR
-        avgDiff <= 12.0f && maxSyncDiff <= 20.0f && peakDiff <= 16.0f &&
-          validGpsUpdatesDuringRunCount >= DynoConfig.MIN_GPS_UPDATES &&
-          lastGpsAccuracyMeters <= 10f && elapsedSec <= 25f && rejectionRatio <= 0.25f -> "REGULAR"
-
-        else -> {
-          invalidReasonText = "Inconsistência na detecção inercial ou divergência de velocidade."
-          "INVÁLIDA"
-        }
+      val confidenceLevelStr = when (runQualityStr) {
+        "BOA" -> "ALTA"
+        "REGULAR" -> "MEDIA"
+        else -> "BAIXA"
       }
 
       val avgHz = if (elapsedSec > 0f) finalSamples.size / elapsedSec else 0f
@@ -1084,25 +1371,24 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
       var peakPowerSpeedKmh = maxGpsSpeedKmh
       var peakTorqueSpeedKmh = startGpsKmh + (maxGpsSpeedKmh - startGpsKmh) * 0.45f
       var totalMassKg = 0f
-      var drivetrainLossPercent = 15f
+      var drivetrainLossPercent = 12f
       var marginPercent = 10f
 
-      var computedSamples = finalSamples
-
-      if (vehicle != null) {
-        totalMassKg = vehicle.totalWeightKg
-        val frontalArea = vehicle.frontalAreaM2
-        val cd = vehicle.dragCoefficient
-        val cr = vehicle.rollingResistanceCoeff
-        val drivetrain = vehicle.drivetrain
-        val efficiency = VehicleCalculations.getDrivetrainEfficiency(drivetrain)
-        drivetrainLossPercent = VehicleCalculations.getDrivetrainLossPercent(drivetrain)
+      val profileToUse = vehicle ?: activeVehicleProfile
+      if (profileToUse != null) {
+        totalMassKg = profileToUse.totalWeightKg
+        val frontalArea = profileToUse.frontalAreaM2
+        val cd = profileToUse.dragCoefficient
+        val cr = profileToUse.rollingResistanceCoeff
+        val drivetrain = profileToUse.drivetrain
+        val efficiency = VehicleCalculations.getDrivetrainEfficiency(drivetrain, profileToUse.customDrivetrainLossPercent)
+        drivetrainLossPercent = VehicleCalculations.getDrivetrainLossPercent(drivetrain, profileToUse.customDrivetrainLossPercent)
 
         val confidence = VehicleCalculations.evaluateWeightConfidence(
-          useMeasuredWeight = vehicle.useMeasuredWeight,
-          audioPreset = vehicle.audioPreset,
-          hasGnv = vehicle.gnvWeightKg > 0f,
-          hasCargo = vehicle.cargoWeightKg > 0f
+          useMeasuredWeight = profileToUse.useMeasuredWeight,
+          audioPreset = profileToUse.audioPreset,
+          hasGnv = profileToUse.gnvWeightKg > 0f,
+          hasCargo = profileToUse.cargoWeightKg > 0f
         )
         marginPercent = when (confidence) {
           WeightConfidence.HIGH -> 7.0f
@@ -1111,50 +1397,63 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
         }
 
         val tireCalc = VehicleCalculations.calculateTireDimensions(
-          widthMm = vehicle.tireWidthMm,
-          aspectRatio = vehicle.tireAspectRatio,
-          rimInches = vehicle.wheelDiameterInches
+          widthMm = profileToUse.tireWidthMm,
+          aspectRatio = profileToUse.tireAspectRatio,
+          rimInches = profileToUse.wheelDiameterInches,
+          tireCorrectionPercent = profileToUse.tireCorrectionPercent
         )
 
-        // Relação estimada padrão de 2ª marcha
-        val gearRatio = 1.95f
-        val finalDrive = 4.10f
-        val rollForce = VehicleCalculations.calculateRollingResistanceForce(totalMassKg, cr)
+        val gearRatio = _uiState.value.selectedGearRatio
+        val finalDrive = _uiState.value.selectedFinalDrive
+        val slopePercent = if (_uiState.value.slopeMode == "MANUAL") _uiState.value.manualSlopePercent else 0f
 
-        // Processar cada amostra para gerar curvas completas
-        computedSamples = finalSamples.map { sample ->
-          val aMps2 = sample.filteredAccelerationZ
+        val rollForce = VehicleCalculations.calculateRollingResistanceForce(totalMassKg, cr)
+        val slopeForce = VehicleCalculations.calculateSlopeForce(totalMassKg, slopePercent)
+
+        // Processamento detalhado e limpo de cada amostra
+        val computedSamples = finalSamples.map { sample ->
+          val aMps2 = sample.finalAccelerationMps2
           val g = aMps2 / 9.80665f
-          val vMps = (sample.gpsSpeedKmh / 3.6f).coerceAtLeast(0f)
-          val fAero = VehicleCalculations.calculateAerodynamicForce(vMps, cd, frontalArea)
-          val fAccel = VehicleCalculations.calculateAccelerationForce(totalMassKg, aMps2)
-          val fTractive = VehicleCalculations.calculateTractiveForce(fAccel, rollForce, fAero)
+          val vMps = sample.filteredSpeedMs
+          val fAero = VehicleCalculations.calculateAerodynamicForce(vMps, cd, frontalArea, profileToUse.airDensityKgM3)
+          val fAccel = VehicleCalculations.calculateAccelerationForce(totalMassKg, max(0f, aMps2))
+          val fTractive = VehicleCalculations.calculateTotalTractiveForce(fAccel, rollForce, fAero, slopeForce)
           val wWatts = VehicleCalculations.calculateWheelPowerWatts(fTractive, vMps)
           val sampleWheelPowerCv = VehicleCalculations.convertWattsToCv(wWatts)
-          val sampleEnginePowerCv = VehicleCalculations.calculateEnginePowerCv(sampleWheelPowerCv, drivetrain)
+          val sampleEnginePowerCv = VehicleCalculations.calculateEnginePowerCv(sampleWheelPowerCv, drivetrain, profileToUse.customDrivetrainLossPercent)
 
           val sampleRpm = VehicleCalculations.calculateRpmFromSpeed(vMps, tireCalc.circumferenceM, gearRatio, finalDrive)?.toInt()
-          val sampleEngineTorqueKgfm = if (sampleRpm != null && sampleRpm > 800) {
+          val sampleEngineTorqueKgfm = if (sampleRpm != null && sampleRpm > 500) {
             VehicleCalculations.calculateTorqueKgfm(sampleEnginePowerCv, sampleRpm.toFloat()) ?: 0f
           } else 0f
-          val sampleWheelTorqueKgfm = sampleEngineTorqueKgfm * efficiency
+          val sampleWheelTorqueKgfm = if (sampleRpm != null && sampleRpm > 500) {
+            VehicleCalculations.calculateTorqueKgfm(sampleWheelPowerCv, sampleRpm.toFloat()) ?: 0f
+          } else 0f
 
           sample.copy(
             longitudinalG = g,
+            accelerationForceN = fAccel,
+            aerodynamicForceN = fAero,
+            rollingForceN = rollForce,
+            slopeForceN = slopeForce,
+            totalForceN = fTractive,
+            wheelPowerWatts = wWatts,
+            wheelPowerKw = wWatts / 1000f,
             wheelPowerCv = sampleWheelPowerCv,
             enginePowerCv = sampleEnginePowerCv,
             wheelTorqueKgfm = sampleWheelTorqueKgfm,
             engineTorqueKgfm = sampleEngineTorqueKgfm,
+            wheelTorqueNm = sampleWheelTorqueKgfm * 9.80665f,
+            engineTorqueNm = sampleEngineTorqueKgfm * 9.80665f,
             engineRpm = sampleRpm
           )
         }
 
-        val validComputed = computedSamples.filter { it.isValid && it.filteredAccelerationZ > 0.1f }
+        val validComputed = computedSamples.filter { it.isValid && it.finalAccelerationMps2 > 0.05f }
         if (validComputed.isNotEmpty()) {
           peakLongG = maxOf(peakLongG, validComputed.map { it.longitudinalG }.maxOrNull() ?: 0f)
           avgLongG = validComputed.map { it.longitudinalG }.average().toFloat()
 
-          // Amostra com maior potência do motor
           val maxPowerSample = validComputed.maxByOrNull { it.enginePowerCv }
           if (maxPowerSample != null) {
             wheelPowerCv = maxPowerSample.wheelPowerCv
@@ -1163,8 +1462,7 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
             peakPowerSpeedKmh = maxPowerSample.gpsSpeedKmh
           }
 
-          // Amostra com maior torque do motor
-          val maxTorqueSample = validComputed.filter { (it.engineRpm ?: 0) in 1500..6500 }.maxByOrNull { it.engineTorqueKgfm }
+          val maxTorqueSample = validComputed.filter { (it.engineRpm ?: 0) in 1000..7500 }.maxByOrNull { it.engineTorqueKgfm }
             ?: validComputed.maxByOrNull { it.engineTorqueKgfm }
           if (maxTorqueSample != null) {
             wheelTorqueKgfm = maxTorqueSample.wheelTorqueKgfm
@@ -1173,25 +1471,34 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
             peakTorqueSpeedKmh = maxTorqueSample.gpsSpeedKmh
           }
         }
-      }
 
-      if (vehicle != null) {
+        val avgAccuracy = if (gpsFixHistory.isNotEmpty()) {
+          gpsFixHistory.map { it.accuracyM }.average().toFloat()
+        } else lastGpsAccuracyMeters
+
         val result = RunResult(
-          vehicleId = vehicle.id,
-          vehicleName = "${vehicle.manufacturer} ${vehicle.model} ${vehicle.engine}".trim(),
+          vehicleId = profileToUse.id,
+          vehicleName = "${profileToUse.manufacturer} ${profileToUse.model} ${profileToUse.engine}".trim(),
           runStartCalculatedSpeedKmh = startCalculatedKmh,
           runStartGpsSpeedKmh = startGpsKmh,
+          startSpeedKmh = startGpsKmh,
           maximumGpsSpeedKmh = maxGpsSpeedKmh,
           maximumCalculatedSpeedKmh = maxIntegratedSpeedKmh,
           finalGpsSpeedKmh = finalGpsKmh,
           finalCalculatedSpeedKmh = finalCalcSpeedKmh,
+          finalSpeedKmh = finalGpsKmh,
           speedGainKmh = speedGainKmh,
+          totalDistanceMeters = totalRunDistanceMeters,
           estimatedPowerCv = enginePowerCv,
           estimatedTorqueKgfm = engineTorqueKgfm,
           wheelPowerCv = wheelPowerCv,
           enginePowerCv = enginePowerCv,
+          wheelPowerKw = (wheelPowerCv * 735.49875f) / 1000f,
+          enginePowerKw = (enginePowerCv * 735.49875f) / 1000f,
           wheelTorqueKgfm = wheelTorqueKgfm,
           engineTorqueKgfm = engineTorqueKgfm,
+          wheelTorqueNm = wheelTorqueKgfm * 9.80665f,
+          engineTorqueNm = engineTorqueKgfm * 9.80665f,
           peakLongitudinalG = peakLongG,
           averageLongitudinalG = avgLongG,
           peakPowerRpm = peakPowerRpm,
@@ -1201,10 +1508,20 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
           totalVehicleMassKg = totalMassKg,
           drivetrainLossPercent = drivetrainLossPercent,
           estimatedMarginPercent = marginPercent,
-          gearUsed = "2ª",
+          gearUsed = _uiState.value.selectedGear,
+          gearRatioUsed = gearRatio,
+          finalDriveUsed = finalDrive,
           isAerodynamicsEstimated = true,
+          cdUsed = cd,
+          frontalAreaUsed = frontalArea,
+          crrUsed = cr,
+          airDensityUsed = profileToUse.airDensityKgM3,
+          slopeModeUsed = _uiState.value.slopeMode,
+          slopePercentUsed = slopePercent,
+          confidenceLevel = confidenceLevelStr,
           elapsedSeconds = elapsedSec,
           gpsAccuracyMeters = lastGpsAccuracyMeters,
+          averageGpsAccuracyMeters = avgAccuracy,
           totalSamples = computedSamples.size,
           rejectedSamples = rejectedCount,
           validSamplesCount = validCount,
@@ -1217,6 +1534,15 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
           maximumSpeedDifferenceKmh = maxSyncDiff,
           invalidationReason = invalidReasonText,
           appVersion = "0.20.0",
+          time0to60Kmh = splitTime0to60,
+          time0to100Kmh = splitTime0to100,
+          time60to100Kmh = splitTime60to100,
+          time80to120Kmh = splitTime80to120,
+          time100to200Kmh = splitTime100to200,
+          time60Feet = splitTime60Feet,
+          time100M = splitTime100M,
+          time201M = splitTime201M,
+          time402M = splitTime402M,
           samples = computedSamples
         )
         runResultRepository.saveResult(result)
@@ -1232,16 +1558,41 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     zFiltradoRun = 0f
     peakLongitudinalG = 0f
     liveLongitudinalG = 0f
+    filteredGpsAccelerationMps2 = 0f
+    previousGpsSpeedMs = 0f
+    previousGpsElapsedNs = 0L
+    gpsSpeedMovingAverageBuffer.clear()
+
     suspectStartTimeNs = null
     suspectNegativeSampleCount = 0
     clutchStartTimeNs = null
+    speedDropStartTimeNs = null
+    invalidContinuousAnomalyStartTimeNs = null
     runStartTimeNs = 0L
     runEndTimeNs = 0L
     lastSensorTimestampNs = 0L
     lastSampleRecordedNs = 0L
+    lastDistanceIntegrationNs = 0L
+    lastDistanceSpeedMs = 0f
+
+    totalRunDistanceMeters = 0f
+    splitTime0to60 = null
+    splitTime0to100 = null
+    splitCross60Ns = null
+    splitCross80Ns = null
+    splitCross100Ns = null
+    splitTime60to100 = null
+    splitTime80to120 = null
+    splitTime100to200 = null
+    splitTime60Feet = null
+    splitTime100M = null
+    splitTime201M = null
+    splitTime402M = null
 
     armedEstimatedSpeedMs = 0f
     armedLastNanoTime = 0L
+    positiveAccelDurationMs = 0L
+    lastAccelCheckNs = 0L
 
     startCalculatedKmh = _uiState.value.startSpeedTriggerKmh
     startGpsKmh = 0f
