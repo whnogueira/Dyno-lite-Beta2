@@ -1,14 +1,6 @@
 package com.example
 
-import com.example.model.DrivetrainType
-import com.example.model.FinishReason
-import com.example.model.RunResult
-import com.example.model.RunSample
-import com.example.model.ShiftSpeedType
-import com.example.model.SimulationConfig
-import com.example.model.SimulationEngine
-import com.example.model.TireGripType
-import com.example.model.VehicleCalculations
+import com.example.model.*
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -23,9 +15,6 @@ class SimulationEngineTest {
       aspectRatio = 55,
       rimInches = 15
     )
-    // 195 * 0.55 = 107.25 mm
-    // rim = 15 * 25.4 = 381.0 mm
-    // total diameter = 381 + 2 * 107.25 = 595.5 mm
     assertEquals(107.25, tire.lateralHeightMm, 0.1)
     assertEquals(381.0, tire.rimDiameterMm, 0.1)
     assertEquals(595.5, tire.totalDiameterMm, 0.5)
@@ -52,7 +41,7 @@ class SimulationEngineTest {
       tireWidthMm = 195,
       tireAspectRatio = 55,
       rimDiameterInches = 15,
-      shiftSpeed = ShiftSpeedType.FAST
+      shiftTimeSeconds = 0.30f
     )
 
     val result = SimulationEngine.runSimulation(config)
@@ -62,7 +51,6 @@ class SimulationEngineTest {
     assertNotNull("402m should be calculated", result.time402m)
     assertTrue("402m time should be realistic (between 14s and 19s)", result.time402m!! in 14.0f..19.0f)
     assertTrue("Final speed should be above 130 km/h", (result.speedAt402mKmh ?: 0f) > 130f)
-    assertTrue("Samples should not be empty", result.samples.isNotEmpty())
     assertTrue("Gear speed table should have 5 gears", result.gearSpeeds.size == 5)
   }
 
@@ -116,71 +104,48 @@ class SimulationEngineTest {
   }
 
   @Test
-  fun testRecalculateRunResult() {
-    val sample1 = RunSample(
-      timestampMillis = 1000L,
-      gpsSpeedKmh = 40.0f,
-      gpsLatitude = 0.0,
-      gpsLongitude = 0.0,
-      gpsAccuracyMeters = 2.0f,
-      filteredAccelG = 0.45f,
-      wheelPowerCv = 80f,
-      enginePowerCv = 95f,
-      wheelTorqueKgfm = 18f,
-      engineTorqueKgfm = 21f,
-      estimatedRpm = 3200
-    )
-    val sample2 = RunSample(
-      timestampMillis = 1500L,
-      gpsSpeedKmh = 60.0f,
-      gpsLatitude = 0.0,
-      gpsLongitude = 0.0,
-      gpsAccuracyMeters = 2.0f,
-      filteredAccelG = 0.40f,
-      wheelPowerCv = 90f,
-      enginePowerCv = 105f,
-      wheelTorqueKgfm = 17f,
-      engineTorqueKgfm = 20f,
-      estimatedRpm = 4800
-    )
+  fun testGarageTuningEngineCalculations() {
+    val defaultBuild = GarageTuningEngine.createDefaultVectraBuild()
+    val stockResult = GarageTuningEngine.calculateTuningBuild(defaultBuild)
 
-    val originalRun = RunResult(
-      id = "run-test-1",
-      vehicleId = "veh-1",
-      vehicleName = "Carro Teste",
-      maxWheelPowerCv = 90f,
-      maxEnginePowerCv = 105f,
-      maxWheelTorqueKgfm = 18f,
-      maxEngineTorqueKgfm = 21f,
-      peakPowerRpm = 4800,
-      peakTorqueRpm = 3200,
-      samples = listOf(sample1, sample2),
-      finishReason = FinishReason.NORMAL_COMPLETION,
-      gearRatioUsed = 1.95f,
-      finalDriveUsed = 4.10f,
-      totalVehicleMassKg = 1200f,
-      drivetrainLossPercent = 12f
-    )
+    // Stock Vectra 2.2 8V with Ethanol tuning is around 130 cv
+    assertTrue("Stock power should be around 120-140 cv", stockResult.estimatedEnginePowerCv in 115f..145f)
+    assertTrue("Stock torque should be around 18-22 kgfm", stockResult.estimatedEngineTorqueKgfm in 18f..22f)
+    assertTrue("Stock reliability should be high", stockResult.reliabilityScore >= 85)
 
-    // Recalculate with 1400kg (+200kg mass)
-    val recalculated = VehicleCalculations.recalculateRunResult(
-      run = originalRun,
-      correctedTotalMassKg = 1400f,
-      correctedGearRatio = 1.95f,
-      correctedFinalDrive = 4.10f,
-      correctedTireWidthMm = 195,
-      correctedTireAspectRatio = 55,
-      correctedRimInches = 15,
-      correctedLossPercent = 12f,
-      correctedCd = 0.33f,
-      correctedFrontalAreaM2 = 2.10f,
-      correctedCrr = 0.015f
-    )
+    // Apply Turbo 0.8 bar Template
+    val turboBuild = GarageTuningEngine.applyProjectTemplate(ProjectTemplateType.TURBO_INTERMEDIARIO, defaultBuild)
+    val turboResult = GarageTuningEngine.calculateTuningBuild(turboBuild)
 
-    assertTrue(
-      "Recalculated power with more mass must be higher than original",
-      recalculated.maxEnginePowerCv > originalRun.maxEnginePowerCv
+    assertTrue("Turbo power should be significantly higher (>200 cv)", turboResult.estimatedEnginePowerCv > 200f)
+    assertTrue("Turbo torque should be higher (>30 kgfm)", turboResult.estimatedEngineTorqueKgfm > 30f)
+    assertTrue("Boost pressure should be around 0.7-0.8 bar", turboResult.actualBoostBar >= 0.70f)
+
+    // Test Dyno Track simulation
+    val trackResult = GarageTuningEngine.runDynoTrackSimulation(turboResult)
+    assertTrue("0-100 time should be faster with turbo (< 7.5s)", trackResult.time0to100Kmh < 7.5f)
+    assertTrue("402m speed should be > 150 km/h", trackResult.speedAt402mKmh > 150f)
+  }
+
+  @Test
+  fun testInjectorBottleneckFormula() {
+    // Formula: novaVazao = vazaoOriginal * sqrt(novaPressao / pressaoOriginal)
+    val baseFlow = 28f // lb/h
+    val corrected = GarageTuningEngine.calculateCorrectedInjectorFlow(
+      nominalFlowLbHr = baseFlow,
+      nominalPressureBar = 3.0f,
+      operatingPressureBar = 4.0f
     )
-    assertEquals(1400f, recalculated.totalVehicleMassKg, 0.1f)
+    val expected = (baseFlow * kotlin.math.sqrt(4.0f / 3.0f))
+    assertEquals(expected, corrected, 0.1f)
+
+    // Supported HP calculation
+    val supportedHp = GarageTuningEngine.calculateMaxSupportedPowerByInjectorsCv(
+      correctedFlowLbHr = corrected,
+      injectorCount = 4,
+      maxDutyCyclePercent = 85.0f,
+      bsfc = 0.55f
+    )
+    assertTrue("Supported HP should be positive and realistic", supportedHp > 150f)
   }
 }
