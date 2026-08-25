@@ -36,15 +36,19 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.Assessment
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.DirectionsCar
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.ShowChart
 import androidx.compose.material.icons.outlined.TableChart
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -56,12 +60,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -83,6 +91,7 @@ import com.example.data.RunResultRepository
 import com.example.model.FinishReason
 import com.example.model.RunResult
 import com.example.model.RunSample
+import com.example.model.VehicleCalculations
 import com.example.ui.components.DynoBadgeStatus
 import com.example.ui.components.DynoCard
 import com.example.ui.components.DynoDangerButton
@@ -113,6 +122,7 @@ import kotlin.math.abs
 @Composable
 fun ResultsScreen(
   onStartNewTest: (String?) -> Unit = {},
+  onOpenSimulator: ((String) -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
@@ -128,6 +138,7 @@ fun ResultsScreen(
   var showHistoryDialog by remember { mutableStateOf(false) }
   var showComparisonDialog by remember { mutableStateOf(false) }
   var showClearAllConfirmDialog by remember { mutableStateOf(false) }
+  var showCorrectRunDialog by remember { mutableStateOf(false) }
 
   // Check valid tests for the current vehicle to evaluate comparison eligibility
   val currentVehicleName = currentDisplayedResult?.vehicleName ?: ""
@@ -844,7 +855,71 @@ fun ResultsScreen(
               modifier = Modifier.fillMaxWidth()
             )
 
-            // 7. BOTÃO REPETIR TESTE
+            // 7. BOTÕES SIMULADOR E CORREÇÃO DE DADOS
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+              // Botão Simular a partir desta passagem
+              if (onOpenSimulator != null) {
+                Button(
+                  onClick = { onOpenSimulator(run.id) },
+                  modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .testTag("btn_simulate_from_run"),
+                  shape = RoundedCornerShape(12.dp),
+                  colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF8B5CF6),
+                    contentColor = Color.White
+                  )
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.Tune,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                  )
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Text(
+                    text = "SIMULADOR",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                      fontWeight = FontWeight.Bold,
+                      fontSize = 12.sp
+                    )
+                  )
+                }
+              }
+
+              // Botão Corrigir dados da passagem
+              OutlinedButton(
+                onClick = { showCorrectRunDialog = true },
+                modifier = Modifier
+                  .weight(1f)
+                  .height(48.dp)
+                  .testTag("btn_correct_run_data"),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, DynoBlueLight.copy(alpha = 0.5f)),
+                colors = ButtonDefaults.outlinedButtonColors(
+                  contentColor = DynoBlueLight
+                )
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Edit,
+                  contentDescription = null,
+                  modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                  text = "CORRIGIR DADOS",
+                  style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp
+                  )
+                )
+              }
+            }
+
+            // 8. BOTÃO REPETIR TESTE
             Button(
               onClick = { onStartNewTest(run.vehicleId) },
               modifier = Modifier
@@ -971,6 +1046,20 @@ fun ResultsScreen(
         OutlinedButton(onClick = { showClearAllConfirmDialog = false }) {
           Text("CANCELAR")
         }
+      }
+    )
+  }
+
+  // DIÁLOGO DE CORREÇÃO DE DADOS DA PASSAGEM (Seção 37)
+  if (showCorrectRunDialog && currentDisplayedResult != null) {
+    CorrectRunDataDialog(
+      run = currentDisplayedResult!!,
+      onDismiss = { showCorrectRunDialog = false },
+      onSaveCorrected = { correctedRun ->
+        runResultRepository.saveResult(correctedRun)
+        results = runResultRepository.getResults()
+        currentDisplayedResult = correctedRun
+        showCorrectRunDialog = false
       }
     )
   }
@@ -2036,4 +2125,244 @@ private fun SampleTableRow(sample: RunSample) {
       textAlign = TextAlign.End
     )
   }
+}
+
+/**
+ * Diálogo de Correção de Dados da Passagem (Seção 37)
+ * Permite ao usuário editar parâmetros de veículo/teste e recalcular potência/torque reais
+ * utilizando os dados de velocidade e tempo brutos gravados na passagem original.
+ */
+@Composable
+fun CorrectRunDataDialog(
+  run: RunResult,
+  onDismiss: () -> Unit,
+  onSaveCorrected: (RunResult) -> Unit
+) {
+  var weightText by remember { mutableStateOf(if (run.totalVehicleMassKg > 0f) String.format(Locale.US, "%.0f", run.totalVehicleMassKg) else "1250") }
+  var gearRatioText by remember { mutableStateOf(String.format(Locale.US, "%.2f", run.gearRatioUsed)) }
+  var finalDriveText by remember { mutableStateOf(String.format(Locale.US, "%.2f", run.finalDriveUsed)) }
+  var tireWidthText by remember { mutableStateOf("195") }
+  var tireAspectText by remember { mutableStateOf("55") }
+  var rimInchesText by remember { mutableStateOf("15") }
+  var lossPercentText by remember { mutableStateOf(String.format(Locale.US, "%.1f", run.drivetrainLossPercent)) }
+  var cdText by remember { mutableStateOf(String.format(Locale.US, "%.2f", run.cdUsed)) }
+  var frontalAreaText by remember { mutableStateOf(String.format(Locale.US, "%.2f", run.frontalAreaUsed)) }
+  var errorMessage by remember { mutableStateOf<String?>(null) }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+      ) {
+        Icon(Icons.Default.Edit, contentDescription = null, tint = DynoBluePrimary)
+        Text(
+          text = "Corrigir dados da passagem",
+          style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+        )
+      }
+    },
+    text = {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+      ) {
+        Text(
+          text = "Ajuste os parâmetros físicos. A potência e torque reais serão recalculados preservando as leituras de velocidade GPS da passagem original.",
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        if (errorMessage != null) {
+          Surface(
+            color = DynoErrorRed.copy(alpha = 0.15f),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Text(
+              text = errorMessage!!,
+              color = DynoErrorRed,
+              style = MaterialTheme.typography.bodySmall,
+              modifier = Modifier.padding(8.dp)
+            )
+          }
+        }
+
+        // 1. Peso Total
+        OutlinedTextField(
+          value = weightText,
+          onValueChange = { weightText = it },
+          label = { Text("Massa Total (Carro + Motorista) [kg]") },
+          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth()
+        )
+
+        // 2. Relações de Câmbio
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          OutlinedTextField(
+            value = gearRatioText,
+            onValueChange = { gearRatioText = it },
+            label = { Text("Relação da Marcha") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            singleLine = true,
+            modifier = Modifier.weight(1f)
+          )
+          OutlinedTextField(
+            value = finalDriveText,
+            onValueChange = { finalDriveText = it },
+            label = { Text("Diferencial") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            singleLine = true,
+            modifier = Modifier.weight(1f)
+          )
+        }
+
+        // 3. Dimensões do Pneu
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          OutlinedTextField(
+            value = tireWidthText,
+            onValueChange = { tireWidthText = it },
+            label = { Text("Largura (mm)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            modifier = Modifier.weight(1f)
+          )
+          OutlinedTextField(
+            value = tireAspectText,
+            onValueChange = { tireAspectText = it },
+            label = { Text("Perfil (%)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            modifier = Modifier.weight(1f)
+          )
+          OutlinedTextField(
+            value = rimInchesText,
+            onValueChange = { rimInchesText = it },
+            label = { Text("Aro (pol)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            modifier = Modifier.weight(1f)
+          )
+        }
+
+        // 4. Perda e Aerodinâmica
+        OutlinedTextField(
+          value = lossPercentText,
+          onValueChange = { lossPercentText = it },
+          label = { Text("Perda de Transmissão (%)") },
+          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth()
+        )
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          OutlinedTextField(
+            value = cdText,
+            onValueChange = { cdText = it },
+            label = { Text("Arrasto (Cd)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            singleLine = true,
+            modifier = Modifier.weight(1f)
+          )
+          OutlinedTextField(
+            value = frontalAreaText,
+            onValueChange = { frontalAreaText = it },
+            label = { Text("Área Frontal (m²)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            singleLine = true,
+            modifier = Modifier.weight(1f)
+          )
+        }
+      }
+    },
+    confirmButton = {
+      Button(
+        onClick = {
+          val weight = weightText.toFloatOrNull()
+          val gear = gearRatioText.toFloatOrNull()
+          val fd = finalDriveText.toFloatOrNull()
+          val tWidth = tireWidthText.toIntOrNull()
+          val tAspect = tireAspectText.toIntOrNull()
+          val rim = rimInchesText.toIntOrNull()
+          val loss = lossPercentText.toFloatOrNull()
+          val cd = cdText.toFloatOrNull()
+          val area = frontalAreaText.toFloatOrNull()
+
+          if (weight == null || weight < 300f || weight > 5000f) {
+            errorMessage = "Informe um peso válido entre 300 e 5000 kg"
+            return@Button
+          }
+          if (gear == null || gear <= 0.2f || gear > 8f) {
+            errorMessage = "Relação de marcha inválida"
+            return@Button
+          }
+          if (fd == null || fd <= 0.5f || fd > 10f) {
+            errorMessage = "Relação de diferencial inválida"
+            return@Button
+          }
+          if (tWidth == null || tWidth < 125 || tWidth > 385) {
+            errorMessage = "Largura de pneu inválida"
+            return@Button
+          }
+          if (tAspect == null || tAspect < 20 || tAspect > 90) {
+            errorMessage = "Perfil de pneu inválido"
+            return@Button
+          }
+          if (rim == null || rim < 10 || rim > 26) {
+            errorMessage = "Aro inválido"
+            return@Button
+          }
+          if (loss == null || loss < 0f || loss > 40f) {
+            errorMessage = "Perda de transmissão deve ser entre 0% e 40%"
+            return@Button
+          }
+          if (cd == null || cd < 0.15f || cd > 1.0f) {
+            errorMessage = "Coeficiente Cd inválido"
+            return@Button
+          }
+          if (area == null || area < 1.0f || area > 5.0f) {
+            errorMessage = "Área frontal inválida"
+            return@Button
+          }
+
+          val recalculated = VehicleCalculations.recalculateRunResult(
+            run = run,
+            correctedTotalMassKg = weight,
+            correctedGearRatio = gear,
+            correctedFinalDrive = fd,
+            correctedTireWidthMm = tWidth,
+            correctedTireAspectRatio = tAspect,
+            correctedRimInches = rim,
+            correctedLossPercent = loss,
+            correctedCd = cd,
+            correctedFrontalAreaM2 = area,
+            correctedCrr = run.crrUsed
+          )
+          onSaveCorrected(recalculated)
+        },
+        colors = ButtonDefaults.buttonColors(containerColor = DynoBluePrimary),
+        shape = RoundedCornerShape(10.dp)
+      ) {
+        Text("RECALCULAR E SALVAR")
+      }
+    },
+    dismissButton = {
+      OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(10.dp)) {
+        Text("CANCELAR")
+      }
+    }
+  )
 }

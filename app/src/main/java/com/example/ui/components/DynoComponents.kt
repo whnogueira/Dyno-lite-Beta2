@@ -25,9 +25,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.Assessment
 import androidx.compose.material.icons.outlined.DirectionsCar
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -824,7 +826,8 @@ fun DynoTopBar(
 enum class DynoTab {
   HOME,
   GARAGE,
-  RESULTS
+  RESULTS,
+  SIMULATOR
 }
 
 // =========================================================================================
@@ -860,7 +863,7 @@ fun DynoBottomNavigation(
             text = "INÍCIO",
             style = MaterialTheme.typography.labelSmall.copy(
               fontWeight = if (selectedTab == DynoTab.HOME) FontWeight.Bold else FontWeight.Medium,
-              fontSize = 11.sp
+              fontSize = 10.5.sp
             )
           )
         },
@@ -890,7 +893,7 @@ fun DynoBottomNavigation(
             text = "GARAGEM",
             style = MaterialTheme.typography.labelSmall.copy(
               fontWeight = if (selectedTab == DynoTab.GARAGE) FontWeight.Bold else FontWeight.Medium,
-              fontSize = 11.sp
+              fontSize = 10.5.sp
             )
           )
         },
@@ -904,23 +907,23 @@ fun DynoBottomNavigation(
         modifier = Modifier.testTag("nav_tab_garage")
       )
 
-      // 3. RESULTADOS (Resultados abre exclusivamente por toque manual do usuário nesta aba)
+      // 3. HISTÓRICO / RESULTADOS
       NavigationBarItem(
         selected = selectedTab == DynoTab.RESULTS,
         onClick = { onTabSelected(DynoTab.RESULTS) },
         icon = {
           Icon(
             imageVector = if (selectedTab == DynoTab.RESULTS) Icons.Default.Assessment else Icons.Outlined.Assessment,
-            contentDescription = "Resultados",
+            contentDescription = "Histórico",
             modifier = Modifier.size(24.dp)
           )
         },
         label = {
           Text(
-            text = "RESULTADOS",
+            text = "HISTÓRICO",
             style = MaterialTheme.typography.labelSmall.copy(
               fontWeight = if (selectedTab == DynoTab.RESULTS) FontWeight.Bold else FontWeight.Medium,
-              fontSize = 11.sp
+              fontSize = 10.5.sp
             )
           )
         },
@@ -932,6 +935,36 @@ fun DynoBottomNavigation(
           unselectedTextColor = DynoTextMuted
         ),
         modifier = Modifier.testTag("nav_tab_results")
+      )
+
+      // 4. SIMULADOR (Modo Simulação com destaque roxo/índigo)
+      NavigationBarItem(
+        selected = selectedTab == DynoTab.SIMULATOR,
+        onClick = { onTabSelected(DynoTab.SIMULATOR) },
+        icon = {
+          Icon(
+            imageVector = Icons.Default.Tune,
+            contentDescription = "Simulador",
+            modifier = Modifier.size(24.dp)
+          )
+        },
+        label = {
+          Text(
+            text = "SIMULADOR",
+            style = MaterialTheme.typography.labelSmall.copy(
+              fontWeight = if (selectedTab == DynoTab.SIMULATOR) FontWeight.Bold else FontWeight.Medium,
+              fontSize = 10.5.sp
+            )
+          )
+        },
+        colors = NavigationBarItemDefaults.colors(
+          selectedIconColor = Color(0xFFA78BFA),
+          selectedTextColor = Color(0xFFA78BFA),
+          indicatorColor = Color(0xFF8B5CF6).copy(alpha = 0.25f),
+          unselectedIconColor = DynoTextMuted,
+          unselectedTextColor = DynoTextMuted
+        ),
+        modifier = Modifier.testTag("nav_tab_simulator")
       )
     }
   }

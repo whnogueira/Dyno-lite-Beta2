@@ -57,6 +57,7 @@ import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.OnboardingPresentationDialog
 import com.example.ui.screens.ResultsScreen
 import com.example.ui.screens.SettingsScreen
+import com.example.ui.screens.SimulatorScreen
 import com.example.ui.screens.TestPreparationScreen
 import com.example.ui.screens.VehicleWizardScreen
 import com.example.ui.theme.DynoLiteTheme
@@ -98,6 +99,7 @@ fun DynoLiteApp() {
   var vehicleToEdit by remember { mutableStateOf<VehicleProfile?>(null) }
   var activeTestVehicle by remember { mutableStateOf<VehicleProfile?>(null) }
   var homeFeedbackMessage by remember { mutableStateOf<String?>(null) }
+  var simulatorInitialRunId by remember { mutableStateOf<String?>(null) }
 
   // Onboarding presentation dialog state for version 0.16.0
   var showOnboardingDialog by remember {
@@ -245,6 +247,16 @@ fun DynoLiteApp() {
                   vehicleToEdit = null
                   currentDestination = AppDestination.VEHICLE_WIZARD
                 }
+              },
+              onOpenSimulator = { runId ->
+                simulatorInitialRunId = runId
+                selectedTab = DynoTab.SIMULATOR
+              }
+            )
+            DynoTab.SIMULATOR -> SimulatorScreen(
+              initialRunId = simulatorInitialRunId,
+              onNavigateToRunDetails = {
+                selectedTab = DynoTab.RESULTS
               }
             )
           }

@@ -308,4 +308,131 @@ object VehicleCalculations {
     val torqueNm = powerWatts / omega
     return if (torqueNm in 1f..10000f) torqueNm else null
   }
+
+  /**
+   * Recalcula os resultados de uma medição a partir de correções em seus parâmetros de cadastro
+   * (Seção 37: "Corrigir dados da passagem")
+   */
+  fun recalculateRunResult(
+    run: RunResult,
+    correctedTotalMassKg: Float,
+    correctedGearRatio: Float,
+    correctedFinalDrive: Float,
+    correctedTireWidthMm: Int,
+    correctedTireAspectRatio: Int,
+    correctedRimInches: Int,
+    correctedLossPercent: Float,
+    correctedCd: Float,
+    correctedFrontalAreaM2: Float,
+    correctedCrr: Float
+  ): RunResult {
+    val tireCalc = calculateTireDimensions(
+      widthMm = correctedTireWidthMm,
+      aspectRatio = correctedTireAspectRatio,
+      rimInches = correctedRimInches
+    )
+
+    val rollForce = calculateRollingResistanceForce(correctedTotalMassKg, correctedCrr)
+    val slopeForce = calculateSlopeForce(correctedTotalMassKg, run.slopePercentUsed)
+    val efficiency = (1.0f - (correctedLossPercent / 100f)).coerceIn(0.5f, 1.0f)
+
+    val updatedSamples = run.samples.map { sample ->
+      val aMps2 = sample.finalAccelerationMps2
+      val g = aMps2 / STANDARD_GRAVITY
+      val vMps = sample.filteredSpeedMs
+      val fAero = calculateAerodynamicForce(vMps, correctedCd, correctedFrontalAreaM2, run.airDensityUsed)
+      val fAccel = calculateAccelerationForce(correctedTotalMassKg, kotlin.math.max(0f, aMps2))
+      val fTractive = calculateTotalTractiveForce(fAccel, rollForce, fAero, slopeForce)
+      val wWatts = calculateWheelPowerWatts(fTractive, vMps)
+      val sampleWheelCv = convertWattsToCv(wWatts)
+      val sampleEngineCv = if (efficiency > 0f) (sampleWheelCv / efficiency).coerceAtLeast(0f) else sampleWheelCv
+
+      val sampleRpm = calculateRpmFromSpeed(vMps, tireCalc.circumferenceM, correctedGearRatio, correctedFinalDrive)?.toInt()
+      val sampleEngineTorqueKgfm = if (sampleRpm != null && sampleRpm > 500) {
+        calculateTorqueKgfm(sampleEngineCv, sampleRpm.toFloat()) ?: 0f
+      } else 0f
+      val sampleWheelTorqueKgfm = if (sampleRpm != null && sampleRpm > 500) {
+        calculateTorqueKgfm(sampleWheelCv, sampleRpm.toFloat()) ?: 0f
+      } else 0f
+
+      sample.copy(
+        longitudinalG = g,
+        accelerationForceN = fAccel,
+        aerodynamicForceN = fAero,
+        rollingForceN = rollForce,
+        slopeForceN = slopeForce,
+        totalForceN = fTractive,
+        wheelPowerWatts = wWatts,
+        wheelPowerKw = wWatts / 1000f,
+        wheelPowerCv = sampleWheelCv,
+        enginePowerCv = sampleEngineCv,
+        wheelTorqueKgfm = sampleWheelTorqueKgfm,
+        engineTorqueKgfm = sampleEngineTorqueKgfm,
+        wheelTorqueNm = sampleWheelTorqueKgfm * STANDARD_GRAVITY,
+        engineTorqueNm = sampleEngineTorqueKgfm * STANDARD_GRAVITY,
+        engineRpm = sampleRpm
+      )
+    }
+
+    val validSamples = updatedSamples.filter { it.isValid && it.finalAccelerationMps2 > 0.05f }
+    var newWheelPowerCv = 0f
+    var newEnginePowerCv = 0f
+    var newWheelTorqueKgfm = 0f
+    var newEngineTorqueKgfm = 0f
+    var peakPowerRpm: Int? = null
+    var peakTorqueRpm: Int? = null
+    var peakPowerSpeedKmh = run.maximumGpsSpeedKmh
+    var peakTorqueSpeedKmh = run.startSpeedKmh + (run.maximumGpsSpeedKmh - run.startSpeedKmh) * 0.45f
+    var peakG = run.peakLongitudinalG
+    var avgG = run.averageLongitudinalG
+
+    if (validSamples.isNotEmpty()) {
+      peakG = kotlin.math.max(peakG, validSamples.map { it.longitudinalG }.maxOrNull() ?: 0f)
+      avgG = validSamples.map { it.longitudinalG }.average().toFloat()
+
+      val maxP = validSamples.maxByOrNull { it.enginePowerCv }
+      if (maxP != null) {
+        newWheelPowerCv = maxP.wheelPowerCv
+        newEnginePowerCv = maxP.enginePowerCv
+        peakPowerRpm = maxP.engineRpm
+        peakPowerSpeedKmh = maxP.gpsSpeedKmh
+      }
+
+      val maxT = validSamples.filter { (it.engineRpm ?: 0) in 1000..7500 }.maxByOrNull { it.engineTorqueKgfm }
+        ?: validSamples.maxByOrNull { it.engineTorqueKgfm }
+      if (maxT != null) {
+        newWheelTorqueKgfm = maxT.wheelTorqueKgfm
+        newEngineTorqueKgfm = maxT.engineTorqueKgfm
+        peakTorqueRpm = maxT.engineRpm
+        peakTorqueSpeedKmh = maxT.gpsSpeedKmh
+      }
+    }
+
+    return run.copy(
+      totalVehicleMassKg = correctedTotalMassKg,
+      gearRatioUsed = correctedGearRatio,
+      finalDriveUsed = correctedFinalDrive,
+      drivetrainLossPercent = correctedLossPercent,
+      cdUsed = correctedCd,
+      frontalAreaUsed = correctedFrontalAreaM2,
+      crrUsed = correctedCrr,
+      wheelPowerCv = newWheelPowerCv,
+      enginePowerCv = newEnginePowerCv,
+      wheelPowerKw = newWheelPowerCv * 0.73549875f,
+      enginePowerKw = newEnginePowerCv * 0.73549875f,
+      estimatedPowerCv = newEnginePowerCv,
+      wheelTorqueKgfm = newWheelTorqueKgfm,
+      engineTorqueKgfm = newEngineTorqueKgfm,
+      wheelTorqueNm = newWheelTorqueKgfm * STANDARD_GRAVITY,
+      engineTorqueNm = newEngineTorqueKgfm * STANDARD_GRAVITY,
+      estimatedTorqueKgfm = newEngineTorqueKgfm,
+      peakPowerRpm = peakPowerRpm,
+      peakTorqueRpm = peakTorqueRpm,
+      peakPowerSpeedKmh = peakPowerSpeedKmh,
+      peakTorqueSpeedKmh = peakTorqueSpeedKmh,
+      peakLongitudinalG = peakG,
+      averageLongitudinalG = avgG,
+      samples = updatedSamples
+    )
+  }
 }
