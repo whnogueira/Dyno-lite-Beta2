@@ -1,6 +1,6 @@
 {
   "name": "Dyno Lite",
-  "description": "Dinamômetro veicular - Interface de usuário e dados v0.19.1",
+  "description": "Dinamômetro veicular de alta precisão com persistência de dados DynoMobileDB",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

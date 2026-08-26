@@ -28,12 +28,15 @@ import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -73,6 +76,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import com.example.data.RunResultRepository
+import kotlinx.coroutines.launch
+
 @Composable
 fun HomeScreen(
   primaryVehicle: VehicleProfile?,
@@ -86,7 +95,20 @@ fun HomeScreen(
   onNavigateToGuide: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
+  val context = LocalContext.current
+  val runResultRepository = remember { RunResultRepository(context) }
+  val coroutineScope = rememberCoroutineScope()
   var showHowItWorksDialog by remember { mutableStateOf(false) }
+  var incompleteTestToRecover by remember { mutableStateOf<RunResult?>(null) }
+
+  // Detecta testes não finalizados no banco ao abrir a tela (Requisito 7)
+  LaunchedEffect(Unit) {
+    val incompleteList = runResultRepository.getIncompleteTests()
+    val recoverable = incompleteList.firstOrNull { it.samples.isNotEmpty() }
+    if (recoverable != null) {
+      incompleteTestToRecover = recoverable
+    }
+  }
 
   Box(
     modifier = modifier
@@ -624,6 +646,75 @@ fun HomeScreen(
       confirmButton = {
         TextButton(onClick = { showHowItWorksDialog = false }) {
           Text("ENTENDI", color = DynoBlueLight, fontWeight = FontWeight.Bold)
+        }
+      }
+    )
+  }
+
+  // DIÁLOGO DE RECUPERAÇÃO DE TESTE NÃO FINALIZADO (Requisito 7)
+  val testToRecover = incompleteTestToRecover
+  if (testToRecover != null) {
+    AlertDialog(
+      onDismissRequest = { /* Não descarta automaticamente sem escolha */ },
+      containerColor = DynoSurfaceElevated,
+      title = {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          Icon(Icons.Outlined.Visibility, contentDescription = null, tint = DynoTorqueOrange)
+          Text(
+            text = "Teste não finalizado",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = DynoTextPrimary
+          )
+        }
+      },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          Text(
+            text = "Foi encontrado um teste não finalizado (${testToRecover.samples.size} amostras gravadas no banco).",
+            style = MaterialTheme.typography.bodyMedium,
+            color = DynoTextPrimary
+          )
+          Text(
+            text = "Deseja recuperar esses dados para visualizar no histórico ou descartar a gravação?",
+            style = MaterialTheme.typography.bodySmall,
+            color = DynoTextSecondary
+          )
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            coroutineScope.launch {
+              runResultRepository.saveResultSuspending(
+                testToRecover.copy(
+                  quality = if (testToRecover.samples.size >= 10) "RECUPERADA" else "INVÁLIDA",
+                  validSamplesCount = testToRecover.samples.size
+                ),
+                status = "completed"
+              )
+              incompleteTestToRecover = null
+            }
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = DynoBluePrimary),
+          shape = RoundedCornerShape(10.dp)
+        ) {
+          Text("RECUPERAR")
+        }
+      },
+      dismissButton = {
+        OutlinedButton(
+          onClick = {
+            coroutineScope.launch {
+              runResultRepository.deleteResultSuspending(testToRecover.id)
+              incompleteTestToRecover = null
+            }
+          },
+          shape = RoundedCornerShape(10.dp)
+        ) {
+          Text("DESCARTAR")
         }
       }
     )

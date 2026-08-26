@@ -70,6 +70,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.util.Locale
 
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.runtime.rememberCoroutineScope
+import com.example.data.RunResultRepository
+import com.example.ui.theme.DynoErrorRed
+import com.example.ui.theme.DynoSuccessGreen
+import kotlinx.coroutines.launch
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -80,6 +89,10 @@ fun SettingsScreen(
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
+  val runResultRepository = remember { RunResultRepository(context) }
+  val coroutineScope = rememberCoroutineScope()
+  var selfTestMessage by remember { mutableStateOf<String?>(null) }
+  var isTestingStorage by remember { mutableStateOf(false) }
   val prefs = remember(context) {
     context.getSharedPreferences("dyno_lite_prefs", Context.MODE_PRIVATE)
   }
@@ -186,11 +199,27 @@ fun SettingsScreen(
 
         // 3. Diagnóstico avançado
         SettingsItemCard(
-          title = "Diagnóstico avançado",
+          title = "Diagnóstico de sensores",
           subtitle = "Acelerômetro bruto, eixos X/Y/Z, calibração manual, giroscópio, GPS e passagem experimental.",
           icon = Icons.Outlined.Sensors,
           onClick = onNavigateToSensorDiagnostic,
           testTag = "card_sensor_diagnostic"
+        )
+
+        // 3.1 Testar Armazenamento
+        SettingsItemCard(
+          title = "Diagnóstico do banco de dados",
+          subtitle = "Executar teste de ciclo completo de gravação, persistência e leitura no Room (DynoMobileDB).",
+          icon = Icons.Outlined.Storage,
+          onClick = {
+            coroutineScope.launch {
+              isTestingStorage = true
+              val (ok, msg) = runResultRepository.runStorageSelfTest()
+              isTestingStorage = false
+              selfTestMessage = msg
+            }
+          },
+          testTag = "card_storage_diagnostic"
         )
 
         // Section: Informações & Ajuda
@@ -477,6 +506,41 @@ fun SettingsScreen(
       confirmButton = {
         Button(onClick = { showPrivacyDialog = false }) {
           Text("ENTENDI")
+        }
+      }
+    )
+  }
+
+  // Dialog: Resultado do Teste de Armazenamento
+  if (selfTestMessage != null) {
+    val isSuccess = selfTestMessage?.startsWith("SUCESSO") == true
+    AlertDialog(
+      onDismissRequest = { selfTestMessage = null },
+      title = {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          Icon(
+            imageVector = if (isSuccess) Icons.Default.Check else Icons.Default.Close,
+            contentDescription = null,
+            tint = if (isSuccess) DynoSuccessGreen else DynoErrorRed
+          )
+          Text(
+            text = "Diagnóstico de Armazenamento",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+          )
+        }
+      },
+      text = {
+        Text(
+          text = selfTestMessage ?: "",
+          style = MaterialTheme.typography.bodyMedium
+        )
+      },
+      confirmButton = {
+        Button(onClick = { selfTestMessage = null }) {
+          Text("FECHAR")
         }
       }
     )

@@ -33,11 +33,13 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 
 /**
@@ -266,6 +268,10 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
   private val recordedSamples = mutableListOf<RunSample>()
   private val gpsFixHistory = mutableListOf<GpsFixRecord>()
   private val diagnosticLogs = mutableListOf<String>()
+
+  private var currentTestId: String? = null
+  private var persistedSampleCount: Int = 0
+  private var lastSampleFlushTimeMs: Long = 0L
 
   private var syncDiffSum = 0.0
   private var syncDiffCount = 0
@@ -1039,6 +1045,22 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
                   rejectionReason = rejReason
                 )
                 recordedSamples.add(samplePoint)
+
+                // Salva amostras em lotes pequenos no DynoMobileDB (a cada 20 amostras ou 2 segundos)
+                val unpersistedCount = recordedSamples.size - persistedSampleCount
+                val nowWallMs = SystemClock.elapsedRealtime()
+                if (unpersistedCount >= 20 || (nowWallMs - lastSampleFlushTimeMs >= 2000L && unpersistedCount > 0)) {
+                  val batch = recordedSamples.subList(persistedSampleCount, recordedSamples.size).toList()
+                  val startIdx = persistedSampleCount
+                  persistedSampleCount = recordedSamples.size
+                  lastSampleFlushTimeMs = nowWallMs
+                  val tid = currentTestId
+                  if (tid != null) {
+                    viewModelScope.launch(Dispatchers.IO) {
+                      runResultRepository.saveSampleBatch(tid, batch, startIdx)
+                    }
+                  }
+                }
               }
 
               // Proteção de início
@@ -1229,12 +1251,25 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
   }
 
   fun cancelTest() {
+    val tid = currentTestId
+    if (tid != null) {
+      viewModelScope.launch(Dispatchers.IO) {
+        val existing = runResultRepository.getResultByIdSuspending(tid)
+        if (existing != null) {
+          runResultRepository.saveResultSuspending(existing, status = "cancelled")
+        }
+      }
+    }
     resetRunData()
     _uiState.update { it.copy(testState = DynoRunState.PARADO) }
   }
 
   private fun triggerOfficialRunStart(nowNs: Long, availableGpsKmh: Float) {
     val actualGpsSpeed = availableGpsKmh.coerceAtLeast(0f)
+    val testId = java.util.UUID.randomUUID().toString()
+    currentTestId = testId
+    persistedSampleCount = 0
+    lastSampleFlushTimeMs = SystemClock.elapsedRealtime()
 
     runStartTimeNs = nowNs
     lastSensorTimestampNs = nowNs
@@ -1270,7 +1305,7 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
 
     gpsFixHistory.clear()
     diagnosticLogs.clear()
-    diagnosticLogs.add("Início oficial da passagem: gatilho=${_uiState.value.startSpeedTriggerKmh} km/h, gpsInicial=$actualGpsSpeed km/h")
+    diagnosticLogs.add("Início oficial da passagem: id=$testId, gatilho=${_uiState.value.startSpeedTriggerKmh} km/h, gpsInicial=$actualGpsSpeed km/h")
 
     totalInertialSamples = 0
     rejectedInertialSamples = 0
@@ -1281,6 +1316,28 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     resultSaved = false
     recordedSamples.clear()
     inertialHistory.clear()
+
+    // Cria imediatamente um registro no DynoMobileDB com status "recording"
+    val profile = activeVehicleProfile
+    val snapshotJson = runResultRepository.createSnapshotFromProfile(
+      profile,
+      _uiState.value.selectedGearRatio,
+      _uiState.value.selectedFinalDrive,
+      _uiState.value.selectedGear,
+      _uiState.value.slopeMode,
+      if (_uiState.value.slopeMode == "MANUAL") _uiState.value.manualSlopePercent else 0f
+    )
+    val vehName = "${profile?.manufacturer ?: ""} ${profile?.model ?: ""} ${profile?.engine ?: ""}".trim()
+
+    viewModelScope.launch(Dispatchers.IO) {
+      runResultRepository.startRecordingTest(
+        testId = testId,
+        vehicleId = profile?.id,
+        vehicleName = vehName,
+        snapshotJson = snapshotJson,
+        startSpeedKmh = actualGpsSpeed
+      )
+    }
 
     _uiState.update { it.copy(testState = DynoRunState.MEDINDO_PROTEGIDO) }
   }
@@ -1476,7 +1533,9 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
           gpsFixHistory.map { it.accuracyM }.average().toFloat()
         } else lastGpsAccuracyMeters
 
+        val finalTestId = currentTestId ?: java.util.UUID.randomUUID().toString()
         val result = RunResult(
+          id = finalTestId,
           vehicleId = profileToUse.id,
           vehicleName = "${profileToUse.manufacturer} ${profileToUse.model} ${profileToUse.engine}".trim(),
           runStartCalculatedSpeedKmh = startCalculatedKmh,
@@ -1545,11 +1604,17 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
           time402M = splitTime402M,
           samples = computedSamples
         )
-        runResultRepository.saveResult(result)
-        resultSaved = true
-      }
 
-      onRunCompletedCallback?.invoke(resultSaved)
+        viewModelScope.launch(Dispatchers.IO) {
+          val savedOk = runResultRepository.saveResultSuspending(result, status = "completed")
+          resultSaved = savedOk
+          withContext(Dispatchers.Main) {
+            onRunCompletedCallback?.invoke(savedOk)
+          }
+        }
+      } else {
+        onRunCompletedCallback?.invoke(false)
+      }
     }
   }
 

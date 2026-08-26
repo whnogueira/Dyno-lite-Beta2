@@ -2,20 +2,77 @@ package com.example.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
+import com.example.data.db.DynoMobileDatabase
+import com.example.data.db.VehicleEntity
 import com.example.model.AudioWeightPreset
 import com.example.model.VehicleProfile
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 
+private const val TAG = "DynoStorage"
+
 class VehicleRepository(context: Context) {
 
+  private val database = DynoMobileDatabase.getDatabase(context)
+  private val vehicleDao = database.vehicleDao()
   private val prefs: SharedPreferences =
     context.getSharedPreferences("dyno_lite_vehicles_store", Context.MODE_PRIVATE)
 
   private val KEY_VEHICLES_JSON = "key_vehicles_json"
   private val KEY_PRIMARY_VEHICLE_ID = "key_primary_vehicle_id"
 
+  init {
+    // Initial sync / migration to Room
+    CoroutineScope(Dispatchers.IO).launch {
+      try {
+        val count = vehicleDao.getAllVehicles().size
+        if (count == 0) {
+          val localVehicles = getVehiclesFromPrefs()
+          if (localVehicles.isNotEmpty()) {
+            val entities = localVehicles.map { v ->
+              VehicleEntity(
+                id = v.id,
+                name = "${v.manufacturer} ${v.model} ${v.engine}".trim(),
+                manufacturer = v.manufacturer,
+                model = v.model,
+                year = v.year,
+                isPrimary = v.isPrimary,
+                fullJson = serializeVehicle(v).toString()
+              )
+            }
+            vehicleDao.insertVehicles(entities)
+            Log.i(TAG, "[DynoStorage] Veículos sincronizados com a tabela vehicles do DynoMobileDB.")
+          }
+        }
+      } catch (e: Exception) {
+        Log.e(TAG, "[DynoStorage] Erro ao sincronizar veículos: ${e.message}", e)
+      }
+    }
+  }
+
   fun getVehicles(): List<VehicleProfile> {
+    return try {
+      runBlocking(Dispatchers.IO) {
+        val dbEntities = vehicleDao.getAllVehicles()
+        if (dbEntities.isNotEmpty()) {
+          dbEntities.map { entity ->
+            deserializeVehicle(JSONObject(entity.fullJson))
+          }
+        } else {
+          getVehiclesFromPrefs()
+        }
+      }
+    } catch (e: Exception) {
+      getVehiclesFromPrefs()
+    }
+  }
+
+  private fun getVehiclesFromPrefs(): List<VehicleProfile> {
     val jsonStr = prefs.getString(KEY_VEHICLES_JSON, null) ?: return emptyList()
     val list = mutableListOf<VehicleProfile>()
     try {
@@ -100,6 +157,9 @@ class VehicleRepository(context: Context) {
         }
       }
       saveAll(currentVehicles)
+      CoroutineScope(Dispatchers.IO).launch {
+        vehicleDao.deleteVehicleById(vehicleId)
+      }
     }
   }
 
@@ -109,6 +169,26 @@ class VehicleRepository(context: Context) {
       jsonArray.put(serializeVehicle(v))
     }
     prefs.edit().putString(KEY_VEHICLES_JSON, jsonArray.toString()).apply()
+
+    CoroutineScope(Dispatchers.IO).launch {
+      try {
+        vehicleDao.deleteAllVehicles()
+        val entities = vehicles.map { v ->
+          VehicleEntity(
+            id = v.id,
+            name = "${v.manufacturer} ${v.model} ${v.engine}".trim(),
+            manufacturer = v.manufacturer,
+            model = v.model,
+            year = v.year,
+            isPrimary = v.isPrimary,
+            fullJson = serializeVehicle(v).toString()
+          )
+        }
+        vehicleDao.insertVehicles(entities)
+      } catch (e: Exception) {
+        Log.e(TAG, "[DynoStorage] Erro ao persistir veículos no Room: ${e.message}", e)
+      }
+    }
   }
 
   private fun serializeVehicle(v: VehicleProfile): JSONObject {

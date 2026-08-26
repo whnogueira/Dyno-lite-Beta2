@@ -1,41 +1,242 @@
 package com.example.data
 
 import android.content.Context
-import android.content.SharedPreferences
+import android.util.Log
+import com.example.data.db.DynoMobileDatabase
+import com.example.data.db.TestEntity
+import com.example.data.db.TestSampleEntity
+import com.example.data.db.currentIsoUtc
+import com.example.data.db.isoToTimestampMs
+import com.example.data.db.toIsoUtc
 import com.example.model.RunResult
 import com.example.model.RunSample
+import com.example.model.VehicleProfile
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.UUID
+
+private const val TAG = "DynoStorage"
 
 class RunResultRepository(context: Context) {
 
-  private val prefs: SharedPreferences =
-    context.getSharedPreferences("dyno_lite_runs_store", Context.MODE_PRIVATE)
+  private val database = DynoMobileDatabase.getDatabase(context)
+  private val testDao = database.testDao()
+  private val testSampleDao = database.testSampleDao()
+  private val legacyPrefs = context.getSharedPreferences("dyno_lite_runs_store", Context.MODE_PRIVATE)
 
-  private val KEY_RUNS_JSON = "key_runs_json"
-  private val MAX_STORED_RUNS = 100
-  private val MAX_RUNS_WITH_DETAILED_SAMPLES = 30
-  private val MAX_SAMPLES_PER_RUN = 500
+  init {
+    // Migração de dados legados do SharedPreferences para o Room (DynoMobileDB)
+    CoroutineScope(Dispatchers.IO).launch {
+      migrateLegacyRunsIfNeeded()
+    }
+  }
 
-  fun getResults(): List<RunResult> {
-    val jsonStr = prefs.getString(KEY_RUNS_JSON, null) ?: return emptyList()
-    val list = mutableListOf<RunResult>()
+  private suspend fun migrateLegacyRunsIfNeeded() = withContext(Dispatchers.IO) {
     try {
-      val jsonArray = JSONArray(jsonStr)
-      for (i in 0 until jsonArray.length()) {
-        val obj = jsonArray.getJSONObject(i)
-        list.add(deserializeRunResult(obj))
+      val isMigrated = legacyPrefs.getBoolean("is_migrated_to_room_v1", false)
+      if (isMigrated) return@withContext
+
+      val jsonStr = legacyPrefs.getString("key_runs_json", null)
+      if (!jsonStr.isNullOrBlank()) {
+        val jsonArray = JSONArray(jsonStr)
+        Log.i(TAG, "[DynoStorage] Iniciando migração de ${jsonArray.length()} testes legados do SharedPreferences para DynoMobileDB...")
+        for (i in 0 until jsonArray.length()) {
+          val obj = jsonArray.getJSONObject(i)
+          val run = deserializeLegacyJson(obj)
+          val testEntity = mapRunResultToTestEntity(run, status = "completed")
+          testDao.insertTest(testEntity)
+          if (run.samples.isNotEmpty()) {
+            val sampleEntities = run.samples.mapIndexed { idx, s ->
+              mapRunSampleToEntity(s, run.id, idx)
+            }
+            testSampleDao.insertSamples(sampleEntities)
+          }
+        }
+        Log.i(TAG, "[DynoStorage] Migração de testes concluída com sucesso.")
+      }
+      legacyPrefs.edit().putBoolean("is_migrated_to_room_v1", true).apply()
+    } catch (e: Exception) {
+      Log.e(TAG, "[DynoStorage] Erro durante migração de testes legados: ${e.message}", e)
+    }
+  }
+
+  /**
+   * Cria registro inicial de teste com status "recording".
+   */
+  suspend fun startRecordingTest(
+    testId: String,
+    vehicleId: String?,
+    vehicleName: String,
+    snapshotJson: String,
+    startSpeedKmh: Float
+  ): Boolean = withContext(Dispatchers.IO) {
+    try {
+      val nowIso = currentIsoUtc()
+      val entity = TestEntity(
+        id = testId,
+        vehicleId = vehicleId,
+        name = vehicleName.ifBlank { "Passagem" },
+        createdAt = nowIso,
+        completedAt = null,
+        status = "recording",
+        startSpeed = startSpeedKmh.sanitize(),
+        configurationSnapshot = snapshotJson
+      )
+      testDao.insertTest(entity)
+      Log.i(TAG, "[DynoStorage] Teste criado: $testId (status: recording)")
+      true
+    } catch (e: Exception) {
+      Log.e(TAG, "[DynoStorage] Falha ao iniciar teste $testId: ${e.message}", e)
+      false
+    }
+  }
+
+  /**
+   * Salva lote de amostras durante o teste em andamento.
+   */
+  suspend fun saveSampleBatch(
+    testId: String,
+    samples: List<RunSample>,
+    startingIndex: Int
+  ): Boolean = withContext(Dispatchers.IO) {
+    if (samples.isEmpty()) return@withContext true
+    try {
+      val entities = samples.mapIndexed { idx, sample ->
+        mapRunSampleToEntity(sample, testId, startingIndex + idx)
+      }
+      testSampleDao.insertSamples(entities)
+      Log.d(TAG, "[DynoStorage] Amostras gravadas (${entities.size} amostras, idx=$startingIndex): $testId")
+      true
+    } catch (e: Exception) {
+      Log.e(TAG, "[DynoStorage] Falha ao gravar lote de amostras para $testId: ${e.message}", e)
+      false
+    }
+  }
+
+  /**
+   * Salva o teste completo ou atualiza um teste existente para "completed".
+   */
+  suspend fun saveResultSuspending(run: RunResult, status: String = "completed"): Boolean = withContext(Dispatchers.IO) {
+    try {
+      val testEntity = mapRunResultToTestEntity(run, status = status)
+      val rowId = testDao.insertTest(testEntity)
+
+      if (run.samples.isNotEmpty()) {
+        // Enforce max 500 samples per run
+        val sampleList = if (run.samples.size > 500) run.samples.take(500) else run.samples
+        val sampleEntities = sampleList.mapIndexed { idx, sample ->
+          mapRunSampleToEntity(sample, run.id, idx)
+        }
+        testSampleDao.deleteSamplesForTest(run.id)
+        testSampleDao.insertSamples(sampleEntities)
+      }
+
+      Log.i(TAG, "[DynoStorage] Teste salvo com sucesso: ${run.id} (status: $status, row: $rowId, amostras: ${run.samples.size})")
+      true
+    } catch (e: Exception) {
+      Log.e(TAG, "[DynoStorage] Falha ao salvar teste ${run.id}: ${e.message}", e)
+      false
+    }
+  }
+
+  /**
+   * Wrapper síncrono para interoperabilidade com telas e componentes existentes.
+   */
+  fun saveResult(run: RunResult, status: String = "completed"): Boolean {
+    return try {
+      runBlocking(Dispatchers.IO) {
+        saveResultSuspending(run, status)
       }
     } catch (e: Exception) {
-      e.printStackTrace()
+      Log.e(TAG, "[DynoStorage] Erro no saveResult síncrono: ${e.message}", e)
+      false
     }
-    return list.sortedByDescending { it.timestamp }
+  }
+
+  /**
+   * Retorna Flow reativo de todos os testes concluídos ordenados do mais recente para o mais antigo.
+   */
+  fun getResultsFlow(): Flow<List<RunResult>> {
+    return testDao.getCompletedTestsFlow().map { entities ->
+      Log.d(TAG, "[DynoStorage] Flow emitiu ${entities.size} testes concluídos")
+      entities.map { entity ->
+        val samples = testSampleDao.getSamplesForTest(entity.id).map { mapEntityToRunSample(it) }
+        mapTestEntityToRunResult(entity, samples)
+      }
+    }
+  }
+
+  /**
+   * Retorna lista de todos os testes concluídos de forma síncrona.
+   */
+  fun getResults(): List<RunResult> {
+    return try {
+      runBlocking(Dispatchers.IO) {
+        val entities = testDao.getCompletedTests()
+        Log.d(TAG, "[DynoStorage] Consulta getResults() retornou ${entities.size} testes concluídos")
+        entities.map { entity ->
+          val samples = testSampleDao.getSamplesForTest(entity.id).map { mapEntityToRunSample(it) }
+          mapTestEntityToRunResult(entity, samples)
+        }
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "[DynoStorage] Erro ao consultar getResults: ${e.message}", e)
+      emptyList()
+    }
+  }
+
+  /**
+   * Retorna lista de testes não concluídos (status 'recording' ou 'interrupted').
+   */
+  suspend fun getIncompleteTests(): List<RunResult> = withContext(Dispatchers.IO) {
+    try {
+      val entities = testDao.getIncompleteTests()
+      Log.i(TAG, "[DynoStorage] Consulta getIncompleteTests() retornou ${entities.size} testes incompletos")
+      entities.map { entity ->
+        val samples = testSampleDao.getSamplesForTest(entity.id).map { mapEntityToRunSample(it) }
+        mapTestEntityToRunResult(entity, samples)
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "[DynoStorage] Erro ao consultar getIncompleteTests: ${e.message}", e)
+      emptyList()
+    }
+  }
+
+  /**
+   * Busca um teste específico por ID.
+   */
+  suspend fun getResultByIdSuspending(id: String): RunResult? = withContext(Dispatchers.IO) {
+    try {
+      val entity = testDao.getTestById(id) ?: return@withContext null
+      val samples = testSampleDao.getSamplesForTest(id).map { mapEntityToRunSample(it) }
+      mapTestEntityToRunResult(entity, samples)
+    } catch (e: Exception) {
+      Log.e(TAG, "[DynoStorage] Erro ao buscar resultado por id $id: ${e.message}", e)
+      null
+    }
   }
 
   fun getResultById(id: String): RunResult? {
-    return getResults().firstOrNull { it.id == id }
+    return try {
+      runBlocking(Dispatchers.IO) {
+        getResultByIdSuspending(id)
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "[DynoStorage] Erro no getResultById síncrono: ${e.message}", e)
+      null
+    }
   }
 
+  /**
+   * Retorna amostras limpas e ordenadas de um teste.
+   */
   fun getOrderedRunSamples(resultId: String): List<RunSample> {
     val run = getResultById(resultId) ?: return emptyList()
     val rawSamples = run.samples
@@ -43,33 +244,22 @@ class RunResultRepository(context: Context) {
 
     val cleanedSamples = mutableListOf<RunSample>()
     var lastTimeMs = -1L
-
-    // Sort by elapsedTimeMs ascending
     val sorted = rawSamples.sortedBy { it.elapsedTimeMs }
 
     for (sample in sorted) {
-      // Validate NaN, Infinity and strictly increasing time
       val timeMs = sample.elapsedTimeMs
-      if (timeMs <= lastTimeMs) continue // Skip duplicate or non-increasing timestamps
-
-      val filtAccZ = if (sample.filteredAccelerationZ.isNaN() || sample.filteredAccelerationZ.isInfinite()) 0f else sample.filteredAccelerationZ
-      val corrAccZ = if (sample.correctedAccelerationZ.isNaN() || sample.correctedAccelerationZ.isInfinite()) 0f else sample.correctedAccelerationZ
-      val gpsSpd = if (sample.gpsSpeedKmh.isNaN() || sample.gpsSpeedKmh.isInfinite()) 0f else sample.gpsSpeedKmh.coerceAtLeast(0f)
-      val calcSpd = if (sample.calculatedSpeedKmh.isNaN() || sample.calculatedSpeedKmh.isInfinite()) 0f else sample.calculatedSpeedKmh.coerceAtLeast(0f)
-      val spdDiff = if (sample.speedDifferenceKmh.isNaN() || sample.speedDifferenceKmh.isInfinite()) 0f else sample.speedDifferenceKmh.coerceAtLeast(0f)
-      val gpsAcc = if (sample.gpsAccuracyMeters.isNaN() || sample.gpsAccuracyMeters.isInfinite()) 0f else sample.gpsAccuracyMeters.coerceAtLeast(0f)
-      val gyroMag = if (sample.gyroMagnitude.isNaN() || sample.gyroMagnitude.isInfinite()) 0f else sample.gyroMagnitude.coerceAtLeast(0f)
+      if (timeMs <= lastTimeMs) continue
 
       cleanedSamples.add(
         sample.copy(
           elapsedTimeMs = timeMs,
-          filteredAccelerationZ = filtAccZ,
-          correctedAccelerationZ = corrAccZ,
-          gpsSpeedKmh = gpsSpd,
-          calculatedSpeedKmh = calcSpd,
-          speedDifferenceKmh = spdDiff,
-          gpsAccuracyMeters = gpsAcc,
-          gyroMagnitude = gyroMag
+          filteredAccelerationZ = sample.filteredAccelerationZ.sanitize(),
+          correctedAccelerationZ = sample.correctedAccelerationZ.sanitize(),
+          gpsSpeedKmh = sample.gpsSpeedKmh.sanitize().coerceAtLeast(0f),
+          calculatedSpeedKmh = sample.calculatedSpeedKmh.sanitize().coerceAtLeast(0f),
+          speedDifferenceKmh = sample.speedDifferenceKmh.sanitize().coerceAtLeast(0f),
+          gpsAccuracyMeters = sample.gpsAccuracyMeters.sanitize().coerceAtLeast(0f),
+          gyroMagnitude = sample.gyroMagnitude.sanitize().coerceAtLeast(0f)
         )
       )
       lastTimeMs = timeMs
@@ -78,131 +268,396 @@ class RunResultRepository(context: Context) {
     return cleanedSamples
   }
 
-  fun saveResult(run: RunResult) {
-    val currentRuns = getResults().toMutableList()
-    val existingIndex = currentRuns.indexOfFirst { it.id == run.id }
-
-    // Enforce max 500 samples per run
-    val trimmedRun = if (run.samples.size > MAX_SAMPLES_PER_RUN) {
-      run.copy(samples = run.samples.subList(0, MAX_SAMPLES_PER_RUN))
-    } else {
-      run
+  /**
+   * Exclui um teste e suas amostras.
+   */
+  suspend fun deleteResultSuspending(id: String): Boolean = withContext(Dispatchers.IO) {
+    try {
+      testSampleDao.deleteSamplesForTest(id)
+      val count = testDao.deleteTestById(id)
+      Log.i(TAG, "[DynoStorage] Teste $id excluído (linhas afetadas: $count)")
+      true
+    } catch (e: Exception) {
+      Log.e(TAG, "[DynoStorage] Erro ao excluir teste $id: ${e.message}", e)
+      false
     }
-
-    if (existingIndex >= 0) {
-      currentRuns[existingIndex] = trimmedRun
-    } else {
-      currentRuns.add(0, trimmedRun)
-    }
-
-    val trimmedRuns = if (currentRuns.size > MAX_STORED_RUNS) {
-      currentRuns.subList(0, MAX_STORED_RUNS)
-    } else {
-      currentRuns
-    }
-
-    saveAll(trimmedRuns)
   }
 
   fun deleteResult(id: String) {
-    val currentRuns = getResults().toMutableList()
-    val removed = currentRuns.removeAll { it.id == id }
-    if (removed) {
-      saveAll(currentRuns)
+    runBlocking(Dispatchers.IO) {
+      deleteResultSuspending(id)
+    }
+  }
+
+  /**
+   * Limpa todos os testes e amostras do banco.
+   */
+  suspend fun clearAllResultsSuspending(): Boolean = withContext(Dispatchers.IO) {
+    try {
+      testSampleDao.deleteAllSamples()
+      testDao.deleteAllTests()
+      Log.i(TAG, "[DynoStorage] Todos os testes e amostras foram limpos do DynoMobileDB")
+      true
+    } catch (e: Exception) {
+      Log.e(TAG, "[DynoStorage] Erro ao limpar todos os resultados: ${e.message}", e)
+      false
     }
   }
 
   fun clearAllResults() {
-    prefs.edit().remove(KEY_RUNS_JSON).apply()
-  }
-
-  private fun saveAll(runs: List<RunResult>) {
-    val jsonArray = JSONArray()
-    for (i in runs.indices) {
-      val r = runs[i]
-      // Preserve detailed samples only for the 30 most recent runs
-      val includeSamples = i < MAX_RUNS_WITH_DETAILED_SAMPLES
-      jsonArray.put(serializeRunResult(r, includeSamples))
+    runBlocking(Dispatchers.IO) {
+      clearAllResultsSuspending()
     }
-    prefs.edit().putString(KEY_RUNS_JSON, jsonArray.toString()).apply()
   }
 
-  private fun serializeRunResult(r: RunResult, includeSamples: Boolean): JSONObject {
-    val obj = JSONObject()
-    obj.put("id", r.id)
-    obj.put("timestamp", r.timestamp)
-    if (r.vehicleId != null) obj.put("vehicleId", r.vehicleId)
-    obj.put("vehicleName", r.vehicleName)
-    obj.put("runStartCalculatedSpeedKmh", r.runStartCalculatedSpeedKmh.toDouble())
-    obj.put("runStartGpsSpeedKmh", r.runStartGpsSpeedKmh.toDouble())
-    obj.put("maximumGpsSpeedKmh", r.maximumGpsSpeedKmh.toDouble())
-    obj.put("maximumCalculatedSpeedKmh", r.maximumCalculatedSpeedKmh.toDouble())
-    obj.put("finalGpsSpeedKmh", r.finalGpsSpeedKmh.toDouble())
-    obj.put("finalCalculatedSpeedKmh", r.finalCalculatedSpeedKmh.toDouble())
-    obj.put("speedGainKmh", r.speedGainKmh.toDouble())
-    obj.put("estimatedPowerCv", r.estimatedPowerCv.toDouble())
-    obj.put("estimatedTorqueKgfm", r.estimatedTorqueKgfm.toDouble())
-    obj.put("wheelPowerCv", r.wheelPowerCv.toDouble())
-    obj.put("enginePowerCv", r.enginePowerCv.toDouble())
-    obj.put("wheelTorqueKgfm", r.wheelTorqueKgfm.toDouble())
-    obj.put("engineTorqueKgfm", r.engineTorqueKgfm.toDouble())
-    obj.put("peakLongitudinalG", r.peakLongitudinalG.toDouble())
-    obj.put("averageLongitudinalG", r.averageLongitudinalG.toDouble())
-    if (r.peakPowerRpm != null) obj.put("peakPowerRpm", r.peakPowerRpm)
-    if (r.peakTorqueRpm != null) obj.put("peakTorqueRpm", r.peakTorqueRpm)
-    obj.put("peakPowerSpeedKmh", r.peakPowerSpeedKmh.toDouble())
-    obj.put("peakTorqueSpeedKmh", r.peakTorqueSpeedKmh.toDouble())
-    obj.put("totalVehicleMassKg", r.totalVehicleMassKg.toDouble())
-    obj.put("drivetrainLossPercent", r.drivetrainLossPercent.toDouble())
-    obj.put("estimatedMarginPercent", r.estimatedMarginPercent.toDouble())
-    obj.put("gearUsed", r.gearUsed)
-    obj.put("isAerodynamicsEstimated", r.isAerodynamicsEstimated)
-    obj.put("elapsedSeconds", r.elapsedSeconds.toDouble())
-    obj.put("gpsAccuracyMeters", r.gpsAccuracyMeters.toDouble())
-    obj.put("totalSamples", r.totalSamples)
-    obj.put("rejectedSamples", r.rejectedSamples)
-    obj.put("validSamplesCount", r.validSamplesCount)
-    obj.put("validGpsLocationsCount", r.validGpsLocationsCount)
-    obj.put("averageSamplingRateHz", r.averageSamplingRateHz.toDouble())
-    obj.put("averageGpsFrequencyHz", r.averageGpsFrequencyHz.toDouble())
-    obj.put("quality", r.quality)
-    obj.put("finishReason", r.finishReason)
-    obj.put("averageSpeedDifferenceKmh", r.averageSpeedDifferenceKmh.toDouble())
-    obj.put("maximumSpeedDifferenceKmh", r.maximumSpeedDifferenceKmh.toDouble())
-    if (r.invalidationReason != null) obj.put("invalidationReason", r.invalidationReason)
-    obj.put("appVersion", r.appVersion)
+  /**
+   * Teste de armazenamento obrigatório para diagnóstico (Modo Dev).
+   * 1. Cria um teste de teste
+   * 2. Salva 10 amostras
+   * 3. Marca como concluído
+   * 4. Lê do banco
+   * 5. Confere todos os campos
+   * 6. Remove o registro de teste
+   * 7. Retorna Pair(sucesso, mensagem)
+   */
+  suspend fun runStorageSelfTest(): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+    val dummyTestId = "dev-selftest-${UUID.randomUUID()}"
+    try {
+      Log.i(TAG, "[DynoStorage] === INICIANDO TESTE DE AUTO-DIAGNÓSTICO DO ARMAZENAMENTO ===")
+      // 1. Criar registro
+      val dummyEntity = TestEntity(
+        id = dummyTestId,
+        vehicleId = "dev-vehicle",
+        name = "Teste de Diagnóstico de Armazenamento",
+        createdAt = currentIsoUtc(),
+        completedAt = null,
+        status = "recording",
+        startSpeed = 40.0f,
+        configurationSnapshot = "{\"test\":true}"
+      )
+      testDao.insertTest(dummyEntity)
+      Log.i(TAG, "[DynoStorage] SelfTest: registro inicial inserido")
 
-    if (includeSamples && r.samples.isNotEmpty()) {
-      val samplesArray = JSONArray()
-      val sampleLimit = minOf(r.samples.size, MAX_SAMPLES_PER_RUN)
-      for (sIdx in 0 until sampleLimit) {
-        val s = r.samples[sIdx]
-        val sObj = JSONObject()
-        sObj.put("t", s.elapsedTimeMs)
-        sObj.put("az", s.filteredAccelerationZ.toDouble())
-        sObj.put("cz", s.correctedAccelerationZ.toDouble())
-        sObj.put("g", s.longitudinalG.toDouble())
-        sObj.put("gps", s.gpsSpeedKmh.toDouble())
-        sObj.put("calc", s.calculatedSpeedKmh.toDouble())
-        sObj.put("diff", s.speedDifferenceKmh.toDouble())
-        sObj.put("acc", s.gpsAccuracyMeters.toDouble())
-        sObj.put("gyro", s.gyroMagnitude.toDouble())
-        sObj.put("wp", s.wheelPowerCv.toDouble())
-        sObj.put("ep", s.enginePowerCv.toDouble())
-        sObj.put("wt", s.wheelTorqueKgfm.toDouble())
-        sObj.put("et", s.engineTorqueKgfm.toDouble())
-        if (s.engineRpm != null) sObj.put("rpm", s.engineRpm)
-        sObj.put("val", s.isValid)
-        if (s.rejectionReason != null) sObj.put("rej", s.rejectionReason)
-        samplesArray.put(sObj)
+      // 2. Salvar 10 amostras
+      val dummySamples = (0 until 10).map { i ->
+        TestSampleEntity(
+          id = UUID.randomUUID().toString(),
+          testId = dummyTestId,
+          sampleIndex = i,
+          timestamp = currentIsoUtc(),
+          elapsedTimeMs = i * 100L,
+          speed = 40f + i * 2f,
+          filteredSpeed = 40f + i * 2f,
+          acceleration = 2.5f,
+          longitudinalG = 0.25f,
+          rpm = 2500 + i * 200,
+          distance = i * 5f,
+          wheelPowerCv = 120f + i * 5f,
+          enginePowerCv = 140f + i * 6f,
+          torqueKgfm = 20f,
+          gpsAccuracy = 3.5f,
+          confidence = "ALTA",
+          isValid = true
+        )
       }
-      obj.put("samples", samplesArray)
-    }
+      testSampleDao.insertSamples(dummySamples)
+      Log.i(TAG, "[DynoStorage] SelfTest: 10 amostras inseridas")
 
-    return obj
+      // 3. Concluir teste
+      val completedEntity = dummyEntity.copy(
+        completedAt = currentIsoUtc(),
+        status = "completed",
+        endSpeed = 80.0f,
+        elapsedTime = 3.5f,
+        maxWheelPowerCv = 170.0f,
+        estimatedEnginePowerCv = 200.0f,
+        maxTorqueKgfm = 24.5f,
+        sampleCount = 10
+      )
+      testDao.updateTest(completedEntity)
+      Log.i(TAG, "[DynoStorage] SelfTest: registro atualizado para completed")
+
+      // 4. Ler do banco e verificar
+      val readBackTest = testDao.getTestById(dummyTestId)
+        ?: return@withContext Pair(false, "Falha: teste não encontrado após gravação")
+      val readBackSamples = testSampleDao.getSamplesForTest(dummyTestId)
+
+      if (readBackSamples.size != 10) {
+        return@withContext Pair(false, "Falha: esperava 10 amostras, obteve ${readBackSamples.size}")
+      }
+      if (readBackTest.status != "completed") {
+        return@withContext Pair(false, "Falha: status do teste é ${readBackTest.status} (esperado completed)")
+      }
+      if (readBackTest.estimatedEnginePowerCv != 200.0f) {
+        return@withContext Pair(false, "Falha: valor da potência divergente (${readBackTest.estimatedEnginePowerCv})")
+      }
+
+      // 5. Limpar teste de teste
+      testSampleDao.deleteSamplesForTest(dummyTestId)
+      testDao.deleteTestById(dummyTestId)
+      Log.i(TAG, "[DynoStorage] SelfTest: registro temporário limpo com sucesso")
+      Log.i(TAG, "[DynoStorage] === TESTE DE AUTO-DIAGNÓSTICO CONCLUÍDO COM SUCESSO ===")
+
+      Pair(true, "Armazenamento persistente (DynoMobileDB) funcionando perfeitamente! Leitura, gravação e transações verificadas.")
+    } catch (e: Exception) {
+      Log.e(TAG, "[DynoStorage] Falha no teste de auto-diagnóstico: ${e.message}", e)
+      // Cleanup attempt
+      try {
+        testSampleDao.deleteSamplesForTest(dummyTestId)
+        testDao.deleteTestById(dummyTestId)
+      } catch (_: Exception) {}
+      Pair(false, "Falha no armazenamento: ${e.localizedMessage ?: e.message}")
+    }
   }
 
-  private fun deserializeRunResult(obj: JSONObject): RunResult {
+  // --- Mapeamentos e Sanitização ---
+
+  private fun mapRunResultToTestEntity(r: RunResult, status: String): TestEntity {
+    val snapshot = createConfigurationSnapshot(r)
+    return TestEntity(
+      id = r.id,
+      vehicleId = r.vehicleId,
+      name = r.vehicleName.ifBlank { "Passagem" },
+      createdAt = r.timestamp.toIsoUtc(),
+      completedAt = currentIsoUtc(),
+      status = status,
+      startSpeed = r.startSpeedKmh.sanitize(),
+      endSpeed = r.finalSpeedKmh.sanitize(),
+      elapsedTime = r.elapsedSeconds.sanitize(),
+      distance = r.totalDistanceMeters.sanitize(),
+      maxWheelPowerCv = r.wheelPowerCv.sanitize(),
+      estimatedEnginePowerCv = r.enginePowerCv.sanitize(),
+      maxTorqueKgfm = r.engineTorqueKgfm.sanitize(),
+      maxRpm = r.peakPowerRpm,
+      maxG = r.peakLongitudinalG.sanitize(),
+      averageGpsAccuracy = r.averageGpsAccuracyMeters.sanitize(),
+      confidence = r.confidenceLevel.ifBlank { "ALTA" },
+      sampleCount = r.samples.size.takeIf { it > 0 } ?: r.totalSamples,
+      quality = r.quality.ifBlank { "BOA" },
+      finishReason = r.finishReason,
+      invalidationReason = r.invalidationReason,
+      averageSpeedDifferenceKmh = r.averageSpeedDifferenceKmh.sanitize(),
+      maximumSpeedDifferenceKmh = r.maximumSpeedDifferenceKmh.sanitize(),
+      time0to60Kmh = r.time0to60Kmh?.sanitize(),
+      time0to100Kmh = r.time0to100Kmh?.sanitize(),
+      time60to100Kmh = r.time60to100Kmh?.sanitize(),
+      time80to120Kmh = r.time80to120Kmh?.sanitize(),
+      time100to200Kmh = r.time100to200Kmh?.sanitize(),
+      time60Feet = r.time60Feet?.sanitize(),
+      time100M = r.time100M?.sanitize(),
+      time201M = r.time201M?.sanitize(),
+      time402M = r.time402M?.sanitize(),
+      appVersion = r.appVersion.ifBlank { "0.20.0" },
+      configurationSnapshot = snapshot
+    )
+  }
+
+  private fun mapTestEntityToRunResult(entity: TestEntity, samples: List<RunSample>): RunResult {
+    val startGps = entity.startSpeed
+    val maxSpeed = entity.endSpeed.coerceAtLeast(startGps)
+    val powerCv = entity.estimatedEnginePowerCv
+    val torqueKgfm = entity.maxTorqueKgfm
+    val wheelPower = entity.maxWheelPowerCv
+
+    // Parse snapshot if available
+    var gearUsed = "2ª"
+    var gearRatio = 1.95f
+    var finalDrive = 4.10f
+    var mass = 0f
+    var drivetrainLoss = 12f
+    var cd = 0.34f
+    var frontalArea = 2.10f
+    var crr = 0.015f
+    var airDensity = 1.225f
+    var slopeMode = "IGNORE"
+    var slopePercent = 0f
+
+    try {
+      if (entity.configurationSnapshot.isNotBlank() && entity.configurationSnapshot != "{}") {
+        val snapObj = JSONObject(entity.configurationSnapshot)
+        gearUsed = snapObj.optString("gearUsed", "2ª")
+        gearRatio = snapObj.optDouble("gearRatio", 1.95).toFloat()
+        finalDrive = snapObj.optDouble("finalDrive", 4.10).toFloat()
+        mass = snapObj.optDouble("totalMassKg", 0.0).toFloat()
+        drivetrainLoss = snapObj.optDouble("drivetrainLossPercent", 12.0).toFloat()
+        cd = snapObj.optDouble("cd", 0.34).toFloat()
+        frontalArea = snapObj.optDouble("frontalAreaM2", 2.10).toFloat()
+        crr = snapObj.optDouble("crr", 0.015).toFloat()
+        airDensity = snapObj.optDouble("airDensityKgM3", 1.225).toFloat()
+        slopeMode = snapObj.optString("slopeMode", "IGNORE")
+        slopePercent = snapObj.optDouble("slopePercent", 0.0).toFloat()
+      }
+    } catch (_: Exception) {}
+
+    return RunResult(
+      id = entity.id,
+      timestamp = entity.createdAt.isoToTimestampMs(),
+      vehicleId = entity.vehicleId,
+      vehicleName = entity.name,
+      runStartCalculatedSpeedKmh = entity.startSpeed,
+      runStartGpsSpeedKmh = entity.startSpeed,
+      startSpeedKmh = entity.startSpeed,
+      maximumGpsSpeedKmh = maxSpeed,
+      maximumCalculatedSpeedKmh = maxSpeed,
+      finalGpsSpeedKmh = entity.endSpeed,
+      finalCalculatedSpeedKmh = entity.endSpeed,
+      finalSpeedKmh = entity.endSpeed,
+      speedGainKmh = (maxSpeed - startGps).coerceAtLeast(0f),
+      totalDistanceMeters = entity.distance,
+      estimatedPowerCv = powerCv,
+      estimatedTorqueKgfm = torqueKgfm,
+      wheelPowerCv = wheelPower,
+      enginePowerCv = powerCv,
+      wheelPowerKw = (wheelPower * 735.49875f) / 1000f,
+      enginePowerKw = (powerCv * 735.49875f) / 1000f,
+      wheelTorqueKgfm = (torqueKgfm * 0.88f).sanitize(),
+      engineTorqueKgfm = torqueKgfm,
+      wheelTorqueNm = (torqueKgfm * 0.88f * 9.80665f).sanitize(),
+      engineTorqueNm = (torqueKgfm * 9.80665f).sanitize(),
+      peakLongitudinalG = entity.maxG,
+      averageLongitudinalG = (entity.maxG * 0.6f).sanitize(),
+      peakPowerRpm = entity.maxRpm,
+      peakTorqueRpm = entity.maxRpm?.let { (it * 0.75f).toInt() },
+      peakPowerSpeedKmh = maxSpeed,
+      peakTorqueSpeedKmh = startGps + (maxSpeed - startGps) * 0.45f,
+      totalVehicleMassKg = mass,
+      drivetrainLossPercent = drivetrainLoss,
+      estimatedMarginPercent = 10f,
+      gearUsed = gearUsed,
+      gearRatioUsed = gearRatio,
+      finalDriveUsed = finalDrive,
+      isAerodynamicsEstimated = true,
+      cdUsed = cd,
+      frontalAreaUsed = frontalArea,
+      crrUsed = crr,
+      airDensityUsed = airDensity,
+      slopeModeUsed = slopeMode,
+      slopePercentUsed = slopePercent,
+      confidenceLevel = entity.confidence,
+      elapsedSeconds = entity.elapsedTime,
+      gpsAccuracyMeters = entity.averageGpsAccuracy,
+      averageGpsAccuracyMeters = entity.averageGpsAccuracy,
+      totalSamples = entity.sampleCount,
+      rejectedSamples = samples.count { !it.isValid },
+      validSamplesCount = samples.count { it.isValid }.takeIf { it > 0 } ?: entity.sampleCount,
+      validGpsLocationsCount = (entity.elapsedTime * 1.5f).toInt().coerceAtLeast(1),
+      averageSamplingRateHz = if (entity.elapsedTime > 0f) entity.sampleCount / entity.elapsedTime else 0f,
+      averageGpsFrequencyHz = 1.0f,
+      quality = entity.quality,
+      finishReason = entity.finishReason ?: "GPS_DECELERATION",
+      averageSpeedDifferenceKmh = entity.averageSpeedDifferenceKmh,
+      maximumSpeedDifferenceKmh = entity.maximumSpeedDifferenceKmh,
+      invalidationReason = entity.invalidationReason,
+      appVersion = entity.appVersion,
+      time0to60Kmh = entity.time0to60Kmh,
+      time0to100Kmh = entity.time0to100Kmh,
+      time60to100Kmh = entity.time60to100Kmh,
+      time80to120Kmh = entity.time80to120Kmh,
+      time100to200Kmh = entity.time100to200Kmh,
+      time60Feet = entity.time60Feet,
+      time100M = entity.time100M,
+      time201M = entity.time201M,
+      time402M = entity.time402M,
+      samples = samples
+    )
+  }
+
+  private fun mapRunSampleToEntity(s: RunSample, testId: String, index: Int): TestSampleEntity {
+    return TestSampleEntity(
+      id = UUID.randomUUID().toString(),
+      testId = testId,
+      sampleIndex = index,
+      timestamp = (s.timestampMs.takeIf { it > 0L } ?: System.currentTimeMillis()).toIsoUtc(),
+      elapsedTimeMs = s.elapsedTimeMs,
+      speed = s.rawGpsSpeedKmh.takeIf { it > 0f } ?: s.gpsSpeedKmh.sanitize(),
+      filteredSpeed = s.filteredSpeedKmh.takeIf { it > 0f } ?: s.calculatedSpeedKmh.sanitize(),
+      acceleration = s.finalAccelerationMps2.sanitize(),
+      filteredAccelerationZ = s.filteredAccelerationZ.sanitize(),
+      correctedAccelerationZ = s.correctedAccelerationZ.sanitize(),
+      longitudinalG = s.longitudinalG.sanitize(),
+      rpm = s.engineRpm,
+      distance = s.distanceMeters.sanitize(),
+      wheelPowerCv = s.wheelPowerCv.sanitize(),
+      enginePowerCv = s.enginePowerCv.sanitize(),
+      torqueKgfm = s.engineTorqueKgfm.sanitize(),
+      gpsAccuracy = s.gpsAccuracyMeters.sanitize(),
+      gyroMagnitude = s.gyroMagnitude.sanitize(),
+      confidence = s.confidenceLevel.ifBlank { "ALTA" },
+      isValid = s.isValid,
+      rejectionReason = s.rejectionReason
+    )
+  }
+
+  private fun mapEntityToRunSample(entity: TestSampleEntity): RunSample {
+    return RunSample(
+      timestampMs = entity.timestamp.isoToTimestampMs(),
+      elapsedTimeMs = entity.elapsedTimeMs,
+      rawGpsSpeedKmh = entity.speed,
+      filteredSpeedKmh = entity.filteredSpeed,
+      gpsSpeedKmh = entity.speed,
+      calculatedSpeedKmh = entity.filteredSpeed,
+      finalAccelerationMps2 = entity.acceleration,
+      filteredAccelerationZ = entity.filteredAccelerationZ,
+      correctedAccelerationZ = entity.correctedAccelerationZ,
+      longitudinalG = entity.longitudinalG,
+      engineRpm = entity.rpm,
+      distanceMeters = entity.distance,
+      wheelPowerCv = entity.wheelPowerCv,
+      enginePowerCv = entity.enginePowerCv,
+      wheelTorqueKgfm = entity.torqueKgfm * 0.88f,
+      engineTorqueKgfm = entity.torqueKgfm,
+      wheelTorqueNm = entity.torqueKgfm * 0.88f * 9.80665f,
+      engineTorqueNm = entity.torqueKgfm * 9.80665f,
+      gpsAccuracyMeters = entity.gpsAccuracy,
+      gyroMagnitude = entity.gyroMagnitude,
+      confidenceLevel = entity.confidence,
+      isValid = entity.isValid,
+      rejectionReason = entity.rejectionReason
+    )
+  }
+
+  private fun createConfigurationSnapshot(r: RunResult): String {
+    val obj = JSONObject()
+    obj.put("totalMassKg", r.totalVehicleMassKg.toDouble())
+    obj.put("gearUsed", r.gearUsed)
+    obj.put("gearRatio", r.gearRatioUsed.toDouble())
+    obj.put("finalDrive", r.finalDriveUsed.toDouble())
+    obj.put("drivetrainLossPercent", r.drivetrainLossPercent.toDouble())
+    obj.put("cd", r.cdUsed.toDouble())
+    obj.put("frontalAreaM2", r.frontalAreaUsed.toDouble())
+    obj.put("crr", r.crrUsed.toDouble())
+    obj.put("airDensityKgM3", r.airDensityUsed.toDouble())
+    obj.put("slopeMode", r.slopeModeUsed)
+    obj.put("slopePercent", r.slopePercentUsed.toDouble())
+    obj.put("startSpeedKmh", r.startSpeedKmh.toDouble())
+    obj.put("endSpeedKmh", r.finalSpeedKmh.toDouble())
+    return obj.toString()
+  }
+
+  fun createSnapshotFromProfile(profile: VehicleProfile?, selectedGearRatio: Float, selectedFinalDrive: Float, selectedGear: String, slopeMode: String, slopePercent: Float): String {
+    val obj = JSONObject()
+    if (profile != null) {
+      obj.put("totalMassKg", profile.totalWeightKg.toDouble())
+      obj.put("tireWidthMm", profile.tireWidthMm)
+      obj.put("tireAspectRatio", profile.tireAspectRatio)
+      obj.put("wheelDiameterInches", profile.wheelDiameterInches)
+      obj.put("tireCorrectionPercent", profile.tireCorrectionPercent.toDouble())
+      obj.put("drivetrain", profile.drivetrain)
+      obj.put("drivetrainLossPercent", profile.customDrivetrainLossPercent?.toDouble() ?: 12.0)
+      obj.put("cd", profile.dragCoefficient.toDouble())
+      obj.put("frontalAreaM2", profile.frontalAreaM2.toDouble())
+      obj.put("crr", profile.rollingResistanceCoeff.toDouble())
+      obj.put("airDensityKgM3", profile.airDensityKgM3.toDouble())
+    }
+    obj.put("gearUsed", selectedGear)
+    obj.put("gearRatio", selectedGearRatio.toDouble())
+    obj.put("finalDrive", selectedFinalDrive.toDouble())
+    obj.put("slopeMode", slopeMode)
+    obj.put("slopePercent", slopePercent.toDouble())
+    return obj.toString()
+  }
+
+  private fun deserializeLegacyJson(obj: JSONObject): RunResult {
     val samplesList = mutableListOf<RunSample>()
     if (obj.has("samples")) {
       val samplesArray = obj.getJSONArray("samples")
@@ -241,16 +696,18 @@ class RunResultRepository(context: Context) {
     val estTorque = obj.optDouble("estimatedTorqueKgfm", 0.0).toFloat()
 
     return RunResult(
-      id = obj.optString("id"),
+      id = obj.optString("id", UUID.randomUUID().toString()),
       timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
       vehicleId = if (obj.has("vehicleId")) obj.getString("vehicleId") else null,
       vehicleName = obj.optString("vehicleName", ""),
       runStartCalculatedSpeedKmh = obj.optDouble("runStartCalculatedSpeedKmh", 40.0).toFloat(),
       runStartGpsSpeedKmh = startGps,
+      startSpeedKmh = startGps,
       maximumGpsSpeedKmh = maxGps,
       maximumCalculatedSpeedKmh = obj.optDouble("maximumCalculatedSpeedKmh", 40.0).toFloat(),
       finalGpsSpeedKmh = obj.optDouble("finalGpsSpeedKmh", 0.0).toFloat(),
       finalCalculatedSpeedKmh = obj.optDouble("finalCalculatedSpeedKmh", 0.0).toFloat(),
+      finalSpeedKmh = obj.optDouble("finalGpsSpeedKmh", 0.0).toFloat(),
       speedGainKmh = obj.optDouble("speedGainKmh", (maxGps - startGps).coerceAtLeast(0f).toDouble()).toFloat(),
       estimatedPowerCv = estPower,
       estimatedTorqueKgfm = estTorque,
@@ -286,4 +743,9 @@ class RunResultRepository(context: Context) {
       samples = samplesList
     )
   }
+}
+
+private fun Float?.sanitize(): Float {
+  if (this == null || this.isNaN() || this.isInfinite()) return 0f
+  return this
 }

@@ -294,10 +294,11 @@ fun DynoLiteApp() {
           onNavigateToHome = { saved ->
             activeTestVehicle = null
             currentDestination = AppDestination.MAIN_TABS
-            selectedTab = DynoTab.HOME
             if (saved) {
-              homeFeedbackMessage = "Passagem salva. Veja o resultado na aba Resultados."
+              selectedTab = DynoTab.RESULTS
+              homeFeedbackMessage = "Passagem concluída e salva com sucesso!"
             } else {
+              selectedTab = DynoTab.HOME
               homeFeedbackMessage = "Não foi possível salvar a passagem."
             }
           },

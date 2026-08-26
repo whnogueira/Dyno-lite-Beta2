@@ -118,6 +118,10 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ResultsScreen(
@@ -127,7 +131,11 @@ fun ResultsScreen(
 ) {
   val context = LocalContext.current
   val runResultRepository = remember { RunResultRepository(context) }
-  var results by remember { mutableStateOf(runResultRepository.getResults()) }
+  val coroutineScope = rememberCoroutineScope()
+
+  // Observa fluxo em tempo real do banco de dados Room (DynoMobileDB)
+  val flowResults by runResultRepository.getResultsFlow().collectAsStateWithLifecycle(initialValue = runResultRepository.getResults())
+  var results by remember(flowResults) { mutableStateOf(flowResults) }
 
   // Result currently displayed on screen (defaults to most recent run if available)
   var currentDisplayedResult by remember(results) {
@@ -139,6 +147,8 @@ fun ResultsScreen(
   var showComparisonDialog by remember { mutableStateOf(false) }
   var showClearAllConfirmDialog by remember { mutableStateOf(false) }
   var showCorrectRunDialog by remember { mutableStateOf(false) }
+  var selfTestResultMessage by remember { mutableStateOf<String?>(null) }
+  var isRunningSelfTest by remember { mutableStateOf(false) }
 
   // Check valid tests for the current vehicle to evaluate comparison eligibility
   val currentVehicleName = currentDisplayedResult?.vehicleName ?: ""
@@ -523,6 +533,13 @@ fun ResultsScreen(
               isExpanded = isMeasurementDetailsExpanded,
               onToggleExpand = { isMeasurementDetailsExpanded = !isMeasurementDetailsExpanded },
               orderedSamples = remember(run.id) { runResultRepository.getOrderedRunSamples(run.id) },
+              modifier = Modifier.fillMaxWidth()
+            )
+
+            // BOTÃO SALVAR TESTE / TESTE SALVO
+            SaveTestButtonRow(
+              run = run,
+              runResultRepository = runResultRepository,
               modifier = Modifier.fillMaxWidth()
             )
 
@@ -919,6 +936,13 @@ fun ResultsScreen(
               }
             }
 
+            // BOTÃO SALVAR TESTE / TESTE SALVO
+            SaveTestButtonRow(
+              run = run,
+              runResultRepository = runResultRepository,
+              modifier = Modifier.fillMaxWidth()
+            )
+
             // 8. BOTÃO REPETIR TESTE
             Button(
               onClick = { onStartNewTest(run.vehicleId) },
@@ -995,6 +1019,7 @@ fun ResultsScreen(
   if (showHistoryDialog) {
     HistoryResultsDialog(
       results = results,
+      runResultRepository = runResultRepository,
       currentSelectedId = currentDisplayedResult?.id,
       onSelectResult = { selected ->
         currentDisplayedResult = selected
@@ -1007,10 +1032,56 @@ fun ResultsScreen(
           currentDisplayedResult = results.firstOrNull()
         }
       },
+      onRunSelfTest = {
+        coroutineScope.launch {
+          isRunningSelfTest = true
+          val (ok, message) = runResultRepository.runStorageSelfTest()
+          isRunningSelfTest = false
+          selfTestResultMessage = message
+        }
+      },
       onClearAll = {
         showClearAllConfirmDialog = true
       },
       onDismiss = { showHistoryDialog = false }
+    )
+  }
+
+  // DIÁLOGO DE RESULTADO DO TESTE DE ARMAZENAMENTO
+  if (selfTestResultMessage != null) {
+    AlertDialog(
+      onDismissRequest = { selfTestResultMessage = null },
+      title = {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          val isSuccess = selfTestResultMessage?.startsWith("SUCESSO") == true
+          Icon(
+            imageVector = if (isSuccess) Icons.Default.Check else Icons.Default.Close,
+            contentDescription = null,
+            tint = if (isSuccess) DynoSuccessGreen else DynoErrorRed
+          )
+          Text(
+            text = "Teste de Armazenamento",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+          )
+        }
+      },
+      text = {
+        Text(
+          text = selfTestResultMessage ?: "",
+          style = MaterialTheme.typography.bodyMedium
+        )
+      },
+      confirmButton = {
+        Button(
+          onClick = { selfTestResultMessage = null },
+          shape = RoundedCornerShape(10.dp)
+        ) {
+          Text("FECHAR")
+        }
+      }
     )
   }
 
@@ -1830,12 +1901,20 @@ private fun ComparisonAndHistoryButtons(
 @Composable
 private fun HistoryResultsDialog(
   results: List<RunResult>,
+  runResultRepository: RunResultRepository,
   currentSelectedId: String?,
   onSelectResult: (RunResult) -> Unit,
   onDeleteResult: (String) -> Unit,
+  onRunSelfTest: () -> Unit,
   onClearAll: () -> Unit,
   onDismiss: () -> Unit
 ) {
+  var incompleteTests by remember { mutableStateOf<List<RunResult>>(emptyList()) }
+
+  androidx.compose.runtime.LaunchedEffect(Unit) {
+    incompleteTests = runResultRepository.getIncompleteTests()
+  }
+
   AlertDialog(
     onDismissRequest = onDismiss,
     title = {
@@ -1860,27 +1939,97 @@ private fun HistoryResultsDialog(
       }
     },
     text = {
-      if (results.isEmpty()) {
-        Box(
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .heightIn(max = 440.dp)
+          .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+      ) {
+        // Botão de Auto-Diagnóstico de Armazenamento (Requisito 12)
+        OutlinedButton(
+          onClick = onRunSelfTest,
           modifier = Modifier
             .fillMaxWidth()
-            .padding(24.dp),
-          contentAlignment = Alignment.Center
+            .testTag("btn_test_storage_selftest"),
+          shape = RoundedCornerShape(10.dp),
+          border = BorderStroke(1.dp, DynoBlueLight.copy(alpha = 0.6f))
         ) {
+          Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp), tint = DynoBlueLight)
+          Spacer(modifier = Modifier.width(6.dp))
           Text(
-            text = "Nenhum teste gravado no histórico.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            text = "TESTAR ARMAZENAMENTO (DIAGNÓSTICO)",
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+            color = DynoBlueLight
           )
         }
-      } else {
-        Column(
-          modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(max = 400.dp)
-            .verticalScroll(rememberScrollState()),
-          verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+
+        // Seção: Testes Não Concluídos (se houver)
+        if (incompleteTests.isNotEmpty()) {
+          Text(
+            text = "Testes não concluídos (${incompleteTests.size}):",
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = DynoTorqueOrange)
+          )
+          incompleteTests.forEach { incomplete ->
+            Card(
+              modifier = Modifier.fillMaxWidth(),
+              shape = RoundedCornerShape(10.dp),
+              colors = CardDefaults.cardColors(containerColor = DynoTorqueOrange.copy(alpha = 0.12f)),
+              border = BorderStroke(1.dp, DynoTorqueOrange.copy(alpha = 0.35f))
+            ) {
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(
+                    text = incomplete.vehicleName.ifBlank { "Passagem Interrompida" },
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                    color = DynoTextPrimary
+                  )
+                  Text(
+                    text = "Amostras gravadas: ${incomplete.samples.size} (não finalizado)",
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                    color = DynoTextSecondary
+                  )
+                }
+                IconButton(
+                  onClick = {
+                    onDeleteResult(incomplete.id)
+                    incompleteTests = incompleteTests.filter { it.id != incomplete.id }
+                  },
+                  modifier = Modifier.size(28.dp)
+                ) {
+                  Icon(Icons.Default.Delete, contentDescription = "Excluir", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                }
+              }
+            }
+          }
+          HorizontalDivider(thickness = 0.8.dp, color = DynoDivider)
+        }
+
+        // Seção: Testes Concluídos
+        if (results.isEmpty()) {
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(16.dp),
+            contentAlignment = Alignment.Center
+          ) {
+            Text(
+              text = "Nenhum teste gravado no histórico.",
+              style = MaterialTheme.typography.bodyMedium,
+              color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+          }
+        } else {
+          Text(
+            text = "Testes concluídos (${results.size}):",
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = DynoBlueLight)
+          )
           results.forEach { run ->
             val isSelected = run.id == currentSelectedId
             val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
@@ -2366,3 +2515,139 @@ fun CorrectRunDataDialog(
     }
   )
 }
+
+/**
+ * Componente de Ação e Feedback do Salvamento do Teste (Requisito 5)
+ */
+@Composable
+private fun SaveTestButtonRow(
+  run: RunResult,
+  runResultRepository: RunResultRepository,
+  modifier: Modifier = Modifier
+) {
+  val coroutineScope = rememberCoroutineScope()
+  var isSaving by remember { mutableStateOf(false) }
+  var saveStatus by remember { mutableStateOf<String?>(null) } // "success", "error", null
+  var isAlreadySavedInDb by remember(run.id) {
+    mutableStateOf(runResultRepository.getResultById(run.id) != null)
+  }
+
+  Column(
+    modifier = modifier.fillMaxWidth(),
+    verticalArrangement = Arrangement.spacedBy(6.dp)
+  ) {
+    // Feedback Banner
+    if (saveStatus == "success" || isAlreadySavedInDb) {
+      Surface(
+        modifier = Modifier
+          .fillMaxWidth()
+          .testTag("banner_save_success"),
+        shape = RoundedCornerShape(10.dp),
+        color = DynoSuccessGreen.copy(alpha = 0.15f),
+        border = BorderStroke(1.dp, DynoSuccessGreen.copy(alpha = 0.4f))
+      ) {
+        Row(
+          modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          Icon(Icons.Default.Check, contentDescription = null, tint = DynoSuccessGreen, modifier = Modifier.size(18.dp))
+          Text(
+            text = "Teste salvo com sucesso no banco de dados",
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+            color = DynoSuccessGreen
+          )
+        }
+      }
+    } else if (saveStatus == "error") {
+      Surface(
+        modifier = Modifier
+          .fillMaxWidth()
+          .testTag("banner_save_error"),
+        shape = RoundedCornerShape(10.dp),
+        color = DynoErrorRed.copy(alpha = 0.15f),
+        border = BorderStroke(1.dp, DynoErrorRed.copy(alpha = 0.4f))
+      ) {
+        Row(
+          modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.weight(1f)
+          ) {
+            Icon(Icons.Default.Close, contentDescription = null, tint = DynoErrorRed, modifier = Modifier.size(18.dp))
+            Text(
+              text = "Não foi possível salvar o teste",
+              style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+              color = DynoErrorRed
+            )
+          }
+          TextButton(
+            onClick = {
+              coroutineScope.launch {
+                isSaving = true
+                val ok = runResultRepository.saveResultSuspending(run, "completed")
+                isSaving = false
+                if (ok) {
+                  isAlreadySavedInDb = true
+                  saveStatus = "success"
+                } else {
+                  saveStatus = "error"
+                }
+              }
+            }
+          ) {
+            Text("Tentar novamente", color = DynoBlueLight, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+          }
+        }
+      }
+    }
+
+    // Botão SALVAR TESTE / TESTE SALVO
+    Button(
+      onClick = {
+        if (!isAlreadySavedInDb && !isSaving) {
+          coroutineScope.launch {
+            isSaving = true
+            val ok = runResultRepository.saveResultSuspending(run, "completed")
+            isSaving = false
+            if (ok) {
+              isAlreadySavedInDb = true
+              saveStatus = "success"
+            } else {
+              saveStatus = "error"
+            }
+          }
+        }
+      },
+      enabled = !isAlreadySavedInDb && !isSaving,
+      modifier = Modifier
+        .fillMaxWidth()
+        .height(48.dp)
+        .testTag("btn_save_test"),
+      shape = RoundedCornerShape(12.dp),
+      colors = ButtonDefaults.buttonColors(
+        containerColor = if (isAlreadySavedInDb) DynoSuccessGreen else MaterialTheme.colorScheme.primary,
+        disabledContainerColor = DynoSuccessGreen.copy(alpha = 0.85f),
+        disabledContentColor = Color.White,
+        contentColor = Color.White
+      )
+    ) {
+      if (isSaving) {
+        Text("SALVANDO NO BANCO...", fontWeight = FontWeight.Bold)
+      } else if (isAlreadySavedInDb) {
+        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(20.dp), tint = Color.White)
+        Spacer(modifier = Modifier.width(8.dp))
+        Text("TESTE SALVO", fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+      } else {
+        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(20.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text("SALVAR TESTE", fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+      }
+    }
+  }
+}
+
