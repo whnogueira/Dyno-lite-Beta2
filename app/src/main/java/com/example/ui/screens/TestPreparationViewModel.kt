@@ -89,10 +89,20 @@ data class InertialPoint(
 )
 
 /**
+ * Estado de movimento do veículo baseado em média móvel de 5 amostras e histerese (Requisito 1).
+ */
+enum class VehicleMotionState {
+  STOPPED,
+  UNCERTAIN,
+  MOVING
+}
+
+/**
  * Estado imutável completo exposto para a interface Compose via StateFlow.
  */
 data class DynoUiState(
   val gpsSpeedKmh: Float = 0f,
+  val avgGpsSpeedKmh: Float = 0f,
   val integratedSpeedKmh: Float = 0f,
   val displaySpeedKmh: Float = 0f,
   val longitudinalG: Float = 0f,
@@ -121,8 +131,11 @@ data class DynoUiState(
   val isGpsReady: Boolean = false,
   val hasGpsFix: Boolean = false,
   val isGpsProviderEnabled: Boolean = false,
-  val isStoppedForTwoSeconds: Boolean = true,
+  val vehicleMotionState: VehicleMotionState = VehicleMotionState.STOPPED,
+  val isStoppedForTwoSeconds: Boolean = false,
   val isPhoneStable: Boolean = true,
+  val blockingReason: String = "Aguardando GPS",
+  val isReadyToArm: Boolean = false,
   val hasPhoneMovedAfterCalib: Boolean = false,
   val runElapsedSeconds: Float = 0f,
   val startSpeedTriggerKmh: Float = 40.0f,
@@ -194,8 +207,18 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
   @Volatile private var lastGpsAnchorNanoTime: Long = 0L
   @Volatile private var integralSpeedSinceLastGpsMps: Float = 0f
 
-  // Buffer de Média Móvel de Velocidade GPS (últimas 5 amostras)
+  // Buffer de Média Móvel de Velocidade GPS (últimas 5 amostras) e Histerese (Requisito 1)
   private val gpsSpeedMovingAverageBuffer = mutableListOf<Float>()
+  private var vehicleMotionState: VehicleMotionState = VehicleMotionState.STOPPED
+  private var consecutiveHighSpeedCount: Int = 0
+  private var stoppedStartTimeMs: Long = SystemClock.elapsedRealtime()
+
+  // Estabilidade do Aparelho por Média Móvel de ~1s e Sustentação (Requisito 4)
+  private data class GyroSample(val timestampNs: Long, val magnitude: Float)
+  private val gyroWindow = mutableListOf<GyroSample>()
+  private var gyroUnstableStartTimeNs: Long = 0L
+  @Volatile private var isPhoneStable: Boolean = true
+
   private var previousGpsSpeedMs: Float = 0f
   private var previousGpsElapsedNs: Long = 0L
   private var filteredGpsAccelerationMps2: Float = 0f
@@ -211,9 +234,6 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
   @Volatile private var lastGpsSpeedAccuracyMps: Float = 99f
   @Volatile private var lastLatitude: Double = 0.0
   @Volatile private var lastLongitude: Double = 0.0
-
-  // Detecção de Parado
-  private var stoppedStartTimeMs: Long = SystemClock.elapsedRealtime()
 
   // Run Tracking & Splits
   private var runStartTimeNs: Long = 0L
@@ -388,8 +408,8 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     }
     if (!_uiState.value.isGpsProviderEnabled || !_uiState.value.hasGpsFix) {
       issues.add("Aguardando sinal e fix do GPS.")
-    } else if (lastGpsAccuracyMeters > 15.0f) {
-      issues.add("Precisão horizontal do GPS fraca (${String.format(Locale.US, "%.1f", lastGpsAccuracyMeters)} m > 15 m).")
+    } else if (lastGpsAccuracyMeters > 25.0f) {
+      issues.add("Precisão horizontal do GPS insuficiente (${String.format(Locale.US, "%.1f", lastGpsAccuracyMeters)} m > 25 m).")
     }
     if (!_uiState.value.isCalibrated) {
       issues.add("Aparelho não calibrado na posição do suporte.")
@@ -401,7 +421,7 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
 
   /**
    * LOOP DE ATUALIZAÇÃO DO VELOCÍMETRO E TELEMETRIA EM TEMPO REAL (~16.6 Hz / ~60ms)
-   * Baseado diretamente na velocidade GPS em tempo real.
+   * Baseado diretamente na velocidade GPS em tempo real, detecção com média móvel e histerese.
    */
   private fun startDisplaySpeedUpdateLoop() {
     viewModelScope.launch {
@@ -416,11 +436,19 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
           ((nowNs - lastProcessedGpsElapsedRealtimeNs) / 1_000_000L).coerceAtLeast(0L)
         } else 9999L
 
-        val isStopped = gpsSpeedKmh < 1.0f && (nowMs - stoppedStartTimeMs >= 2000L)
+        val avgMovingSpeed = if (gpsSpeedMovingAverageBuffer.isNotEmpty()) {
+          gpsSpeedMovingAverageBuffer.average().toFloat()
+        } else gpsSpeedKmh
+
+        // 1. Detecção de Veículo Parado (Requisito 1: média <= 3 km/h e 2s contínuos)
+        val isStoppedForTwoSeconds = (vehicleMotionState == VehicleMotionState.STOPPED) && (nowMs - stoppedStartTimeMs >= 2000L)
+
+        // 2. Status do GPS (Requisito 2: até 5000 ms e precisão <= 25m é válido para armar)
+        val isGpsReady = locationUpdateCount > 0 && gpsAge <= 5000L && lastGpsAccuracyMeters <= 25.0f
 
         // A velocidade exibida prioriza a velocidade GPS oficial do Android
         val targetSpeed: Float = when {
-          isStopped -> 0f
+          isStoppedForTwoSeconds -> 0f
           currentState == DynoRunState.MEDINDO_PROTEGIDO || currentState == DynoRunState.MEDINDO || currentState == DynoRunState.SUSPEITA_DESACELERACAO -> {
             if (gpsAge < 1000L) {
               gpsSpeedKmh * 0.85f + integratedSpeedKmh * 0.15f
@@ -438,14 +466,14 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
             }
           }
           else -> {
-            if (gpsSpeedKmh < 0.8f) 0f else gpsSpeedKmh
+            if (avgMovingSpeed <= 3.0f && isStoppedForTwoSeconds) 0f else gpsSpeedKmh
           }
         }
 
         // Suavização visual moderada
-        val alpha = if (isStopped) 0.45f else 0.32f
+        val alpha = if (isStoppedForTwoSeconds) 0.45f else 0.32f
         val newDisplaySpeed = (displaySpeedKmh + alpha * (targetSpeed - displaySpeedKmh)).coerceAtLeast(0f)
-        val finalDisplaySpeed = if (isStopped && newDisplaySpeed < 0.5f) 0f else newDisplaySpeed
+        val finalDisplaySpeed = if (isStoppedForTwoSeconds && newDisplaySpeed < 0.5f) 0f else newDisplaySpeed
         displaySpeedKmh = finalDisplaySpeed
 
         if (finalDisplaySpeed > maxDisplaySpeedKmh) {
@@ -455,9 +483,22 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
         val gpsFreqHz = if (lastGpsIntervalMs > 0L) (1000f / lastGpsIntervalMs).coerceIn(0.1f, 20f) else 0f
         val avgDiff = if (syncDiffCount > 0) (syncDiffSum / syncDiffCount).toFloat() else 0f
 
-        val currentGyroMag = sqrt(gyroX * gyroX + gyroY * gyroY + gyroZ * gyroZ)
-        val isPhoneStable = currentGyroMag <= 0.85f
-        val isGpsReady = lastGpsAccuracyMeters in 0.1f..15.0f && gpsAge < 3000L && locationUpdateCount > 0
+        // 3. Liberação do Botão Iniciar e Bloqueio atual (Requisitos 2 e 3)
+        val blockingReason = when {
+          !_uiState.value.isCalibrated -> "Aguardando calibração"
+          locationUpdateCount == 0 || gpsAge > 5000L -> "Aguardando GPS"
+          lastGpsAccuracyMeters > 25.0f -> "Precisão GPS insuficiente"
+          vehicleMotionState != VehicleMotionState.STOPPED || !isStoppedForTwoSeconds -> "Aguardando veículo parar"
+          !isPhoneStable -> "Celular se movimentando"
+          else -> "Pronto para iniciar"
+        }
+
+        val isReadyToArm = _uiState.value.isCalibrated &&
+          isGpsReady &&
+          vehicleMotionState == VehicleMotionState.STOPPED &&
+          isStoppedForTwoSeconds &&
+          isPhoneStable &&
+          currentState == DynoRunState.PARADO
 
         // Cálculos de Potência e RPM em tempo real para o display
         var liveWheelPower = 0f
@@ -499,6 +540,7 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
         _uiState.update { current ->
           current.copy(
             gpsSpeedKmh = gpsSpeedKmh,
+            avgGpsSpeedKmh = avgMovingSpeed,
             integratedSpeedKmh = integratedSpeedKmh,
             displaySpeedKmh = finalDisplaySpeed,
             longitudinalG = liveLongitudinalG,
@@ -523,8 +565,11 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
             testState = currentState,
             isGpsReady = isGpsReady,
             hasGpsFix = locationUpdateCount > 0 && gpsAge < 5000L,
-            isStoppedForTwoSeconds = isStopped,
+            vehicleMotionState = vehicleMotionState,
+            isStoppedForTwoSeconds = isStoppedForTwoSeconds,
             isPhoneStable = isPhoneStable,
+            blockingReason = blockingReason,
+            isReadyToArm = isReadyToArm,
             hasPhoneMovedAfterCalib = hasPhoneMovedAfterCalib,
             runElapsedSeconds = if (runStartTimeNs > 0L && (currentState == DynoRunState.MEDINDO_PROTEGIDO || currentState == DynoRunState.MEDINDO || currentState == DynoRunState.SUSPEITA_DESACELERACAO)) {
               ((System.nanoTime() - runStartTimeNs) / 1_000_000L) / 1000f
@@ -600,12 +645,33 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     val horizontalAccuracy = if (location.hasAccuracy()) location.accuracy else 99f
     val speedAccuracyMps = if (location.hasSpeedAccuracy()) location.speedAccuracyMetersPerSecond else 99f
 
-    // Média móvel das últimas 5 amostras de velocidade GPS
+    // Média móvel das últimas 5 amostras de velocidade GPS (Requisito 1)
     gpsSpeedMovingAverageBuffer.add(speedKmh)
     if (gpsSpeedMovingAverageBuffer.size > 5) {
       gpsSpeedMovingAverageBuffer.removeAt(0)
     }
     val avgMovingSpeedKmh = gpsSpeedMovingAverageBuffer.average().toFloat()
+
+    // Histerese de estado de movimento:
+    // - <= 3 km/h -> STOPPED
+    // - > 5 km/h -> MOVING
+    // - Entre 3 e 5 km/h -> mantém estado anterior
+    if (avgMovingSpeedKmh <= 3.0f) {
+      vehicleMotionState = VehicleMotionState.STOPPED
+    } else if (avgMovingSpeedKmh > 5.0f) {
+      vehicleMotionState = VehicleMotionState.MOVING
+    }
+
+    // Reiniciar o contador de parado de 2s somente se pelo menos 2 leituras consecutivas superarem 5 km/h ou MOVING
+    if (speedKmh > 5.0f) {
+      consecutiveHighSpeedCount++
+    } else {
+      consecutiveHighSpeedCount = 0
+    }
+
+    if (consecutiveHighSpeedCount >= 2 || vehicleMotionState == VehicleMotionState.MOVING) {
+      stoppedStartTimeMs = nowWallMs
+    }
 
     // 3. CÁLCULO DA ACELERAÇÃO GPS POR TIMESTAMP REAL: (v2 - v1) / dt
     if (previousGpsElapsedNs > 0L && previousGpsSpeedMs >= 0f) {
@@ -632,7 +698,7 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     gpsSpeedKmh = speedKmh
 
     // Ancorar a velocidade inercial auxiliar na velocidade GPS real
-    if (speedKmh > 0f && horizontalAccuracy <= 15.0f) {
+    if (speedKmh > 0f && horizontalAccuracy <= 25.0f) {
       integratedSpeedKmh = speedKmh
     }
 
@@ -640,19 +706,15 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     lastGpsAnchorNanoTime = nowNano
     integralSpeedSinceLastGpsMps = 0f
 
-    if (speedKmh >= 1.0f) {
-      stoppedStartTimeMs = nowWallMs
-    }
-
     val currentState = _uiState.value.testState
 
-    // 15. LÓGICA DE INÍCIO DA PASSADA
+    // 15. LÓGICA DE INÍCIO DA PASSADA (Requisito 5)
     if (currentState == DynoRunState.AGUARDANDO_INICIO) {
       val targetTrigger = _uiState.value.startSpeedTriggerKmh
       val isCalib = _uiState.value.isCalibrated
 
-      // Checa aceleração positiva por pelo menos 0.5s
-      val isPositiveAccel = (filteredGpsAccelerationMps2 > 0.3f) || (zFiltradoRun > 0.3f)
+      // Checa aceleração positiva (> 0.25 m/s² por GPS ou acelerômetro por pelo menos 300 ms)
+      val isPositiveAccel = (filteredGpsAccelerationMps2 > 0.25f) || (zFiltradoRun > 0.25f)
       if (isPositiveAccel) {
         if (lastAccelCheckNs == 0L) {
           lastAccelCheckNs = nowNano
@@ -664,7 +726,9 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
         positiveAccelDurationMs = 0L
       }
 
-      if (speedKmh >= targetTrigger && horizontalAccuracy <= 15.0f && isCalib && positiveAccelDurationMs >= 400L) {
+      val isAccelConfirmed = (filteredGpsAccelerationMps2 > 0.25f) || (positiveAccelDurationMs >= 300L)
+
+      if (speedKmh >= targetTrigger && horizontalAccuracy <= 25.0f && isCalib && isAccelConfirmed) {
         triggerOfficialRunStart(nowNano, speedKmh)
       }
     } else if (currentState == DynoRunState.MEDINDO_PROTEGIDO ||
@@ -1191,6 +1255,33 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
             gyroX = event.values[0]
             gyroY = event.values[1]
             gyroZ = event.values[2]
+
+            // Estabilidade do Aparelho (Requisito 4):
+            // Média móvel de ~1 segundo nas leituras de giroscópio.
+            // Considerar instável apenas se a média superar o limite continuamente por mais de 1 segundo.
+            val nowNs = System.nanoTime()
+            val rawGyroMag = sqrt(gyroX * gyroX + gyroY * gyroY + gyroZ * gyroZ)
+            synchronized(gyroWindow) {
+              gyroWindow.add(GyroSample(nowNs, rawGyroMag))
+              val oneSecAgo = nowNs - 1_000_000_000L
+              while (gyroWindow.isNotEmpty() && gyroWindow.first().timestampNs < oneSecAgo) {
+                gyroWindow.removeAt(0)
+              }
+              val avgGyroMag = if (gyroWindow.isNotEmpty()) {
+                gyroWindow.map { it.magnitude }.average().toFloat()
+              } else rawGyroMag
+
+              if (avgGyroMag > 1.2f) {
+                if (gyroUnstableStartTimeNs == 0L) {
+                  gyroUnstableStartTimeNs = nowNs
+                } else if (nowNs - gyroUnstableStartTimeNs > 1_000_000_000L) {
+                  isPhoneStable = false
+                }
+              } else {
+                gyroUnstableStartTimeNs = 0L
+                isPhoneStable = true
+              }
+            }
           }
         }
       }
@@ -1627,6 +1718,12 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     previousGpsSpeedMs = 0f
     previousGpsElapsedNs = 0L
     gpsSpeedMovingAverageBuffer.clear()
+    consecutiveHighSpeedCount = 0
+    gyroUnstableStartTimeNs = 0L
+    isPhoneStable = true
+    synchronized(gyroWindow) {
+      gyroWindow.clear()
+    }
 
     suspectStartTimeNs = null
     suspectNegativeSampleCount = 0

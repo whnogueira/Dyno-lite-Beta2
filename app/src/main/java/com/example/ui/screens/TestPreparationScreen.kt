@@ -231,24 +231,26 @@ fun TestPreparationScreen(
   var showRecalibrateConfirmDialog by remember { mutableStateOf(false) }
   var showAdvancedDiagnosticDialog by remember { mutableStateOf(false) }
 
-  val isVehicleMoving = uiState.gpsSpeedKmh >= 3.0f
-  val isReadyToArm = uiState.isCalibrated && uiState.isGpsReady && uiState.isStoppedForTwoSeconds && !isVehicleMoving && uiState.isPhoneStable && uiState.testState == DynoRunState.PARADO
+  val isVehicleMoving = uiState.vehicleMotionState == VehicleMotionState.MOVING || uiState.gpsSpeedKmh > 5.0f
+  val isReadyToArm = uiState.isReadyToArm
 
-  // 9. STATUS DO GPS POR IDADE
+  // 9. STATUS DO GPS POR IDADE (Requisito 2)
   val gpsStatusLabel = when {
     !hasLocationPermission -> "Sem permissão"
-    !uiState.isGpsReady -> "Aguardando GPS"
-    uiState.gpsAgeMillis <= 600L -> "GPS Bom"
-    uiState.gpsAgeMillis <= 1500L -> "GPS Atualizando"
-    else -> "GPS com atraso"
+    uiState.locationUpdateCount == 0 -> "Aguardando GPS"
+    uiState.gpsAgeMillis <= 1500L -> "GPS Bom"
+    uiState.gpsAgeMillis <= 3500L -> "GPS Atualizando"
+    uiState.gpsAgeMillis <= 5000L -> "GPS com atraso"
+    else -> "GPS perdido"
   }
 
   val gpsStatusColor = when {
     !hasLocationPermission -> DynoErrorRed
-    !uiState.isGpsReady -> DynoWarningYellow
-    uiState.gpsAgeMillis <= 600L -> DynoSuccessGreen
-    uiState.gpsAgeMillis <= 1500L -> DynoPowerCyan
-    else -> DynoWarningYellow
+    uiState.locationUpdateCount == 0 -> DynoWarningYellow
+    uiState.gpsAgeMillis <= 1500L -> DynoSuccessGreen
+    uiState.gpsAgeMillis <= 3500L -> DynoPowerCyan
+    uiState.gpsAgeMillis <= 5000L -> DynoWarningYellow
+    else -> DynoErrorRed
   }
 
   // Título e cor de estado no topo do velocímetro
@@ -269,8 +271,10 @@ fun TestPreparationScreen(
     !uiState.isCalibrated -> "Calibre o celular para continuar."
     uiState.isCalibrating -> "Mantenha o veículo parado com o celular no suporte."
     uiState.testState == DynoRunState.PARADO && isReadyToArm -> "Tudo pronto. Toque em iniciar."
-    uiState.testState == DynoRunState.PARADO && isVehicleMoving -> "Aguarde o veículo parar completamente."
+    uiState.testState == DynoRunState.PARADO && uiState.vehicleMotionState != VehicleMotionState.STOPPED -> "Aguarde o veículo parar completamente."
+    uiState.testState == DynoRunState.PARADO && !uiState.isStoppedForTwoSeconds -> "Aguardando 2 segundos parado..."
     uiState.testState == DynoRunState.PARADO && !uiState.isGpsReady -> "Aguardando sinal GPS..."
+    uiState.testState == DynoRunState.PARADO && !uiState.isPhoneStable -> "Estabilize o celular no suporte."
     uiState.testState == DynoRunState.AGUARDANDO_INICIO -> {
       if (uiState.gpsSpeedKmh >= uiState.startSpeedTriggerKmh - 8f) "Prepare-se."
       else "Acelere na marcha selecionada até ${uiState.startSpeedTriggerKmh.toInt()} km/h."
@@ -662,19 +666,65 @@ fun TestPreparationScreen(
               .weight(1f)
           )
 
-          // Instrução Única Abaixo do Velocímetro
-          Text(
-            text = singleDynamicInstruction,
-            style = MaterialTheme.typography.bodySmall.copy(
-              fontWeight = FontWeight.SemiBold,
-              fontSize = 12.sp
-            ),
-            color = if (uiState.hasPhoneMovedAfterCalib) DynoErrorRed else DynoTextSecondary,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(bottom = 2.dp)
-          )
+          // 6. LINHA DE DIAGNÓSTICO E INSTRUÇÃO (Requisito 6)
+          Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(bottom = 2.dp)
+          ) {
+            if (uiState.testState == DynoRunState.PARADO) {
+              if (isReadyToArm) {
+                Text(
+                  text = "Tudo pronto. Toque em iniciar.",
+                  style = MaterialTheme.typography.bodySmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.5.sp
+                  ),
+                  color = DynoSuccessGreen,
+                  textAlign = TextAlign.Center,
+                  maxLines = 1
+                )
+              } else {
+                Text(
+                  text = "Bloqueio atual: ${uiState.blockingReason}",
+                  style = MaterialTheme.typography.bodySmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp
+                  ),
+                  color = if (uiState.hasPhoneMovedAfterCalib) DynoErrorRed else DynoWarningYellow,
+                  textAlign = TextAlign.Center,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
+                )
+              }
+
+              // Linha de Telemetria e Diagnóstico Detalhado
+              Text(
+                text = "GPS: ${String.format(Locale.US, "%.1f", uiState.gpsSpeedKmh)} km/h (Média: ${String.format(Locale.US, "%.1f", uiState.avgGpsSpeedKmh)}) | ±${String.format(Locale.US, "%.1f", uiState.gpsAccuracyMeters)}m | ${uiState.gpsAgeMillis}ms | ${if (uiState.vehicleMotionState == VehicleMotionState.STOPPED) (if (uiState.isStoppedForTwoSeconds) "PARADO" else "PARANDO (2s)") else "MOVIMENTO"} | ${if (uiState.isPhoneStable) "ESTÁVEL" else "INSTÁVEL"}",
+                style = MaterialTheme.typography.labelSmall.copy(
+                  fontSize = 9.sp,
+                  fontFamily = FontFamily.Monospace
+                ),
+                color = DynoTextSecondary.copy(alpha = 0.8f),
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
+            } else {
+              Text(
+                text = singleDynamicInstruction,
+                style = MaterialTheme.typography.bodySmall.copy(
+                  fontWeight = FontWeight.SemiBold,
+                  fontSize = 12.sp
+                ),
+                color = DynoTextSecondary,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
+            }
+          }
         }
 
         // =========================================================================
@@ -763,7 +813,25 @@ fun TestPreparationScreen(
                 )
               }
 
-              // 2. Calibração
+              // 2. Precisão GPS
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Text(
+                  text = "Precisão:",
+                  style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                  color = DynoTextSecondary
+                )
+                Text(
+                  text = if (uiState.locationUpdateCount == 0) "--" else "±${String.format(Locale.US, "%.1f", uiState.gpsAccuracyMeters)} m",
+                  style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                  color = if (uiState.gpsAccuracyMeters <= 15f) DynoSuccessGreen else if (uiState.gpsAccuracyMeters <= 25f) DynoWarningYellow else DynoErrorRed
+                )
+              }
+
+              // 3. Calibração
               Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -781,7 +849,7 @@ fun TestPreparationScreen(
                 )
               }
 
-              // 3. Veículo
+              // 4. Veículo
               Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -792,14 +860,19 @@ fun TestPreparationScreen(
                   style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
                   color = DynoTextSecondary
                 )
+                val vehLabel = when {
+                  uiState.vehicleMotionState == VehicleMotionState.STOPPED && uiState.isStoppedForTwoSeconds -> "Parado"
+                  uiState.vehicleMotionState == VehicleMotionState.STOPPED -> "Parando (2s)"
+                  else -> "Em movimento"
+                }
                 Text(
-                  text = if (!isVehicleMoving) "Parado" else "Em movimento",
+                  text = vehLabel,
                   style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
-                  color = if (!isVehicleMoving) DynoSuccessGreen else DynoWarningYellow
+                  color = if (uiState.vehicleMotionState == VehicleMotionState.STOPPED && uiState.isStoppedForTwoSeconds) DynoSuccessGreen else DynoWarningYellow
                 )
               }
 
-              // 4. Celular
+              // 5. Celular
               Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -810,10 +883,16 @@ fun TestPreparationScreen(
                   style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
                   color = DynoTextSecondary
                 )
+                val phoneLabel = when {
+                  uiState.hasPhoneMovedAfterCalib -> "Recalibre"
+                  !uiState.isCalibrated -> "Aguardando"
+                  !uiState.isPhoneStable -> "Instável"
+                  else -> "Estável"
+                }
                 Text(
-                  text = if (uiState.hasPhoneMovedAfterCalib) "Recalibre" else if (uiState.isCalibrated) "Pronto" else "Aguardando",
+                  text = phoneLabel,
                   style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
-                  color = if (uiState.hasPhoneMovedAfterCalib) DynoErrorRed else if (uiState.isCalibrated) DynoSuccessGreen else DynoWarningYellow
+                  color = if (uiState.hasPhoneMovedAfterCalib) DynoErrorRed else if (uiState.isPhoneStable && uiState.isCalibrated) DynoSuccessGreen else DynoWarningYellow
                 )
               }
             }
@@ -934,9 +1013,12 @@ fun TestPreparationScreen(
         val startBtnText = when {
           isStartButtonMeasuring -> "MEDINDO"
           isStartButtonArmed -> "ARMADO — ${uiState.startSpeedTriggerKmh.toInt()} KM/H"
+          isStartClickable -> "INICIAR"
           !uiState.isCalibrated -> "CALIBRE PRIMEIRO"
-          isVehicleMoving -> "PARE O CARRO"
-          !uiState.isGpsReady -> "AGUARDANDO GPS"
+          uiState.locationUpdateCount == 0 || uiState.gpsAgeMillis > 5000L -> "AGUARDANDO GPS"
+          uiState.gpsAccuracyMeters > 25.0f -> "PRECISÃO GPS FRACA"
+          uiState.vehicleMotionState != VehicleMotionState.STOPPED || !uiState.isStoppedForTwoSeconds -> "PARE O CARRO"
+          !uiState.isPhoneStable -> "ESTABILIZE O CELULAR"
           else -> "INICIAR"
         }
 
