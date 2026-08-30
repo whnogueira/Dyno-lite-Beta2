@@ -67,6 +67,10 @@ data class TestPreparationUiState(
     val liveWheelPowerCv: Float = 0f,
     val liveEngineTorqueKgm: Float = 0f,
     val liveRpm: Int = 0,
+    val selectedGearIndex: Int = 2,
+    val availableGearRatios: List<Float> = listOf(3.78f, 2.12f, 1.46f, 1.03f, 0.86f, 0.73f),
+    val gearRatioUsed: Float = 1.46f,
+    val isGearValid: Boolean = true,
     val gpsAccuracyMeters: Float = 99f,
     val gpsAgeMillis: Long = 9999L,
     val locationUpdateCount: Int = 0,
@@ -90,7 +94,10 @@ data class TestPreparationUiState(
     val lastCompletedResultId: String? = null,
     val userMessage: String? = null,
     val diagnosticError: String? = null
-)
+) {
+    val selectedGearNumber: Int
+        get() = selectedGearIndex + 1
+}
 
 class TestPreparationViewModel(
     application: Application,
@@ -144,7 +151,58 @@ class TestPreparationViewModel(
         viewModelScope.launch {
             vehicleRepository.allVehicles.collect { list ->
                 val primary = list.firstOrNull { it.isPrimary } ?: list.firstOrNull()
-                _uiState.update { it.copy(activeVehicle = primary) }
+                val ratios = primary?.gearRatios?.takeIf { it.isNotEmpty() } ?: listOf(3.78f, 2.12f, 1.46f, 1.03f, 0.86f, 0.73f)
+
+                val preferredIndex = primary?.testGearIndex ?: 2
+                val validIndex = if (preferredIndex in ratios.indices) {
+                    preferredIndex
+                } else if (ratios.size >= 3) {
+                    2
+                } else {
+                    ratios.lastIndex.coerceAtLeast(0)
+                }
+
+                val ratio = ratios.getOrNull(validIndex) ?: 1.0f
+                val isRatioValid = ratio.isFinite() && ratio > 0f
+
+                _uiState.update { current ->
+                    current.copy(
+                        activeVehicle = primary,
+                        availableGearRatios = ratios,
+                        selectedGearIndex = validIndex,
+                        gearRatioUsed = ratio,
+                        isGearValid = isRatioValid
+                    )
+                }
+            }
+        }
+    }
+
+    fun selectTestGear(index: Int) {
+        if (_uiState.value.testState != DynoRunState.PARADO) return
+
+        val veh = _uiState.value.activeVehicle
+        val ratios = veh?.gearRatios ?: _uiState.value.availableGearRatios
+        if (index !in ratios.indices) return
+
+        val ratio = ratios.getOrNull(index) ?: 1.0f
+        val isRatioValid = ratio.isFinite() && ratio > 0f
+
+        _uiState.update {
+            it.copy(
+                selectedGearIndex = index,
+                gearRatioUsed = ratio,
+                isGearValid = isRatioValid
+            )
+        }
+
+        if (veh != null && veh.testGearIndex != index) {
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    vehicleRepository.insertOrUpdateVehicle(veh.copy(testGearIndex = index))
+                } catch (e: Exception) {
+                    Log.w(TAG, "Falha ao salvar preferência de marcha: ${e.message}")
+                }
             }
         }
     }
@@ -199,7 +257,14 @@ class TestPreparationViewModel(
     }
 
     fun armTest() {
-        if (_uiState.value.isReadyToArm) {
+        val state = _uiState.value
+        if (!state.isGearValid) {
+            _uiState.update {
+                it.copy(userMessage = "Relação da marcha selecionada inválida. Verifique o câmbio do veículo.")
+            }
+            return
+        }
+        if (state.isReadyToArm) {
             currentSessionId = UUID.randomUUID().toString()
             synchronized(samples) {
                 samples.clear()
@@ -247,10 +312,12 @@ class TestPreparationViewModel(
                 val isGpsReady = locationCount > 0 && gpsAge <= 5000L && accuracy <= 25.0f
 
                 val isCalibrated = _uiState.value.isCalibrated
+                val isGearValid = _uiState.value.isGearValid
                 val currentState = _uiState.value.testState
 
                 val blockingReason = when {
                     !isCalibrated -> "Aguardando calibração"
+                    !isGearValid -> "Relação de marcha inválida"
                     locationCount == 0 || gpsAge > 5000L -> "Aguardando sinal GPS"
                     accuracy > 25.0f -> "Precisão GPS insuficiente"
                     motionState != VehicleMotionState.STOPPED || !isStopped2s -> "Aguardando veículo parar"
@@ -259,6 +326,7 @@ class TestPreparationViewModel(
                 }
 
                 val isReadyToArm = isCalibrated &&
+                    isGearValid &&
                     isGpsReady &&
                     motionState == VehicleMotionState.STOPPED &&
                     isStopped2s &&
@@ -289,7 +357,8 @@ class TestPreparationViewModel(
                 val wheelPowerCv = (wheelPowerWatts / 735.5f).finiteOrDefault(0f).coerceAtLeast(0f)
                 val enginePowerCv = (wheelPowerCv / max(1.0f - (veh.drivetrainLossPercent / 100.0f), 0.5f)).finiteOrDefault(0f).coerceAtLeast(0f)
 
-                val liveRpm = veh.calculateRpmFromSpeedKmh(finalSpeed)
+                val currentSelectedGearIndex = _uiState.value.selectedGearIndex
+                val liveRpm = veh.calculateRpmFromSpeedKmh(finalSpeed, gearIndex = currentSelectedGearIndex)
                 val engineTorqueKgm = if (liveRpm > 0) ((enginePowerCv * 716.2f) / liveRpm).finiteOrDefault(0f).coerceAtLeast(0f) else 0f
 
                 _uiState.update { current ->
@@ -353,6 +422,8 @@ class TestPreparationViewModel(
         stopSensorsAndGps()
         val sessionId = currentSessionId ?: UUID.randomUUID().toString()
         val veh = _uiState.value.activeVehicle ?: Vehicle()
+        val selectedGearIdx = _uiState.value.selectedGearIndex
+        val effectiveVehicleForRun = veh.copy(testGearIndex = selectedGearIdx)
         val elapsedSecs = _uiState.value.runElapsedSeconds
 
         viewModelScope.launch {
@@ -364,8 +435,8 @@ class TestPreparationViewModel(
                 // 2. Gravar sessão pendente no banco antes de qualquer cálculo
                 val pendingSession = PendingSession(
                     sessionId = sessionId,
-                    vehicleId = veh.id,
-                    vehicleName = veh.name,
+                    vehicleId = effectiveVehicleForRun.id,
+                    vehicleName = effectiveVehicleForRun.name,
                     startTimeMs = startMs,
                     endTimeMs = endMs,
                     sampleCount = recordedSamples.size,
@@ -378,20 +449,20 @@ class TestPreparationViewModel(
                 val startSpeed = recordedSamples.firstOrNull()?.speedKmh?.finiteOrDefault(0f) ?: 0f
                 val maxSpeed = recordedSamples.maxOfOrNull { it.speedKmh.finiteOrDefault(0f) } ?: 0f
                 Log.i(TAG, "=== FINALIZAÇÃO ATÔMICA DA SESSÃO ===")
-                Log.i(TAG, "sessionId: $sessionId")
+                Log.i(TAG, "sessionId: $sessionId | marcha: ${selectedGearIdx + 1}ª (índice $selectedGearIdx)")
                 Log.i(TAG, "quantidade de amostras: ${recordedSamples.size}")
                 Log.i(TAG, "timestamp inicial: $startMs | final: $endMs")
                 Log.i(TAG, "velocidade inicial GPS: $startSpeed km/h | máxima: $maxSpeed km/h")
 
-                // 4. Validar e Calcular resultado
+                // 4. Validar e Calcular resultado com a marcha selecionada
                 stage = "CALC_RESULT"
                 val calculatedResult = RunProcessor.processRun(
                     sessionId = sessionId,
-                    vehicle = veh,
+                    vehicle = effectiveVehicleForRun,
                     rawSamples = recordedSamples,
                     durationOverride = elapsedSecs
                 )
-                Log.i(TAG, "potência calculada: ${calculatedResult.peakEnginePowerCv} cv | torque calculado: ${calculatedResult.peakEngineTorqueKgm} kgfm")
+                Log.i(TAG, "potência calculada: ${calculatedResult.peakEnginePowerCv} cv | torque calculado: ${calculatedResult.peakEngineTorqueKgm} kgfm | marcha salva: ${calculatedResult.gearUsed} (${calculatedResult.gearRatioUsed})")
 
                 // 5. Salvar resultado atômico
                 stage = "SAVE_ATOMIC"
@@ -416,7 +487,7 @@ class TestPreparationViewModel(
                             it.copy(
                                 testState = DynoRunState.PARADO,
                                 userMessage = "Não foi possível finalizar a passagem. As amostras foram preservadas.",
-                                diagnosticError = "testId=$sessionId | etapa=${saveResult.stage} | exceção=${saveResult.exceptionType} | mensagem=${saveResult.technicalMessage} | amostras=${recordedSamples.size} | app=v1.0.2 (2)"
+                                diagnosticError = "testId=$sessionId | etapa=${saveResult.stage} | exceção=${saveResult.exceptionType} | mensagem=${saveResult.technicalMessage} | amostras=${recordedSamples.size} | app=v1.0.3 (3)"
                             )
                         }
                     }
@@ -443,7 +514,7 @@ class TestPreparationViewModel(
                     it.copy(
                         testState = DynoRunState.PARADO,
                         userMessage = "Não foi possível finalizar a passagem. As amostras foram preservadas.",
-                        diagnosticError = "testId=$sessionId | etapa=$stage | exceção=${e.javaClass.simpleName} | mensagem=${e.message} | amostras=${recordedSamples.size} | app=v1.0.2 (2)"
+                        diagnosticError = "testId=$sessionId | etapa=$stage | exceção=${e.javaClass.simpleName} | mensagem=${e.message} | amostras=${recordedSamples.size} | app=v1.0.3 (3)"
                     )
                 }
             }

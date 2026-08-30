@@ -61,23 +61,33 @@ data class Vehicle(
         get() = curbWeightKg + driverWeightKg + additionalWeightKg
 
     val testGearRatio: Float
-        get() = gearRatios.getOrElse(testGearIndex) { 1.46f }
+        get() = gearRatios.getOrNull(testGearIndex)?.takeIf { it.isFinite() && it > 0f } ?: 1.46f
 
     val totalGearReduction: Float
         get() = testGearRatio * finalDriveRatio
 
-    fun calculateRpmFromSpeedKmh(speedKmh: Float): Int {
+    fun calculateRpmFromSpeedKmh(speedKmh: Float, gearIndex: Int = testGearIndex): Int {
         if (speedKmh <= 0f) return 800
+        val ratio = gearRatios.getOrNull(gearIndex)?.takeIf { it.isFinite() && it > 0f } ?: testGearRatio
+        val totalReduction = ratio * finalDriveRatio
+        if (!totalReduction.isFinite() || totalReduction <= 0f) return 800
+        val radius = tireSpec.rollingRadiusMeters
+        if (!radius.isFinite() || radius <= 0f) return 800
         val speedMps = speedKmh / 3.6f
-        val wheelRps = speedMps / (2.0 * Math.PI * tireSpec.rollingRadiusMeters)
-        val engineRps = wheelRps * totalGearReduction
+        val wheelRps = speedMps / (2.0 * Math.PI * radius)
+        val engineRps = wheelRps * totalReduction
         return (engineRps * 60.0).toInt().coerceIn(600, 9500)
     }
 
-    fun calculateSpeedKmhFromRpm(rpm: Int): Float {
+    fun calculateSpeedKmhFromRpm(rpm: Int, gearIndex: Int = testGearIndex): Float {
+        val ratio = gearRatios.getOrNull(gearIndex)?.takeIf { it.isFinite() && it > 0f } ?: testGearRatio
+        val totalReduction = ratio * finalDriveRatio
+        if (!totalReduction.isFinite() || totalReduction <= 0f) return 0f
+        val radius = tireSpec.rollingRadiusMeters
+        if (!radius.isFinite() || radius <= 0f) return 0f
         val engineRps = rpm / 60.0
-        val wheelRps = engineRps / totalGearReduction
-        val speedMps = wheelRps * (2.0 * Math.PI * tireSpec.rollingRadiusMeters)
+        val wheelRps = engineRps / totalReduction
+        val speedMps = wheelRps * (2.0 * Math.PI * radius)
         return (speedMps * 3.6).toFloat().coerceAtLeast(0f)
     }
 }

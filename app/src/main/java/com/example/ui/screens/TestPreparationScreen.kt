@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -210,6 +211,97 @@ fun TestPreparationScreen(
                 }
             }
 
+            // Seletor de Marcha do Teste
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = DynoCardBg),
+                border = BorderStroke(1.dp, DynoCardBorder)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Speed,
+                                contentDescription = null,
+                                tint = DynoPowerCyan,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "MARCHA DO TESTE",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.5.sp
+                                ),
+                                color = DynoTextSecondary
+                            )
+                        }
+
+                        Text(
+                            text = "${uiState.selectedGearNumber}ª Marcha (${String.format(Locale.US, "%.2f", uiState.gearRatioUsed)}:1)",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = DynoPowerCyan
+                        )
+                    }
+
+                    // Botões de Marchas (1ª a 6ª conforme disponíveis no veículo)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val totalGears = uiState.availableGearRatios.size.coerceAtLeast(1)
+                        for (gearIndex in 0 until totalGears) {
+                            val isSelected = (gearIndex == uiState.selectedGearIndex)
+                            val gearNumber = gearIndex + 1
+                            val isRunning = uiState.testState != DynoRunState.PARADO
+
+                            Button(
+                                onClick = { viewModel.selectTestGear(gearIndex) },
+                                enabled = !isRunning,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(42.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isSelected) DynoPowerCyan else DynoCardSurface,
+                                    contentColor = if (isSelected) DynoBg else DynoTextSecondary,
+                                    disabledContainerColor = if (isSelected) DynoPowerCyan.copy(alpha = 0.6f) else DynoCardSurface.copy(alpha = 0.4f),
+                                    disabledContentColor = if (isSelected) DynoBg else DynoTextMuted
+                                ),
+                                border = BorderStroke(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) DynoPowerCyan else DynoCardBorder
+                                ),
+                                contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp)
+                            ) {
+                                Text(
+                                    text = "${gearNumber}ª",
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             // Diagnóstico e Instrução Dinâmica
             if (uiState.userMessage != null) {
                 Card(
@@ -287,7 +379,7 @@ fun TestPreparationScreen(
                         )
                     } else if (uiState.testState == DynoRunState.AGUARDANDO_INICIO) {
                         Text(
-                            text = "ARMADO: ACELERE TUDO A PARTIR DE ${uiState.startSpeedTriggerKmh.toInt()} KM/H EM 3ª MARCHA",
+                            text = "ARMADO: ACELERE TUDO A PARTIR DE ${uiState.startSpeedTriggerKmh.toInt()} KM/H EM ${uiState.selectedGearNumber}ª MARCHA",
                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Black),
                             color = DynoWarningYellow,
                             textAlign = TextAlign.Center
