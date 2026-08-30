@@ -65,9 +65,9 @@ class RunProcessorTest {
         assertEquals("test_session_200", result.id)
         assertEquals("test_gti", result.vehicleId)
         assertEquals(200, result.samples.size)
-        assertTrue(result.peakEnginePowerCv!! > 180f)
-        assertTrue(result.peakEngineTorqueKgm!! >= 30f)
-        assertTrue(result.peakLongitudinalG!! >= 0.35f)
+        assertTrue(result.peakEnginePowerCv > 180f)
+        assertTrue(result.peakEngineTorqueKgm >= 30f)
+        assertTrue(result.peakLongitudinalG >= 0.35f)
         assertEquals("VALID", result.qualityStatus)
         assertNull(result.technicalFailureReason)
     }
@@ -106,9 +106,9 @@ class RunProcessorTest {
         )
 
         assertNotNull(result)
-        assertFalse(result.peakEnginePowerCv!!.isNaN())
-        assertFalse(result.peakEnginePowerCv!!.isInfinite())
-        assertTrue(result.peakEnginePowerCv!! >= 0f)
+        assertFalse(result.peakEnginePowerCv.isNaN())
+        assertFalse(result.peakEnginePowerCv.isInfinite())
+        assertTrue(result.peakEnginePowerCv >= 0f)
     }
 
     @Test

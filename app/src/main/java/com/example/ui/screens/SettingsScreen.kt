@@ -147,7 +147,7 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                         color = DynoPowerCyan
                     )
-                    Text("Versão 1.0.0 (Build 2026)", style = MaterialTheme.typography.bodySmall, color = DynoTextSecondary)
+                    Text("Versão 1.0.2 (Build 2 - Commit 4abc266-fix)", style = MaterialTheme.typography.bodySmall, color = DynoTextSecondary)
                     Text("Dinamômetro veicular inercial e simulador termodinâmico de alta precisão.", style = MaterialTheme.typography.bodySmall, color = DynoTextSecondary)
                 }
             }

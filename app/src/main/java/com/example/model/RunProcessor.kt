@@ -1,11 +1,17 @@
 package com.example.model
 
 import android.util.Log
-import kotlin.math.abs
+import org.json.JSONObject
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sqrt
+
+fun Float.jsonSafe(default: Float = 0f): Float =
+    if (isFinite()) this else default
+
+fun Double.jsonSafe(default: Double = 0.0): Double =
+    if (isFinite()) this else default
 
 fun Float.finiteOrNull(): Float? = if (isFinite()) this else null
 fun Float?.finiteOrDefault(default: Float = 0f): Float = if (this != null && this.isFinite()) this else default
@@ -13,28 +19,62 @@ fun Float?.finiteOrDefault(default: Float = 0f): Float = if (this != null && thi
 fun Double.finiteOrNull(): Double? = if (isFinite()) this else null
 fun Double?.finiteOrDefault(default: Double = 0.0): Double = if (this != null && this.isFinite()) this else default
 
+fun createConfigurationSnapshotSafe(
+    result: RunResult
+): String {
+    return try {
+        JSONObject().apply {
+            put("totalMassKg", result.totalVehicleMassKg.toDouble().jsonSafe())
+            put("gearUsed", result.gearUsed.ifBlank { "Não informado" })
+            put("gearRatio", result.gearRatioUsed.toDouble().jsonSafe(1.0))
+            put("finalDrive", result.finalDriveUsed.toDouble().jsonSafe(1.0))
+            put("drivetrainLossPercent", result.drivetrainLossPercent.toDouble().jsonSafe())
+            put("cd", result.cdUsed.toDouble().jsonSafe(0.34))
+            put("frontalAreaM2", result.frontalAreaUsed.toDouble().jsonSafe(2.10))
+            put("crr", result.crrUsed.toDouble().jsonSafe(0.015))
+            put("airDensityKgM3", result.airDensityUsed.toDouble().jsonSafe(1.225))
+            put("slopeMode", result.slopeModeUsed.ifBlank { "FLAT" })
+            put("slopePercent", result.slopePercentUsed.toDouble().jsonSafe())
+            put("startSpeedKmh", result.startSpeedKmh.toDouble().jsonSafe())
+            put("endSpeedKmh", result.endSpeedKmh.toDouble().jsonSafe())
+        }.toString()
+    } catch (e: Exception) {
+        Log.e(
+            "DynoStorage",
+            "Falha ao criar snapshot: ${e.javaClass.simpleName}: ${e.message}",
+            e
+        )
+        "{}"
+    }
+}
+
 object RunProcessor {
     private const val TAG = "DynoMobile"
 
-    fun sanitizeSample(sample: RunSample): RunSample {
+    fun sanitizeSample(sample: RunSample, sessionId: String = "", index: Int = 0): RunSample {
+        val deterministicId = if (sample.sampleId.isNotBlank()) sample.sampleId else if (sessionId.isNotBlank()) "$sessionId-$index" else "$index"
+        val deterministicIndex = if (sample.sampleIndex > 0) sample.sampleIndex else index
+
         return sample.copy(
+            sampleId = deterministicId,
+            sampleIndex = deterministicIndex,
             timestampNs = if (sample.timestampNs > 0L) sample.timestampNs else System.nanoTime(),
-            elapsedSeconds = sample.elapsedSeconds.finiteOrDefault(0f).coerceAtLeast(0f),
-            speedKmh = sample.speedKmh.finiteOrDefault(0f).coerceAtLeast(0f),
-            accelerationMps2 = sample.accelerationMps2.finiteOrDefault(0f),
-            longitudinalG = sample.longitudinalG.finiteOrDefault(0f).coerceIn(-3.0f, 3.0f),
+            elapsedSeconds = sample.elapsedSeconds.jsonSafe(0f).coerceAtLeast(0f),
+            speedKmh = sample.speedKmh.jsonSafe(0f).coerceAtLeast(0f),
+            accelerationMps2 = sample.accelerationMps2.jsonSafe(0f),
+            longitudinalG = sample.longitudinalG.jsonSafe(0f).coerceIn(-3.0f, 3.0f),
             estimatedRpm = sample.estimatedRpm.coerceIn(0, 15000),
-            wheelPowerCv = sample.wheelPowerCv.finiteOrDefault(0f).coerceAtLeast(0f),
-            enginePowerCv = sample.enginePowerCv.finiteOrDefault(0f).coerceAtLeast(0f),
-            wheelTorqueKgm = sample.wheelTorqueKgm.finiteOrDefault(0f).coerceAtLeast(0f),
-            engineTorqueKgm = sample.engineTorqueKgm.finiteOrDefault(0f).coerceAtLeast(0f),
-            aeroLossCv = sample.aeroLossCv.finiteOrDefault(0f).coerceAtLeast(0f),
-            rollLossCv = sample.rollLossCv.finiteOrDefault(0f).coerceAtLeast(0f),
-            drivetrainLossCv = sample.drivetrainLossCv.finiteOrDefault(0f).coerceAtLeast(0f),
-            inertialLossCv = sample.inertialLossCv.finiteOrDefault(0f).coerceAtLeast(0f),
-            gpsAccuracyMeters = sample.gpsAccuracyMeters.finiteOrDefault(99f).coerceAtLeast(0f),
-            latitude = sample.latitude.finiteOrDefault(0.0),
-            longitude = sample.longitude.finiteOrDefault(0.0)
+            wheelPowerCv = sample.wheelPowerCv.jsonSafe(0f).coerceAtLeast(0f),
+            enginePowerCv = sample.enginePowerCv.jsonSafe(0f).coerceAtLeast(0f),
+            wheelTorqueKgm = sample.wheelTorqueKgm.jsonSafe(0f).coerceAtLeast(0f),
+            engineTorqueKgm = sample.engineTorqueKgm.jsonSafe(0f).coerceAtLeast(0f),
+            aeroLossCv = sample.aeroLossCv.jsonSafe(0f).coerceAtLeast(0f),
+            rollLossCv = sample.rollLossCv.jsonSafe(0f).coerceAtLeast(0f),
+            drivetrainLossCv = sample.drivetrainLossCv.jsonSafe(0f).coerceAtLeast(0f),
+            inertialLossCv = sample.inertialLossCv.jsonSafe(0f).coerceAtLeast(0f),
+            gpsAccuracyMeters = sample.gpsAccuracyMeters.jsonSafe(99f).coerceAtLeast(0f),
+            latitude = sample.latitude.jsonSafe(0.0),
+            longitude = sample.longitude.jsonSafe(0.0)
         )
     }
 
@@ -55,17 +95,19 @@ object RunProcessor {
             driverWeightKg = 80f
         )
 
-        // 1. Sanitização rigorosa de cada amostra
-        val sanitizedSamples = rawSamples.map { sanitizeSample(it) }
+        // 1. Sanitização rigorosa de cada amostra com ID determinístico
+        val sanitizedSamples = rawSamples.mapIndexed { idx, s ->
+            sanitizeSample(s, sessionId = sessionId, index = idx)
+        }
 
         val startTimestampNs = sanitizedSamples.firstOrNull()?.timestampNs ?: 0L
         val endTimestampNs = sanitizedSamples.lastOrNull()?.timestampNs ?: startTimestampNs
         val computedDuration = if (endTimestampNs > startTimestampNs) {
-            ((endTimestampNs - startTimestampNs) / 1_000_000_000f).finiteOrDefault(0f)
+            ((endTimestampNs - startTimestampNs) / 1_000_000_000f).jsonSafe(0f)
         } else {
             (sanitizedSamples.size * 0.05f)
         }
-        val durationSeconds = durationOverride?.finiteOrDefault(computedDuration)?.coerceAtLeast(0.01f) ?: computedDuration.coerceAtLeast(0.01f)
+        val durationSeconds = durationOverride?.jsonSafe(computedDuration)?.coerceAtLeast(0.01f) ?: computedDuration.coerceAtLeast(0.01f)
 
         val startSpeedKmh = sanitizedSamples.firstOrNull()?.speedKmh ?: 0f
         val endSpeedKmh = sanitizedSamples.lastOrNull()?.speedKmh ?: 0f
@@ -73,7 +115,7 @@ object RunProcessor {
 
         Log.d(TAG, "Processando sessão $sessionId: ${sanitizedSamples.size} amostras | Vel Inicial: $startSpeedKmh | Vel Máx: $maxSpeedKmh | Duração: $durationSeconds s")
 
-        // 2. Cálculo / Recálculo de Potência e Torque para amostras que possam estar zeradas ou inconsistentes
+        // 2. Cálculo / Recálculo de Potência e Torque para amostras
         var isPartialResult = false
         var technicalReason: String? = null
 
@@ -85,24 +127,24 @@ object RunProcessor {
             // Se amostra não tem potência calculada válida, tentar derivar fisicamente
             if (samplePower <= 0f && sample.speedKmh > 5f && sample.longitudinalG > 0f) {
                 try {
-                    val speedMps = (sample.speedKmh / 3.6f).finiteOrDefault(0f)
+                    val speedMps = (sample.speedKmh / 3.6f).jsonSafe(0f)
                     val massKg = effectiveVehicle.totalMassKg.coerceIn(400f, 10000f)
-                    val accelMps2 = (sample.longitudinalG * 9.81f).finiteOrDefault(0f).coerceAtLeast(0f)
+                    val accelMps2 = (sample.longitudinalG * 9.81f).jsonSafe(0f).coerceAtLeast(0f)
 
-                    val areaM2 = effectiveVehicle.frontalAreaM2.finiteOrDefault(2.15f).coerceIn(1.0f, 5.0f)
-                    val cd = effectiveVehicle.dragCoefficientCd.finiteOrDefault(0.31f).coerceIn(0.15f, 1.2f)
+                    val areaM2 = effectiveVehicle.frontalAreaM2.jsonSafe(2.15f).coerceIn(1.0f, 5.0f)
+                    val cd = effectiveVehicle.dragCoefficientCd.jsonSafe(0.31f).coerceIn(0.15f, 1.2f)
                     val fAero = 0.5f * 1.2f * areaM2 * cd * speedMps.pow(2)
                     val fRoll = massKg * 9.81f * 0.015f
                     val fInertia = massKg * accelMps2
                     val fTotal = (fInertia + fAero + fRoll).coerceAtLeast(0f)
 
                     val wheelWatts = fTotal * speedMps
-                    val wheelCv = ((wheelWatts / 735.5f)).finiteOrDefault(0f)
-                    val lossPct = effectiveVehicle.drivetrainLossPercent.finiteOrDefault(15f).coerceIn(0f, 50f)
-                    val engCv = (wheelCv / max(1.0f - (lossPct / 100f), 0.5f)).finiteOrDefault(0f)
+                    val wheelCv = ((wheelWatts / 735.5f)).jsonSafe(0f)
+                    val lossPct = effectiveVehicle.drivetrainLossPercent.jsonSafe(15f).coerceIn(0f, 50f)
+                    val engCv = (wheelCv / max(1.0f - (lossPct / 100f), 0.5f)).jsonSafe(0f)
 
                     val rpm = sample.estimatedRpm.takeIf { it > 500 } ?: effectiveVehicle.calculateRpmFromSpeedKmh(sample.speedKmh)
-                    val torqueKgm = if (rpm > 0) ((engCv * 716.2f) / rpm).finiteOrDefault(0f) else 0f
+                    val torqueKgm = if (rpm > 0) ((engCv * 716.2f) / rpm).jsonSafe(0f) else 0f
 
                     sampleWheelPower = wheelCv
                     samplePower = engCv
@@ -113,22 +155,22 @@ object RunProcessor {
             }
 
             sample.copy(
-                enginePowerCv = samplePower.finiteOrDefault(0f),
-                wheelPowerCv = sampleWheelPower.finiteOrDefault(0f),
-                engineTorqueKgm = sampleTorque.finiteOrDefault(0f)
+                enginePowerCv = samplePower.jsonSafe(0f),
+                wheelPowerCv = sampleWheelPower.jsonSafe(0f),
+                engineTorqueKgm = sampleTorque.jsonSafe(0f)
             )
         }
 
-        var peakEngineCv = processedSamples.maxOfOrNull { it.enginePowerCv.finiteOrDefault(0f) } ?: 0f
-        var peakWheelCv = processedSamples.maxOfOrNull { it.wheelPowerCv.finiteOrDefault(0f) } ?: 0f
-        var peakTorque = processedSamples.maxOfOrNull { it.engineTorqueKgm.finiteOrDefault(0f) } ?: 0f
-        val peakG = processedSamples.maxOfOrNull { it.longitudinalG.finiteOrDefault(0f) } ?: 0f
+        val peakEngineCv = processedSamples.maxOfOrNull { it.enginePowerCv.jsonSafe(0f) } ?: 0f
+        val peakWheelCv = processedSamples.maxOfOrNull { it.wheelPowerCv.jsonSafe(0f) } ?: 0f
+        val peakTorque = processedSamples.maxOfOrNull { it.engineTorqueKgm.jsonSafe(0f) } ?: 0f
+        val peakG = processedSamples.maxOfOrNull { it.longitudinalG.jsonSafe(0f) } ?: 0f
 
-        val peakSample = processedSamples.maxByOrNull { it.enginePowerCv.finiteOrDefault(0f) }
+        val peakSample = processedSamples.maxByOrNull { it.enginePowerCv.jsonSafe(0f) }
         val peakRpm = peakSample?.estimatedRpm?.coerceIn(0, 15000) ?: 0
-        val peakSpeed = peakSample?.speedKmh?.finiteOrDefault(0f) ?: 0f
+        val peakSpeed = peakSample?.speedKmh?.jsonSafe(0f) ?: 0f
 
-        val peakTorqueSample = processedSamples.maxByOrNull { it.engineTorqueKgm.finiteOrDefault(0f) }
+        val peakTorqueSample = processedSamples.maxByOrNull { it.engineTorqueKgm.jsonSafe(0f) }
         val peakTorqueRpm = peakTorqueSample?.estimatedRpm?.coerceIn(0, 15000) ?: 0
 
         if (peakEngineCv <= 0f && peakTorque <= 0f) {
@@ -142,36 +184,50 @@ object RunProcessor {
         val t80to120 = calculateSpeedIntervalTime(processedSamples, 80f, 120f)
         val t100to200 = calculateSpeedIntervalTime(processedSamples, 100f, 200f)
 
-        Log.i(TAG, "Resultado da Sessão $sessionId calculado com sucesso -> Potência: $peakEngineCv cv @ $peakRpm RPM | Torque: $peakTorque kgfm | G: $peakG")
+        val gearRatio = effectiveVehicle.gearRatios.getOrNull(effectiveVehicle.testGearIndex) ?: 1.0f
 
-        return RunResult(
+        val preliminaryResult = RunResult(
             id = sessionId,
             vehicleId = effectiveVehicle.id,
             vehicleName = effectiveVehicle.name,
             testDateTimestamp = System.currentTimeMillis(),
-            peakEnginePowerCv = peakEngineCv.finiteOrNull() ?: 0f,
+            peakEnginePowerCv = peakEngineCv.jsonSafe(0f),
             peakEnginePowerRpm = peakRpm,
-            peakEnginePowerSpeedKmh = peakSpeed.finiteOrNull() ?: 0f,
-            peakWheelPowerCv = peakWheelCv.finiteOrNull() ?: 0f,
-            peakEngineTorqueKgm = peakTorque.finiteOrNull() ?: 0f,
+            peakEnginePowerSpeedKmh = peakSpeed.jsonSafe(0f),
+            peakWheelPowerCv = peakWheelCv.jsonSafe(0f),
+            peakEngineTorqueKgm = peakTorque.jsonSafe(0f),
             peakEngineTorqueRpm = peakTorqueRpm,
-            peakLongitudinalG = peakG.finiteOrNull() ?: 0f,
-            startSpeedKmh = startSpeedKmh.finiteOrNull() ?: 0f,
-            endSpeedKmh = endSpeedKmh.finiteOrNull() ?: 0f,
+            peakLongitudinalG = peakG.jsonSafe(0f),
+            startSpeedKmh = startSpeedKmh.jsonSafe(0f),
+            endSpeedKmh = endSpeedKmh.jsonSafe(0f),
             testGear = (effectiveVehicle.testGearIndex + 1).coerceIn(1, 8),
-            durationSeconds = durationSeconds.finiteOrNull() ?: 0f,
-            zeroToHundredSeconds = t0to100?.finiteOrNull(),
-            eightyToOneTwentySeconds = t80to120?.finiteOrNull(),
-            oneHundredToTwoHundredSeconds = t100to200?.finiteOrNull(),
+            durationSeconds = durationSeconds.jsonSafe(0f),
+            zeroToHundredSeconds = t0to100?.jsonSafe(),
+            eightyToOneTwentySeconds = t80to120?.jsonSafe(),
+            oneHundredToTwoHundredSeconds = t100to200?.jsonSafe(),
             quarterMileSeconds = null,
             quarterMileSpeedKmh = null,
             temperatureCelsius = 25.0f,
             pressureHpa = 1013.25f,
             saeCorrectionFactor = 1.0f,
+            totalVehicleMassKg = effectiveVehicle.totalMassKg.jsonSafe(1350f),
+            gearUsed = "${effectiveVehicle.testGearIndex + 1}ª Marcha",
+            gearRatioUsed = gearRatio.jsonSafe(1.0f),
+            finalDriveUsed = effectiveVehicle.finalDriveRatio.jsonSafe(1.0f),
+            drivetrainLossPercent = effectiveVehicle.drivetrainLossPercent.jsonSafe(15.0f),
+            cdUsed = effectiveVehicle.dragCoefficientCd.jsonSafe(0.31f),
+            frontalAreaUsed = effectiveVehicle.frontalAreaM2.jsonSafe(2.15f),
+            crrUsed = 0.015f,
+            airDensityUsed = 1.225f,
+            slopeModeUsed = "FLAT",
+            slopePercentUsed = 0.0f,
             samples = processedSamples,
             qualityStatus = if (isPartialResult) "DADOS INSUFICIENTES" else "VALID",
             technicalFailureReason = technicalReason
         )
+
+        val snapshotJson = createConfigurationSnapshotSafe(preliminaryResult)
+        return preliminaryResult.copy(configurationSnapshotJson = snapshotJson)
     }
 
     private fun calculateSpeedIntervalTime(
@@ -189,7 +245,7 @@ object RunProcessor {
         val startSample = samples[startIndex]
         val endSample = samples[endIndex]
 
-        val timeDiff = (endSample.elapsedSeconds - startSample.elapsedSeconds).finiteOrDefault(0f)
+        val timeDiff = (endSample.elapsedSeconds - startSample.elapsedSeconds).jsonSafe(0f)
         return if (timeDiff > 0.1f && timeDiff < 60.0f) timeDiff else null
     }
 }

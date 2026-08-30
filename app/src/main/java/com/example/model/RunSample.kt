@@ -1,6 +1,8 @@
 package com.example.model
 
 data class RunSample(
+    val sampleId: String = "",
+    val sampleIndex: Int = 0,
     val timestampNs: Long = 0L,
     val elapsedSeconds: Float = 0f,
     val speedKmh: Float = 0f,

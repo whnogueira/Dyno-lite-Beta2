@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
+import com.example.model.SaveRunResult
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -192,11 +193,14 @@ fun HomeScreen(
                                                     vehicle = activeVehicle
                                                 )
                                                 isRecovering = false
-                                                recoveryResult.onSuccess { res ->
-                                                    Toast.makeText(context, "Sessão recuperada com sucesso!", Toast.LENGTH_SHORT).show()
-                                                    onNavigateToResults(res.id)
-                                                }.onFailure { err ->
-                                                    Toast.makeText(context, "Falha na recuperação: ${err.message}", Toast.LENGTH_LONG).show()
+                                                when (recoveryResult) {
+                                                    is SaveRunResult.Success -> {
+                                                        Toast.makeText(context, "Sessão recuperada com sucesso!", Toast.LENGTH_SHORT).show()
+                                                        onNavigateToResults(recoveryResult.resultId)
+                                                    }
+                                                    is SaveRunResult.Failure -> {
+                                                        Toast.makeText(context, "Falha na recuperação (${recoveryResult.stage}): ${recoveryResult.technicalMessage}", Toast.LENGTH_LONG).show()
+                                                    }
                                                 }
                                             }
                                         }
@@ -507,6 +511,8 @@ fun HomeScreen(
                     DiagnosticRow(label = "Etapa com Falha:", value = session.errorStage ?: "Não especificada")
                     DiagnosticRow(label = "Exceção:", value = session.errorExceptionType ?: "Nenhuma")
                     DiagnosticRow(label = "Detalhe do Erro:", value = session.errorMessage ?: "Sem mensagem adicional")
+                    DiagnosticRow(label = "Versão do App:", value = "v1.0.2 (Build 2)")
+                    DiagnosticRow(label = "Commit:", value = "4abc266-fix")
                     if (session.invalidField != null) {
                         DiagnosticRow(label = "Campo Inválido:", value = session.invalidField)
                     }
@@ -525,11 +531,14 @@ fun HomeScreen(
                                     vehicle = activeVehicle
                                 )
                                 isRecovering = false
-                                recoveryResult.onSuccess { res ->
-                                    Toast.makeText(context, "Sessão recuperada com sucesso!", Toast.LENGTH_SHORT).show()
-                                    onNavigateToResults(res.id)
-                                }.onFailure { err ->
-                                    Toast.makeText(context, "Falha na recuperação: ${err.message}", Toast.LENGTH_LONG).show()
+                                when (recoveryResult) {
+                                    is SaveRunResult.Success -> {
+                                        Toast.makeText(context, "Sessão recuperada com sucesso!", Toast.LENGTH_SHORT).show()
+                                        onNavigateToResults(recoveryResult.resultId)
+                                    }
+                                    is SaveRunResult.Failure -> {
+                                        Toast.makeText(context, "Falha na recuperação (${recoveryResult.stage}): ${recoveryResult.technicalMessage}", Toast.LENGTH_LONG).show()
+                                    }
                                 }
                             }
                         }

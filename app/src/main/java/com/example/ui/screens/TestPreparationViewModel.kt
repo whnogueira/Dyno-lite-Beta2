@@ -384,7 +384,7 @@ class TestPreparationViewModel(
                 Log.i(TAG, "velocidade inicial GPS: $startSpeed km/h | máxima: $maxSpeed km/h")
 
                 // 4. Validar e Calcular resultado
-                stage = "Cálculo do Resultado"
+                stage = "CALC_RESULT"
                 val calculatedResult = RunProcessor.processRun(
                     sessionId = sessionId,
                     vehicle = veh,
@@ -393,22 +393,33 @@ class TestPreparationViewModel(
                 )
                 Log.i(TAG, "potência calculada: ${calculatedResult.peakEnginePowerCv} cv | torque calculado: ${calculatedResult.peakEngineTorqueKgm} kgfm")
 
-                // 5. Salvar resultado
-                stage = "Persistência do Resultado"
-                runResultRepository.insertResult(calculatedResult)
+                // 5. Salvar resultado atômico
+                stage = "SAVE_ATOMIC"
+                val saveResult = runResultRepository.saveRunResultAtomic(
+                    run = calculatedResult,
+                    pendingSessionId = sessionId
+                )
 
-                // 6. Marcar sessão como finalizada
-                stage = "Finalização da Sessão"
-                runResultRepository.markSessionFinalized(sessionId)
-
-                // 7. Atualizar UI
-                _uiState.update {
-                    it.copy(
-                        testState = DynoRunState.CONCLUIDO,
-                        lastCompletedResultId = calculatedResult.id,
-                        userMessage = null,
-                        diagnosticError = null
-                    )
+                when (saveResult) {
+                    is com.example.model.SaveRunResult.Success -> {
+                        _uiState.update {
+                            it.copy(
+                                testState = DynoRunState.CONCLUIDO,
+                                lastCompletedResultId = saveResult.resultId,
+                                userMessage = null,
+                                diagnosticError = null
+                            )
+                        }
+                    }
+                    is com.example.model.SaveRunResult.Failure -> {
+                        _uiState.update {
+                            it.copy(
+                                testState = DynoRunState.PARADO,
+                                userMessage = "Não foi possível finalizar a passagem. As amostras foram preservadas.",
+                                diagnosticError = "testId=$sessionId | etapa=${saveResult.stage} | exceção=${saveResult.exceptionType} | mensagem=${saveResult.technicalMessage} | amostras=${recordedSamples.size} | app=v1.0.2 (2)"
+                            )
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "FALHA NA ETAPA '$stage' DA SESSÃO $sessionId: ${e.message}", e)
@@ -431,8 +442,8 @@ class TestPreparationViewModel(
                 _uiState.update {
                     it.copy(
                         testState = DynoRunState.PARADO,
-                        userMessage = "Não foi possível finalizar a passagem. Os dados foram preservados para recuperação.",
-                        diagnosticError = "Sessão: $sessionId | Amostras: ${recordedSamples.size} | Etapa: $stage | Exceção: ${e.javaClass.simpleName} - ${e.message}"
+                        userMessage = "Não foi possível finalizar a passagem. As amostras foram preservadas.",
+                        diagnosticError = "testId=$sessionId | etapa=$stage | exceção=${e.javaClass.simpleName} | mensagem=${e.message} | amostras=${recordedSamples.size} | app=v1.0.2 (2)"
                     )
                 }
             }
