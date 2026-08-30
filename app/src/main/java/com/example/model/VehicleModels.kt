@@ -1,438 +1,93 @@
 package com.example.model
 
-import java.util.UUID
-import kotlin.math.PI
-
-enum class AudioWeightPreset(
-  val label: String,
-  val estimatedWeightKg: Float,
-  val minWeightKg: Float,
-  val maxWeightKg: Float
-) {
-  NONE("Não, somente som original", 0f, 0f, 0f),
-  LIGHT("Som leve (módulozinho / caixa selada)", 18f, 10f, 25f),
-  MEDIUM("Som médio (caixa dutada + amplificador)", 43f, 25f, 60f),
-  HEAVY("Som pesado (subwoofers potentes / baterias)", 90f, 60f, 120f),
-  PAREDAO("Projeto de som / Paredão", 0f, 0f, 0f),
-  CUSTOM("Informar peso exato", 0f, 0f, 0f)
+enum class FuelType(val displayName: String, val densityKgL: Float, val stoichiometricRatio: Float, val energyDensityMjKg: Float) {
+    GASOLINE("Gasolina Comum", 0.74f, 14.7f, 44.0f),
+    PREMIUM_GASOLINE("Gasolina Podium / Premium", 0.75f, 14.7f, 44.5f),
+    ETHANOL("Etanol (E100)", 0.79f, 9.0f, 26.8f),
+    DIESEL("Diesel S10", 0.83f, 14.5f, 43.0f),
+    E25("Gasolina Brasileira (E27)", 0.755f, 13.2f, 39.5f)
 }
 
-enum class WeightConfidence(
-  val label: String,
-  val description: String
-) {
-  HIGH(
-    "Alta Confiança",
-    "Peso verificado diretamente em balança."
-  ),
-  GOOD(
-    "Boa Confiança",
-    "Veículo conhecido com dados de fábrica e sem grandes pesos estimados."
-  ),
-  ESTIMATED(
-    "Estimada",
-    "Parte do peso foi estimada. O resultado da potência terá uma margem maior."
-  )
+enum class AspirationType(val displayName: String) {
+    NATURALLY_ASPIRATED("Aspirado"),
+    TURBOCHARGED("Turbo"),
+    SUPERCHARGED("Supercharger")
 }
 
-data class TransmissionProfile(
-  val id: String,
-  val manufacturer: String,
-  val family: String,
-  val code: String,
-  val displayName: String,
-  val gearRatios: List<Float>,
-  val finalDrive: Float,
-  val compatibleVehicleIds: List<String> = emptyList(),
-  val isCustom: Boolean = false
-)
-
-data class VehicleProfile(
-  val id: String = UUID.randomUUID().toString(),
-  val manufacturer: String,
-  val model: String,
-  val year: Int,
-  val version: String = "",
-  val engine: String = "",
-  val displacement: String = "",
-  val factoryPowerCv: Float? = null,
-  val factoryTorqueKgf: Float? = null,
-  val curbWeightKg: Float = 1000f,
-  val drivetrain: String = "Dianteira",
-  val transmissionId: String? = null,
-  val customTransmissionName: String? = null,
-  val gearRatio: Float? = null,
-  val finalDriveRatio: Float? = null,
-  val customDrivetrainLossPercent: Float? = null,
-  val tireWidthMm: Int = 185,
-  val tireAspectRatio: Int = 70,
-  val wheelDiameterInches: Int = 14,
-  val tireCorrectionPercent: Float = 0.0f,
-  val driverWeightKg: Float = 0f,
-  val passengerWeightKg: Float = 0f,
-  val cargoWeightKg: Float = 0f,
-  val audioPreset: AudioWeightPreset = AudioWeightPreset.NONE,
-  val audioWeightKg: Float = 0f,
-  val gnvWeightKg: Float = 0f,
-  val otherWeightKg: Float = 0f,
-  val removedWeightKg: Float = 0f,
-  val measuredTotalWeightKg: Float? = null,
-  val useMeasuredWeight: Boolean = false,
-  val frontalAreaM2: Float = 2.10f,
-  val dragCoefficient: Float = 0.34f,
-  val rollingResistanceCoeff: Float = 0.015f,
-  val airDensityKgM3: Float = 1.225f,
-  val slopeMode: String = "IGNORE", // "IGNORE", "ESTIMATED", "MANUAL"
-  val manualSlopePercent: Float = 0.0f,
-  val isPrimary: Boolean = false,
-  val isCustom: Boolean = false
-) {
-  val totalWeightKg: Float
-    get() = VehicleCalculations.calculateTotalWeight(
-      curbWeightKg = curbWeightKg,
-      driverWeightKg = driverWeightKg,
-      passengerWeightKg = passengerWeightKg,
-      cargoWeightKg = cargoWeightKg,
-      audioWeightKg = audioWeightKg,
-      gnvWeightKg = gnvWeightKg,
-      otherWeightKg = otherWeightKg,
-      removedWeightKg = removedWeightKg,
-      measuredTotalWeightKg = measuredTotalWeightKg,
-      useMeasuredWeight = useMeasuredWeight
-    )
+enum class DriveType(val displayName: String) {
+    FWD("Dianteira (FWD)"),
+    RWD("Traseira (RWD)"),
+    AWD("Integral (AWD)")
 }
 
-data class TireCalculation(
-  val lateralHeightMm: Double,
-  val rimDiameterMm: Double,
-  val totalDiameterMm: Double,
-  val circumferenceM: Double,
-  val formattedMeasure: String
-)
+data class TireSpec(
+    val widthMm: Int = 205,
+    val profilePercent: Int = 55,
+    val rimInches: Int = 16
+) {
+    val rollingRadiusMeters: Float
+        get() {
+            val sidewallMm = widthMm * (profilePercent / 100.0f)
+            val totalDiameterMm = (rimInches * 25.4f) + (2 * sidewallMm)
+            return (totalDiameterMm / 2000.0f) * 0.975f // 2.5% de deflexão do pneu
+        }
+    val rollingCircumferenceMeters: Float
+        get() = 2f * Math.PI.toFloat() * rollingRadiusMeters
+}
 
-object VehicleCalculations {
-  const val STANDARD_GRAVITY = 9.80665f
-  const val WATTS_PER_CV = 735.49875f
-  const val AIR_DENSITY_SEA_LEVEL = 1.225f
-  const val DEFAULT_CRR = 0.015f
-  const val DEFAULT_CD = 0.34f
-  const val DEFAULT_FRONTAL_AREA = 2.10f
+data class Vehicle(
+    val id: String = "default_vehicle",
+    val name: String = "Carro Padrão",
+    val brand: String = "Genérico",
+    val model: String = "2.0 Turbo",
+    val year: Int = 2022,
+    val curbWeightKg: Float = 1350f,
+    val driverWeightKg: Float = 80f,
+    val additionalWeightKg: Float = 0f,
+    val frontalAreaM2: Float = 2.15f,
+    val dragCoefficientCd: Float = 0.31f,
+    val drivetrainLossPercent: Float = 15.0f,
+    val tireSpec: TireSpec = TireSpec(),
+    val finalDriveRatio: Float = 3.94f,
+    val gearRatios: List<Float> = listOf(3.78f, 2.12f, 1.46f, 1.03f, 0.86f, 0.73f),
+    val testGearIndex: Int = 2, // 3ª marcha (índice 2)
+    val engineDisplacementCc: Int = 2000,
+    val aspiration: AspirationType = AspirationType.TURBOCHARGED,
+    val fuelType: FuelType = FuelType.GASOLINE,
+    val revLimitRpm: Int = 6500,
+    val isPrimary: Boolean = true
+) {
+    val totalMassKg: Float
+        get() = curbWeightKg + driverWeightKg + additionalWeightKg
 
-  fun mps2ToG(mps2: Float): Float = mps2 / STANDARD_GRAVITY
+    val testGearRatio: Float
+        get() = gearRatios.getOrElse(testGearIndex) { 1.46f }
 
-  fun gToMps2(g: Float): Float = g * STANDARD_GRAVITY
+    val totalGearReduction: Float
+        get() = testGearRatio * finalDriveRatio
 
-  fun calculateTireDimensions(
-    widthMm: Int,
-    aspectRatio: Int,
-    rimInches: Int,
-    tireCorrectionPercent: Float = 0.0f
-  ): TireCalculation {
-    val lateralHeight = widthMm * (aspectRatio / 100.0)
-    val rimDiameter = rimInches * 25.4
-    val totalDiameter = rimDiameter + 2.0 * lateralHeight
-    val baseCircumference = (PI * totalDiameter) / 1000.0
-    val correctedCircumference = baseCircumference * (1.0 + (tireCorrectionPercent / 100.0))
-
-    return TireCalculation(
-      lateralHeightMm = lateralHeight,
-      rimDiameterMm = rimDiameter,
-      totalDiameterMm = totalDiameter,
-      circumferenceM = correctedCircumference,
-      formattedMeasure = "$widthMm/${aspectRatio} R$rimInches"
-    )
-  }
-
-  fun calculateTotalWeight(
-    curbWeightKg: Float,
-    driverWeightKg: Float,
-    passengerWeightKg: Float,
-    cargoWeightKg: Float,
-    audioWeightKg: Float,
-    gnvWeightKg: Float,
-    otherWeightKg: Float,
-    removedWeightKg: Float,
-    measuredTotalWeightKg: Float? = null,
-    useMeasuredWeight: Boolean = false
-  ): Float {
-    if (useMeasuredWeight && measuredTotalWeightKg != null && measuredTotalWeightKg > 0f) {
-      return measuredTotalWeightKg
-    }
-    val sum = curbWeightKg + driverWeightKg + passengerWeightKg + cargoWeightKg +
-      audioWeightKg + gnvWeightKg + otherWeightKg - removedWeightKg
-    return sum.coerceAtLeast(0f)
-  }
-
-  fun evaluateWeightConfidence(
-    useMeasuredWeight: Boolean,
-    audioPreset: AudioWeightPreset,
-    hasGnv: Boolean,
-    hasCargo: Boolean
-  ): WeightConfidence {
-    if (useMeasuredWeight) return WeightConfidence.HIGH
-    if (audioPreset == AudioWeightPreset.PAREDAO ||
-      audioPreset == AudioWeightPreset.HEAVY ||
-      audioPreset == AudioWeightPreset.CUSTOM ||
-      hasGnv || hasCargo) {
-      return WeightConfidence.ESTIMATED
-    }
-    return WeightConfidence.GOOD
-  }
-
-  fun calculateRollingResistanceForce(
-    totalMassKg: Float,
-    crr: Float = DEFAULT_CRR
-  ): Float {
-    return (crr * totalMassKg * STANDARD_GRAVITY).coerceAtLeast(0f)
-  }
-
-  fun calculateAerodynamicForce(
-    velocityMps: Float,
-    cd: Float = DEFAULT_CD,
-    frontalAreaM2: Float = DEFAULT_FRONTAL_AREA,
-    airDensity: Float = AIR_DENSITY_SEA_LEVEL
-  ): Float {
-    val v = velocityMps.coerceAtLeast(0f)
-    return (0.5f * airDensity * cd * frontalAreaM2 * v * v).coerceAtLeast(0f)
-  }
-
-  fun calculateSlopeForce(totalMassKg: Float, slopePercent: Float): Float {
-    if (slopePercent == 0f) return 0f
-    val angleRad = kotlin.math.atan(slopePercent / 100.0)
-    return (totalMassKg * STANDARD_GRAVITY * kotlin.math.sin(angleRad)).toFloat()
-  }
-
-  fun calculateAccelerationForce(
-    totalMassKg: Float,
-    accelerationMps2: Float
-  ): Float {
-    return totalMassKg * accelerationMps2
-  }
-
-  fun calculateTractiveForce(
-    accelForceN: Float,
-    rollForceN: Float,
-    aeroForceN: Float,
-    slopeForceN: Float = 0f
-  ): Float {
-    return (accelForceN + rollForceN + aeroForceN + slopeForceN).coerceAtLeast(0f)
-  }
-
-  fun calculateTotalTractiveForce(
-    accelForceN: Float,
-    rollForceN: Float,
-    aeroForceN: Float,
-    slopeForceN: Float = 0f
-  ): Float {
-    return calculateTractiveForce(accelForceN, rollForceN, aeroForceN, slopeForceN)
-  }
-
-  fun calculateWheelPowerWatts(
-    tractiveForceN: Float,
-    velocityMps: Float
-  ): Float {
-    return (tractiveForceN * velocityMps.coerceAtLeast(0f)).coerceAtLeast(0f)
-  }
-
-  fun convertWattsToCv(powerWatts: Float): Float {
-    return (powerWatts / WATTS_PER_CV).coerceAtLeast(0f)
-  }
-
-  fun convertCvToWatts(powerCv: Float): Float {
-    return (powerCv * WATTS_PER_CV).coerceAtLeast(0f)
-  }
-
-  fun getDrivetrainEfficiency(
-    drivetrain: String?,
-    customLossPercent: Float? = null
-  ): Float {
-    if (customLossPercent != null && customLossPercent in 0f..50f) {
-      return (1.0f - (customLossPercent / 100f)).coerceIn(0.5f, 1.0f)
-    }
-    return when (drivetrain?.lowercase()?.trim()) {
-      "dianteira", "fwd" -> 0.88f // 12% perda
-      "traseira", "rwd" -> 0.85f  // 15% perda
-      "integral", "4x4", "awd", "4wd" -> 0.80f // 20% perda
-      else -> 0.88f
-    }
-  }
-
-  fun getDrivetrainLossPercent(
-    drivetrain: String?,
-    customLossPercent: Float? = null
-  ): Float {
-    if (customLossPercent != null && customLossPercent in 0f..50f) {
-      return customLossPercent
-    }
-    val efficiency = getDrivetrainEfficiency(drivetrain, null)
-    return (1.0f - efficiency) * 100f
-  }
-
-  fun calculateEnginePowerCv(
-    wheelPowerCv: Float,
-    drivetrain: String?,
-    customLossPercent: Float? = null
-  ): Float {
-    val efficiency = getDrivetrainEfficiency(drivetrain, customLossPercent)
-    if (efficiency <= 0f) return wheelPowerCv
-    return (wheelPowerCv / efficiency).coerceAtLeast(0f)
-  }
-
-  fun calculateRpmFromSpeed(
-    velocityMps: Float,
-    tireCircumferenceM: Double,
-    gearRatio: Float,
-    finalDriveRatio: Float
-  ): Float? {
-    if (tireCircumferenceM <= 0.0 || gearRatio <= 0f || finalDriveRatio <= 0f) return null
-    val wheelRps = velocityMps / tireCircumferenceM
-    val wheelRpm = wheelRps * 60.0
-    val engineRpm = (wheelRpm * gearRatio * finalDriveRatio).toFloat()
-    return if (engineRpm in 400f..14000f) engineRpm else null
-  }
-
-  fun calculateTorqueKgfm(powerCv: Float, rpm: Float): Float? {
-    if (rpm <= 500f || powerCv <= 0f) return null
-    // T (kgf.m) = (P (cv) * 716.2) / RPM
-    val torque = (powerCv * 716.2f) / rpm
-    return if (torque in 0.1f..1000f) torque else null
-  }
-
-  fun calculateTorqueNm(torqueKgfm: Float): Float {
-    return torqueKgfm * STANDARD_GRAVITY
-  }
-
-  fun calculateTorqueNmFromPower(powerWatts: Float, rpm: Float): Float? {
-    if (rpm <= 500f || powerWatts <= 0f) return null
-    val omega = (rpm * PI / 30.0).toFloat()
-    val torqueNm = powerWatts / omega
-    return if (torqueNm in 1f..10000f) torqueNm else null
-  }
-
-  /**
-   * Recalcula os resultados de uma medição a partir de correções em seus parâmetros de cadastro
-   * (Seção 37: "Corrigir dados da passagem")
-   */
-  fun recalculateRunResult(
-    run: RunResult,
-    correctedTotalMassKg: Float,
-    correctedGearRatio: Float,
-    correctedFinalDrive: Float,
-    correctedTireWidthMm: Int,
-    correctedTireAspectRatio: Int,
-    correctedRimInches: Int,
-    correctedLossPercent: Float,
-    correctedCd: Float,
-    correctedFrontalAreaM2: Float,
-    correctedCrr: Float
-  ): RunResult {
-    val tireCalc = calculateTireDimensions(
-      widthMm = correctedTireWidthMm,
-      aspectRatio = correctedTireAspectRatio,
-      rimInches = correctedRimInches
-    )
-
-    val rollForce = calculateRollingResistanceForce(correctedTotalMassKg, correctedCrr)
-    val slopeForce = calculateSlopeForce(correctedTotalMassKg, run.slopePercentUsed)
-    val efficiency = (1.0f - (correctedLossPercent / 100f)).coerceIn(0.5f, 1.0f)
-
-    val updatedSamples = run.samples.map { sample ->
-      val aMps2 = sample.finalAccelerationMps2
-      val g = aMps2 / STANDARD_GRAVITY
-      val vMps = sample.filteredSpeedMs
-      val fAero = calculateAerodynamicForce(vMps, correctedCd, correctedFrontalAreaM2, run.airDensityUsed)
-      val fAccel = calculateAccelerationForce(correctedTotalMassKg, kotlin.math.max(0f, aMps2))
-      val fTractive = calculateTotalTractiveForce(fAccel, rollForce, fAero, slopeForce)
-      val wWatts = calculateWheelPowerWatts(fTractive, vMps)
-      val sampleWheelCv = convertWattsToCv(wWatts)
-      val sampleEngineCv = if (efficiency > 0f) (sampleWheelCv / efficiency).coerceAtLeast(0f) else sampleWheelCv
-
-      val sampleRpm = calculateRpmFromSpeed(vMps, tireCalc.circumferenceM, correctedGearRatio, correctedFinalDrive)?.toInt()
-      val sampleEngineTorqueKgfm = if (sampleRpm != null && sampleRpm > 500) {
-        calculateTorqueKgfm(sampleEngineCv, sampleRpm.toFloat()) ?: 0f
-      } else 0f
-      val sampleWheelTorqueKgfm = if (sampleRpm != null && sampleRpm > 500) {
-        calculateTorqueKgfm(sampleWheelCv, sampleRpm.toFloat()) ?: 0f
-      } else 0f
-
-      sample.copy(
-        longitudinalG = g,
-        accelerationForceN = fAccel,
-        aerodynamicForceN = fAero,
-        rollingForceN = rollForce,
-        slopeForceN = slopeForce,
-        totalForceN = fTractive,
-        wheelPowerWatts = wWatts,
-        wheelPowerKw = wWatts / 1000f,
-        wheelPowerCv = sampleWheelCv,
-        enginePowerCv = sampleEngineCv,
-        wheelTorqueKgfm = sampleWheelTorqueKgfm,
-        engineTorqueKgfm = sampleEngineTorqueKgfm,
-        wheelTorqueNm = sampleWheelTorqueKgfm * STANDARD_GRAVITY,
-        engineTorqueNm = sampleEngineTorqueKgfm * STANDARD_GRAVITY,
-        engineRpm = sampleRpm
-      )
+    fun calculateRpmFromSpeedKmh(speedKmh: Float): Int {
+        if (speedKmh <= 0f) return 800
+        val speedMps = speedKmh / 3.6f
+        val wheelRps = speedMps / (2.0 * Math.PI * tireSpec.rollingRadiusMeters)
+        val engineRps = wheelRps * totalGearReduction
+        return (engineRps * 60.0).toInt().coerceIn(600, 9500)
     }
 
-    val validSamples = updatedSamples.filter { it.isValid && it.finalAccelerationMps2 > 0.05f }
-    var newWheelPowerCv = 0f
-    var newEnginePowerCv = 0f
-    var newWheelTorqueKgfm = 0f
-    var newEngineTorqueKgfm = 0f
-    var peakPowerRpm: Int? = null
-    var peakTorqueRpm: Int? = null
-    var peakPowerSpeedKmh = run.maximumGpsSpeedKmh
-    var peakTorqueSpeedKmh = run.startSpeedKmh + (run.maximumGpsSpeedKmh - run.startSpeedKmh) * 0.45f
-    var peakG = run.peakLongitudinalG
-    var avgG = run.averageLongitudinalG
-
-    if (validSamples.isNotEmpty()) {
-      peakG = kotlin.math.max(peakG, validSamples.map { it.longitudinalG }.maxOrNull() ?: 0f)
-      avgG = validSamples.map { it.longitudinalG }.average().toFloat()
-
-      val maxP = validSamples.maxByOrNull { it.enginePowerCv }
-      if (maxP != null) {
-        newWheelPowerCv = maxP.wheelPowerCv
-        newEnginePowerCv = maxP.enginePowerCv
-        peakPowerRpm = maxP.engineRpm
-        peakPowerSpeedKmh = maxP.gpsSpeedKmh
-      }
-
-      val maxT = validSamples.filter { (it.engineRpm ?: 0) in 1000..7500 }.maxByOrNull { it.engineTorqueKgfm }
-        ?: validSamples.maxByOrNull { it.engineTorqueKgfm }
-      if (maxT != null) {
-        newWheelTorqueKgfm = maxT.wheelTorqueKgfm
-        newEngineTorqueKgfm = maxT.engineTorqueKgfm
-        peakTorqueRpm = maxT.engineRpm
-        peakTorqueSpeedKmh = maxT.gpsSpeedKmh
-      }
+    fun calculateSpeedKmhFromRpm(rpm: Int): Float {
+        val engineRps = rpm / 60.0
+        val wheelRps = engineRps / totalGearReduction
+        val speedMps = wheelRps * (2.0 * Math.PI * tireSpec.rollingRadiusMeters)
+        return (speedMps * 3.6).toFloat().coerceAtLeast(0f)
     }
+}
 
-    return run.copy(
-      totalVehicleMassKg = correctedTotalMassKg,
-      gearRatioUsed = correctedGearRatio,
-      finalDriveUsed = correctedFinalDrive,
-      drivetrainLossPercent = correctedLossPercent,
-      cdUsed = correctedCd,
-      frontalAreaUsed = correctedFrontalAreaM2,
-      crrUsed = correctedCrr,
-      wheelPowerCv = newWheelPowerCv,
-      enginePowerCv = newEnginePowerCv,
-      wheelPowerKw = newWheelPowerCv * 0.73549875f,
-      enginePowerKw = newEnginePowerCv * 0.73549875f,
-      estimatedPowerCv = newEnginePowerCv,
-      wheelTorqueKgfm = newWheelTorqueKgfm,
-      engineTorqueKgfm = newEngineTorqueKgfm,
-      wheelTorqueNm = newWheelTorqueKgfm * STANDARD_GRAVITY,
-      engineTorqueNm = newEngineTorqueKgfm * STANDARD_GRAVITY,
-      estimatedTorqueKgfm = newEngineTorqueKgfm,
-      peakPowerRpm = peakPowerRpm,
-      peakTorqueRpm = peakTorqueRpm,
-      peakPowerSpeedKmh = peakPowerSpeedKmh,
-      peakTorqueSpeedKmh = peakTorqueSpeedKmh,
-      peakLongitudinalG = peakG,
-      averageLongitudinalG = avgG,
-      samples = updatedSamples
-    )
-  }
+enum class DynoRunState {
+    PARADO,
+    AGUARDANDO_INICIO,
+    MEDINDO_PROTEGIDO,
+    MEDINDO,
+    SUSPEITA_DESACELERACAO,
+    CONCLUIDO,
+    CANCELADO
 }

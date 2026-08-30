@@ -1,7 +1,6 @@
 package com.example.ui.theme
 
 import android.app.Activity
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -11,78 +10,50 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-// =========================================================================================
-// DYNO LITE - ESQUEMA DE CORES MATERIAL 3
-// =========================================================================================
-
-private val DynoColorScheme = darkColorScheme(
-  primary = DynoBluePrimary,
-  onPrimary = DynoTextPrimary,
-  primaryContainer = DynoBluePrimary.copy(alpha = 0.25f),
-  onPrimaryContainer = DynoBlueLight,
-
-  secondary = DynoSurfaceElevated,
-  onSecondary = DynoTextPrimary,
-  secondaryContainer = DynoSurfaceElevated,
-  onSecondaryContainer = DynoTextPrimary,
-
-  tertiary = DynoPowerCyan,
-  onTertiary = DynoBackground,
-  tertiaryContainer = DynoPowerCyan.copy(alpha = 0.2f),
-  onTertiaryContainer = DynoPowerCyan,
-
-  background = DynoBackground,
-  onBackground = DynoTextPrimary,
-
-  surface = DynoSurface,
-  onSurface = DynoTextPrimary,
-  surfaceVariant = DynoSurface,
-  onSurfaceVariant = DynoTextSecondary,
-  surfaceContainer = DynoSurfaceContainer,
-  surfaceContainerHigh = DynoSurfaceElevated,
-
-  error = DynoErrorRed,
-  onError = DynoTextPrimary,
-  errorContainer = DynoErrorRed.copy(alpha = 0.2f),
-  onErrorContainer = DynoErrorRed,
-
-  outline = DynoBorder,
-  outlineVariant = DynoBorderLight,
+private val DarkColorScheme = darkColorScheme(
+    primary = DynoPowerCyan,
+    onPrimary = DynoBg,
+    primaryContainer = DynoCardSurface,
+    onPrimaryContainer = DynoTextPrimary,
+    secondary = DynoTorqueAmber,
+    onSecondary = DynoBg,
+    secondaryContainer = DynoCardBg,
+    onSecondaryContainer = DynoTextPrimary,
+    tertiary = DynoRed,
+    onTertiary = DynoTextPrimary,
+    background = DynoBg,
+    onBackground = DynoTextPrimary,
+    surface = DynoCardBg,
+    onSurface = DynoTextPrimary,
+    surfaceVariant = DynoCardSurface,
+    onSurfaceVariant = DynoTextSecondary,
+    outline = DynoCardBorder,
+    error = DynoErrorRed,
+    onError = DynoTextPrimary
 )
 
 @Composable
-fun DynoLiteTheme(
-  darkTheme: Boolean = true, // Dyno Lite uses a tailored automotive dark canvas
-  dynamicColor: Boolean = false,
-  content: @Composable () -> Unit,
+fun DynoTheme(
+    darkTheme: Boolean = true,
+    content: @Composable () -> Unit
 ) {
-  val view = LocalView.current
-  if (!view.isInEditMode) {
-    SideEffect {
-      val window = (view.context as? Activity)?.window
-      if (window != null) {
-        window.statusBarColor = DynoBackground.toArgb()
-        window.navigationBarColor = DynoBackground.toArgb()
-        val insetsController = WindowCompat.getInsetsController(window, view)
-        insetsController.isAppearanceLightStatusBars = false
-        insetsController.isAppearanceLightNavigationBars = false
-      }
+    val colorScheme = DarkColorScheme
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? Activity)?.window
+            window?.let {
+                it.statusBarColor = DynoBg.toArgb()
+                it.navigationBarColor = DynoBg.toArgb()
+                WindowCompat.getInsetsController(it, view).isAppearanceLightStatusBars = false
+                WindowCompat.getInsetsController(it, view).isAppearanceLightNavigationBars = false
+            }
+        }
     }
-  }
 
-  MaterialTheme(
-    colorScheme = DynoColorScheme,
-    typography = Typography,
-    content = content
-  )
-}
-
-// Compatibilidade
-@Composable
-fun MyApplicationTheme(
-  darkTheme: Boolean = true,
-  dynamicColor: Boolean = false,
-  content: @Composable () -> Unit,
-) {
-  DynoLiteTheme(darkTheme = darkTheme, dynamicColor = dynamicColor, content = content)
+    MaterialTheme(
+        colorScheme = colorScheme,
+        typography = Typography,
+        content = content
+    )
 }

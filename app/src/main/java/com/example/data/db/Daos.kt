@@ -4,126 +4,77 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
-interface TestDao {
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
-  suspend fun insertTest(test: TestEntity): Long
-
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
-  suspend fun insertTests(tests: List<TestEntity>): List<Long>
-
-  @Update
-  suspend fun updateTest(test: TestEntity): Int
-
-  @Query("SELECT * FROM tests WHERE id = :id LIMIT 1")
-  suspend fun getTestById(id: String): TestEntity?
-
-  @Query("SELECT * FROM tests WHERE id = :id LIMIT 1")
-  fun getTestByIdFlow(id: String): Flow<TestEntity?>
-
-  @Query("SELECT * FROM tests ORDER BY createdAt DESC")
-  fun getAllTestsFlow(): Flow<List<TestEntity>>
-
-  @Query("SELECT * FROM tests ORDER BY createdAt DESC")
-  suspend fun getAllTests(): List<TestEntity>
-
-  @Query("SELECT * FROM tests WHERE status = 'completed' ORDER BY createdAt DESC")
-  fun getCompletedTestsFlow(): Flow<List<TestEntity>>
-
-  @Query("SELECT * FROM tests WHERE status = 'completed' ORDER BY createdAt DESC")
-  suspend fun getCompletedTests(): List<TestEntity>
-
-  @Query("SELECT * FROM tests WHERE status = 'recording' OR status = 'interrupted' ORDER BY createdAt DESC")
-  suspend fun getIncompleteTests(): List<TestEntity>
-
-  @Query("SELECT * FROM tests WHERE status = 'recording' OR status = 'interrupted' ORDER BY createdAt DESC")
-  fun getIncompleteTestsFlow(): Flow<List<TestEntity>>
-
-  @Query("DELETE FROM tests WHERE id = :id")
-  suspend fun deleteTestById(id: String): Int
-
-  @Query("DELETE FROM tests")
-  suspend fun deleteAllTests(): Int
-
-  @Query("SELECT COUNT(*) FROM tests")
-  suspend fun getTestCount(): Int
-}
-
-@Dao
-interface TestSampleDao {
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
-  suspend fun insertSample(sample: TestSampleEntity): Long
-
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
-  suspend fun insertSamples(samples: List<TestSampleEntity>): List<Long>
-
-  @Query("SELECT * FROM testSamples WHERE testId = :testId ORDER BY sampleIndex ASC")
-  suspend fun getSamplesForTest(testId: String): List<TestSampleEntity>
-
-  @Query("SELECT * FROM testSamples WHERE testId = :testId ORDER BY sampleIndex ASC")
-  fun getSamplesForTestFlow(testId: String): Flow<List<TestSampleEntity>>
-
-  @Query("DELETE FROM testSamples WHERE testId = :testId")
-  suspend fun deleteSamplesForTest(testId: String): Int
-
-  @Query("DELETE FROM testSamples")
-  suspend fun deleteAllSamples(): Int
-
-  @Query("SELECT COUNT(*) FROM testSamples WHERE testId = :testId")
-  suspend fun countSamplesForTest(testId: String): Int
-}
-
-@Dao
 interface VehicleDao {
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
-  suspend fun insertVehicle(vehicle: VehicleEntity): Long
+    @Query("SELECT * FROM vehicles ORDER BY isPrimary DESC, name ASC")
+    fun getAllVehicles(): Flow<List<VehicleEntity>>
 
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
-  suspend fun insertVehicles(vehicles: List<VehicleEntity>): List<Long>
+    @Query("SELECT * FROM vehicles WHERE id = :id LIMIT 1")
+    suspend fun getVehicleById(id: String): VehicleEntity?
 
-  @Query("SELECT * FROM vehicles ORDER BY name ASC")
-  suspend fun getAllVehicles(): List<VehicleEntity>
+    @Query("SELECT * FROM vehicles WHERE isPrimary = 1 LIMIT 1")
+    suspend fun getPrimaryVehicle(): VehicleEntity?
 
-  @Query("SELECT * FROM vehicles ORDER BY name ASC")
-  fun getAllVehiclesFlow(): Flow<List<VehicleEntity>>
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertVehicle(vehicle: VehicleEntity)
 
-  @Query("SELECT * FROM vehicles WHERE id = :id LIMIT 1")
-  suspend fun getVehicleById(id: String): VehicleEntity?
+    @Update
+    suspend fun updateVehicle(vehicle: VehicleEntity)
 
-  @Query("DELETE FROM vehicles WHERE id = :id")
-  suspend fun deleteVehicleById(id: String): Int
+    @Query("DELETE FROM vehicles WHERE id = :id")
+    suspend fun deleteVehicleById(id: String)
 
-  @Query("DELETE FROM vehicles")
-  suspend fun deleteAllVehicles(): Int
+    @Query("UPDATE vehicles SET isPrimary = 0")
+    suspend fun clearPrimaryFlags()
+
+    @Query("UPDATE vehicles SET isPrimary = 1 WHERE id = :id")
+    suspend fun setPrimaryVehicle(id: String)
 }
 
 @Dao
-interface SimulationDao {
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
-  suspend fun insertSimulation(simulation: SimulationEntity): Long
+interface RunResultDao {
+    @Query("SELECT * FROM run_results ORDER BY testDateTimestamp DESC")
+    fun getAllResults(): Flow<List<RunResultEntity>>
 
-  @Query("SELECT * FROM simulations ORDER BY createdAt DESC")
-  suspend fun getAllSimulations(): List<SimulationEntity>
+    @Query("SELECT * FROM run_results WHERE vehicleId = :vehicleId ORDER BY testDateTimestamp DESC")
+    fun getResultsForVehicle(vehicleId: String): Flow<List<RunResultEntity>>
 
-  @Query("SELECT * FROM simulations WHERE id = :id LIMIT 1")
-  suspend fun getSimulationById(id: String): SimulationEntity?
+    @Query("SELECT * FROM run_results WHERE id = :id LIMIT 1")
+    suspend fun getResultById(id: String): RunResultEntity?
 
-  @Query("DELETE FROM simulations WHERE id = :id")
-  suspend fun deleteSimulationById(id: String): Int
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertResult(result: RunResultEntity)
+
+    @Query("DELETE FROM run_results WHERE id = :id")
+    suspend fun deleteResultById(id: String)
 }
 
 @Dao
-interface SettingDao {
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
-  suspend fun setSetting(setting: SettingEntity): Long
+interface PendingSessionDao {
+    @Query("SELECT * FROM pending_sessions WHERE status != 'FINALIZED' ORDER BY startTimeMs DESC")
+    fun getPendingSessions(): Flow<List<PendingSessionEntity>>
 
-  @Query("SELECT value FROM settings WHERE `key` = :key LIMIT 1")
-  suspend fun getSetting(key: String): String?
+    @Query("SELECT * FROM pending_sessions WHERE sessionId = :sessionId LIMIT 1")
+    suspend fun getSessionById(sessionId: String): PendingSessionEntity?
 
-  @Query("DELETE FROM settings WHERE `key` = :key")
-  suspend fun deleteSetting(key: String): Int
+    @Query("SELECT * FROM pending_sessions WHERE status != 'FINALIZED' ORDER BY startTimeMs DESC LIMIT 1")
+    suspend fun getLatestPendingSession(): PendingSessionEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSession(session: PendingSessionEntity)
+
+    @Update
+    suspend fun updateSession(session: PendingSessionEntity)
+
+    @Query("UPDATE pending_sessions SET status = 'FINALIZED' WHERE sessionId = :sessionId")
+    suspend fun markSessionFinalized(sessionId: String)
+
+    @Query("DELETE FROM pending_sessions WHERE sessionId = :sessionId")
+    suspend fun deleteSessionById(sessionId: String)
+
+    @Query("DELETE FROM pending_sessions WHERE status = 'FINALIZED'")
+    suspend fun clearFinalizedSessions()
 }
