@@ -1,7 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
-    <color name="dyno_bg">#FF0A0D12</color>
-    <color name="dyno_red">#FFFF3B30</color>
+    <color name="dyno_background">#0D1017</color>
+    <color name="dyno_surface">#242832</color>
+    <color name="dyno_surface_elevated">#303540</color>
+    <color name="dyno_blue_primary">#2F80ED</color>
+    <color name="dyno_blue_light">#9DBEFF</color>
+    <color name="dyno_power_cyan">#39C6F4</color>
+    <color name="dyno_torque_orange">#FF8A3D</color>
+    <color name="dyno_success_green">#42C77A</color>
+    <color name="dyno_warning_yellow">#F2C94C</color>
+    <color name="dyno_error_red">#E35D62</color>
+    <color name="dyno_text_primary">#F2F4F8</color>
+    <color name="dyno_text_secondary">#B7BCC7</color>
 </resources>

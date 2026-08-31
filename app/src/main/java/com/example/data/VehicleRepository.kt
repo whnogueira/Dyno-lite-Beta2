@@ -1,103 +1,309 @@
 package com.example.data
 
-import com.example.data.db.VehicleDao
+import android.content.Context
+import android.content.SharedPreferences
+import android.util.Log
+import com.example.data.db.DynoMobileDatabase
 import com.example.data.db.VehicleEntity
-import com.example.model.AspirationType
-import com.example.model.FuelType
-import com.example.model.TireSpec
-import com.example.model.Vehicle
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
+import com.example.model.AudioWeightPreset
+import com.example.model.VehicleProfile
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import org.json.JSONArray
+import org.json.JSONObject
 
-class VehicleRepository(private val vehicleDao: VehicleDao) {
-    private val gson = Gson()
+private const val TAG = "DynoStorage"
 
-    val allVehicles: Flow<List<Vehicle>> = vehicleDao.getAllVehicles().map { entities ->
-        entities.map { it.toDomain(gson) }
+class VehicleRepository(context: Context) {
+
+  private val database = DynoMobileDatabase.getDatabase(context)
+  private val vehicleDao = database.vehicleDao()
+  private val prefs: SharedPreferences =
+    context.getSharedPreferences("dyno_lite_vehicles_store", Context.MODE_PRIVATE)
+
+  private val KEY_VEHICLES_JSON = "key_vehicles_json"
+  private val KEY_PRIMARY_VEHICLE_ID = "key_primary_vehicle_id"
+
+  init {
+    // Initial sync / migration to Room
+    CoroutineScope(Dispatchers.IO).launch {
+      try {
+        val count = vehicleDao.getAllVehicles().size
+        if (count == 0) {
+          val localVehicles = getVehiclesFromPrefs()
+          if (localVehicles.isNotEmpty()) {
+            val entities = localVehicles.map { v ->
+              VehicleEntity(
+                id = v.id,
+                name = "${v.manufacturer} ${v.model} ${v.engine}".trim(),
+                manufacturer = v.manufacturer,
+                model = v.model,
+                year = v.year,
+                isPrimary = v.isPrimary,
+                fullJson = serializeVehicle(v).toString()
+              )
+            }
+            vehicleDao.insertVehicles(entities)
+            Log.i(TAG, "[DynoStorage] Veículos sincronizados com a tabela vehicles do DynoMobileDB.")
+          }
+        }
+      } catch (e: Exception) {
+        Log.e(TAG, "[DynoStorage] Erro ao sincronizar veículos: ${e.message}", e)
+      }
     }
+  }
 
-    suspend fun getVehicleById(id: String): Vehicle? {
-        return vehicleDao.getVehicleById(id)?.toDomain(gson)
+  fun getVehicles(): List<VehicleProfile> {
+    return try {
+      runBlocking(Dispatchers.IO) {
+        val dbEntities = vehicleDao.getAllVehicles()
+        if (dbEntities.isNotEmpty()) {
+          dbEntities.map { entity ->
+            deserializeVehicle(JSONObject(entity.fullJson))
+          }
+        } else {
+          getVehiclesFromPrefs()
+        }
+      }
+    } catch (e: Exception) {
+      getVehiclesFromPrefs()
     }
+  }
 
-    suspend fun getPrimaryVehicle(): Vehicle? {
-        return vehicleDao.getPrimaryVehicle()?.toDomain(gson)
+  private fun getVehiclesFromPrefs(): List<VehicleProfile> {
+    val jsonStr = prefs.getString(KEY_VEHICLES_JSON, null) ?: return emptyList()
+    val list = mutableListOf<VehicleProfile>()
+    try {
+      val jsonArray = JSONArray(jsonStr)
+      for (i in 0 until jsonArray.length()) {
+        val obj = jsonArray.getJSONObject(i)
+        list.add(deserializeVehicle(obj))
+      }
+    } catch (e: Exception) {
+      e.printStackTrace()
     }
+    return list
+  }
 
-    suspend fun insertOrUpdateVehicle(vehicle: Vehicle) {
-        vehicleDao.insertVehicle(vehicle.toEntity(gson))
+  fun getPrimaryVehicle(): VehicleProfile? {
+    val vehicles = getVehicles()
+    if (vehicles.isEmpty()) {
+      return defaultVectraFallback()
     }
+    val primaryId = prefs.getString(KEY_PRIMARY_VEHICLE_ID, null)
+    return vehicles.firstOrNull { it.id == primaryId } ?: vehicles.firstOrNull { it.isPrimary } ?: vehicles.firstOrNull() ?: defaultVectraFallback()
+  }
 
-    suspend fun setPrimaryVehicle(id: String) {
-        vehicleDao.clearPrimaryFlags()
-        vehicleDao.setPrimaryVehicle(id)
-    }
-
-    suspend fun deleteVehicle(id: String) {
-        vehicleDao.deleteVehicleById(id)
-    }
-}
-
-fun VehicleEntity.toDomain(gson: Gson): Vehicle {
-    val gearRatios: List<Float> = try {
-        val type = object : TypeToken<List<Float>>() {}.type
-        gson.fromJson<List<Float>>(gearRatiosJson, type) ?: listOf(3.78f, 2.12f, 1.46f, 1.03f, 0.86f, 0.73f)
-    } catch (_: Exception) {
-        listOf(3.78f, 2.12f, 1.46f, 1.03f, 0.86f, 0.73f)
-    }
-
-    val aspirationEnum = AspirationType.values().firstOrNull { it.name == aspiration } ?: AspirationType.TURBOCHARGED
-    val fuelTypeEnum = FuelType.values().firstOrNull { it.name == fuelType } ?: FuelType.GASOLINE
-
-    return Vehicle(
-        id = id,
-        name = name,
-        brand = brand,
-        model = model,
-        year = year,
-        curbWeightKg = curbWeightKg,
-        driverWeightKg = driverWeightKg,
-        additionalWeightKg = additionalWeightKg,
-        frontalAreaM2 = frontalAreaM2,
-        dragCoefficientCd = dragCoefficientCd,
-        drivetrainLossPercent = drivetrainLossPercent,
-        tireSpec = TireSpec(tireWidthMm, tireProfilePercent, tireRimInches),
-        finalDriveRatio = finalDriveRatio,
-        gearRatios = gearRatios,
-        testGearIndex = testGearIndex,
-        engineDisplacementCc = engineDisplacementCc,
-        aspiration = aspirationEnum,
-        fuelType = fuelTypeEnum,
-        revLimitRpm = revLimitRpm,
-        isPrimary = isPrimary
+  fun defaultVectraFallback(): VehicleProfile {
+    return VehicleProfile(
+      id = "default_vectra_gls_1999",
+      manufacturer = "Chevrolet",
+      model = "Vectra",
+      year = 1999,
+      version = "GLS",
+      engine = "2.2 8V",
+      displacement = "2.2",
+      factoryPowerCv = 123f,
+      factoryTorqueKgf = 19.4f,
+      curbWeightKg = 1265f,
+      drivetrain = "Dianteira",
+      transmissionId = "gm_f17_ccw",
+      gearRatio = 1.41f,
+      finalDriveRatio = 4.19f,
+      tireWidthMm = 195,
+      tireAspectRatio = 60,
+      wheelDiameterInches = 15,
+      isPrimary = true,
+      isCustom = false
     )
-}
+  }
 
-fun Vehicle.toEntity(gson: Gson): VehicleEntity {
-    return VehicleEntity(
-        id = id,
-        name = name,
-        brand = brand,
-        model = model,
-        year = year,
-        curbWeightKg = curbWeightKg,
-        driverWeightKg = driverWeightKg,
-        additionalWeightKg = additionalWeightKg,
-        frontalAreaM2 = frontalAreaM2,
-        dragCoefficientCd = dragCoefficientCd,
-        drivetrainLossPercent = drivetrainLossPercent,
-        tireWidthMm = tireSpec.widthMm,
-        tireProfilePercent = tireSpec.profilePercent,
-        tireRimInches = tireSpec.rimInches,
-        finalDriveRatio = finalDriveRatio,
-        gearRatiosJson = gson.toJson(gearRatios),
-        testGearIndex = testGearIndex,
-        engineDisplacementCc = engineDisplacementCc,
-        aspiration = aspiration.name,
-        fuelType = fuelType.name,
-        revLimitRpm = revLimitRpm,
-        isPrimary = isPrimary
+  fun getPrimaryVehicleId(): String? {
+    return prefs.getString(KEY_PRIMARY_VEHICLE_ID, null)
+  }
+
+  fun saveVehicle(vehicle: VehicleProfile) {
+    val currentVehicles = getVehicles().toMutableList()
+    val existingIndex = currentVehicles.indexOfFirst { it.id == vehicle.id }
+
+    val shouldBePrimary = if (currentVehicles.isEmpty()) true else vehicle.isPrimary
+
+    val updatedVehicle = vehicle.copy(isPrimary = shouldBePrimary)
+
+    if (existingIndex >= 0) {
+      currentVehicles[existingIndex] = updatedVehicle
+    } else {
+      currentVehicles.add(updatedVehicle)
+    }
+
+    if (shouldBePrimary) {
+      for (i in currentVehicles.indices) {
+        if (currentVehicles[i].id != updatedVehicle.id) {
+          currentVehicles[i] = currentVehicles[i].copy(isPrimary = false)
+        }
+      }
+      prefs.edit().putString(KEY_PRIMARY_VEHICLE_ID, updatedVehicle.id).apply()
+    }
+
+    saveAll(currentVehicles)
+  }
+
+  fun setPrimaryVehicle(vehicleId: String) {
+    val currentVehicles = getVehicles().toMutableList()
+    for (i in currentVehicles.indices) {
+      currentVehicles[i] = currentVehicles[i].copy(isPrimary = (currentVehicles[i].id == vehicleId))
+    }
+    prefs.edit().putString(KEY_PRIMARY_VEHICLE_ID, vehicleId).apply()
+    saveAll(currentVehicles)
+  }
+
+  fun duplicateVehicle(vehicleId: String) {
+    val vehicle = getVehicles().firstOrNull { it.id == vehicleId } ?: return
+    val duplicate = vehicle.copy(
+      id = java.util.UUID.randomUUID().toString(),
+      model = "${vehicle.model} (Cópia)",
+      isPrimary = false
     )
+    saveVehicle(duplicate)
+  }
+
+  fun deleteVehicle(vehicleId: String) {
+    val currentVehicles = getVehicles().toMutableList()
+    val removed = currentVehicles.removeAll { it.id == vehicleId }
+    if (removed) {
+      val primaryId = prefs.getString(KEY_PRIMARY_VEHICLE_ID, null)
+      if (primaryId == vehicleId) {
+        if (currentVehicles.isNotEmpty()) {
+          currentVehicles[0] = currentVehicles[0].copy(isPrimary = true)
+          prefs.edit().putString(KEY_PRIMARY_VEHICLE_ID, currentVehicles[0].id).apply()
+        } else {
+          prefs.edit().remove(KEY_PRIMARY_VEHICLE_ID).apply()
+        }
+      }
+      saveAll(currentVehicles)
+      CoroutineScope(Dispatchers.IO).launch {
+        vehicleDao.deleteVehicleById(vehicleId)
+      }
+    }
+  }
+
+  private fun saveAll(vehicles: List<VehicleProfile>) {
+    val jsonArray = JSONArray()
+    for (v in vehicles) {
+      jsonArray.put(serializeVehicle(v))
+    }
+    prefs.edit().putString(KEY_VEHICLES_JSON, jsonArray.toString()).apply()
+
+    CoroutineScope(Dispatchers.IO).launch {
+      try {
+        vehicleDao.deleteAllVehicles()
+        val entities = vehicles.map { v ->
+          VehicleEntity(
+            id = v.id,
+            name = "${v.manufacturer} ${v.model} ${v.engine}".trim(),
+            manufacturer = v.manufacturer,
+            model = v.model,
+            year = v.year,
+            isPrimary = v.isPrimary,
+            fullJson = serializeVehicle(v).toString()
+          )
+        }
+        vehicleDao.insertVehicles(entities)
+      } catch (e: Exception) {
+        Log.e(TAG, "[DynoStorage] Erro ao persistir veículos no Room: ${e.message}", e)
+      }
+    }
+  }
+
+  private fun serializeVehicle(v: VehicleProfile): JSONObject {
+    val obj = JSONObject()
+    obj.put("id", v.id)
+    obj.put("manufacturer", v.manufacturer)
+    obj.put("model", v.model)
+    obj.put("year", v.year)
+    obj.put("version", v.version)
+    obj.put("engine", v.engine)
+    obj.put("displacement", v.displacement)
+    if (v.factoryPowerCv != null) obj.put("factoryPowerCv", v.factoryPowerCv.toDouble())
+    if (v.factoryTorqueKgf != null) obj.put("factoryTorqueKgf", v.factoryTorqueKgf.toDouble())
+    obj.put("curbWeightKg", v.curbWeightKg.toDouble())
+    obj.put("drivetrain", v.drivetrain)
+    if (v.transmissionId != null) obj.put("transmissionId", v.transmissionId)
+    if (v.customTransmissionName != null) obj.put("customTransmissionName", v.customTransmissionName)
+    if (v.gearRatio != null) obj.put("gearRatio", v.gearRatio.toDouble())
+    if (v.finalDriveRatio != null) obj.put("finalDriveRatio", v.finalDriveRatio.toDouble())
+    if (v.customDrivetrainLossPercent != null) obj.put("customDrivetrainLossPercent", v.customDrivetrainLossPercent.toDouble())
+    obj.put("tireWidthMm", v.tireWidthMm)
+    obj.put("tireAspectRatio", v.tireAspectRatio)
+    obj.put("wheelDiameterInches", v.wheelDiameterInches)
+    obj.put("tireCorrectionPercent", v.tireCorrectionPercent.toDouble())
+    obj.put("driverWeightKg", v.driverWeightKg.toDouble())
+    obj.put("passengerWeightKg", v.passengerWeightKg.toDouble())
+    obj.put("cargoWeightKg", v.cargoWeightKg.toDouble())
+    obj.put("audioPreset", v.audioPreset.name)
+    obj.put("audioWeightKg", v.audioWeightKg.toDouble())
+    obj.put("gnvWeightKg", v.gnvWeightKg.toDouble())
+    obj.put("otherWeightKg", v.otherWeightKg.toDouble())
+    obj.put("removedWeightKg", v.removedWeightKg.toDouble())
+    if (v.measuredTotalWeightKg != null) obj.put("measuredTotalWeightKg", v.measuredTotalWeightKg.toDouble())
+    obj.put("useMeasuredWeight", v.useMeasuredWeight)
+    obj.put("frontalAreaM2", v.frontalAreaM2.toDouble())
+    obj.put("dragCoefficient", v.dragCoefficient.toDouble())
+    obj.put("rollingResistanceCoeff", v.rollingResistanceCoeff.toDouble())
+    obj.put("airDensityKgM3", v.airDensityKgM3.toDouble())
+    obj.put("slopeMode", v.slopeMode)
+    obj.put("manualSlopePercent", v.manualSlopePercent.toDouble())
+    obj.put("isPrimary", v.isPrimary)
+    obj.put("isCustom", v.isCustom)
+    return obj
+  }
+
+  private fun deserializeVehicle(obj: JSONObject): VehicleProfile {
+    return VehicleProfile(
+      id = obj.optString("id"),
+      manufacturer = obj.optString("manufacturer"),
+      model = obj.optString("model"),
+      year = obj.optInt("year", 2010),
+      version = obj.optString("version"),
+      engine = obj.optString("engine"),
+      displacement = obj.optString("displacement"),
+      factoryPowerCv = if (obj.has("factoryPowerCv")) obj.getDouble("factoryPowerCv").toFloat() else null,
+      factoryTorqueKgf = if (obj.has("factoryTorqueKgf")) obj.getDouble("factoryTorqueKgf").toFloat() else null,
+      curbWeightKg = obj.optDouble("curbWeightKg", 1000.0).toFloat(),
+      drivetrain = obj.optString("drivetrain", "Dianteira"),
+      transmissionId = if (obj.has("transmissionId")) obj.getString("transmissionId") else null,
+      customTransmissionName = if (obj.has("customTransmissionName")) obj.getString("customTransmissionName") else null,
+      gearRatio = if (obj.has("gearRatio")) obj.getDouble("gearRatio").toFloat() else null,
+      finalDriveRatio = if (obj.has("finalDriveRatio")) obj.getDouble("finalDriveRatio").toFloat() else null,
+      customDrivetrainLossPercent = if (obj.has("customDrivetrainLossPercent")) obj.getDouble("customDrivetrainLossPercent").toFloat() else null,
+      tireWidthMm = obj.optInt("tireWidthMm", 185),
+      tireAspectRatio = obj.optInt("tireAspectRatio", 70),
+      wheelDiameterInches = obj.optInt("wheelDiameterInches", 14),
+      tireCorrectionPercent = obj.optDouble("tireCorrectionPercent", 0.0).toFloat(),
+      driverWeightKg = obj.optDouble("driverWeightKg", 0.0).toFloat(),
+      passengerWeightKg = obj.optDouble("passengerWeightKg", 0.0).toFloat(),
+      cargoWeightKg = obj.optDouble("cargoWeightKg", 0.0).toFloat(),
+      audioPreset = try {
+        AudioWeightPreset.valueOf(obj.optString("audioPreset", AudioWeightPreset.NONE.name))
+      } catch (e: Exception) {
+        AudioWeightPreset.NONE
+      },
+      audioWeightKg = obj.optDouble("audioWeightKg", 0.0).toFloat(),
+      gnvWeightKg = obj.optDouble("gnvWeightKg", 0.0).toFloat(),
+      otherWeightKg = obj.optDouble("otherWeightKg", 0.0).toFloat(),
+      removedWeightKg = obj.optDouble("removedWeightKg", 0.0).toFloat(),
+      measuredTotalWeightKg = if (obj.has("measuredTotalWeightKg")) obj.getDouble("measuredTotalWeightKg").toFloat() else null,
+      useMeasuredWeight = obj.optBoolean("useMeasuredWeight", false),
+      frontalAreaM2 = obj.optDouble("frontalAreaM2", 2.10).toFloat(),
+      dragCoefficient = obj.optDouble("dragCoefficient", 0.34).toFloat(),
+      rollingResistanceCoeff = obj.optDouble("rollingResistanceCoeff", 0.015).toFloat(),
+      airDensityKgM3 = obj.optDouble("airDensityKgM3", 1.225).toFloat(),
+      slopeMode = obj.optString("slopeMode", "IGNORE"),
+      manualSlopePercent = obj.optDouble("manualSlopePercent", 0.0).toFloat(),
+      isPrimary = obj.optBoolean("isPrimary", false),
+      isCustom = obj.optBoolean("isCustom", false)
+    )
+  }
 }

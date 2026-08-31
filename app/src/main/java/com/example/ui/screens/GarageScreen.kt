@@ -1,11 +1,11 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,251 +14,630 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.outlined.Circle
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.DirectionsCar
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.StarOutline
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.data.VehicleRepository
-import com.example.model.Vehicle
-import com.example.ui.theme.DynoBg
-import com.example.ui.theme.DynoCardBg
-import com.example.ui.theme.DynoCardBorder
-import com.example.ui.theme.DynoCardSurface
-import com.example.ui.theme.DynoErrorRed
-import com.example.ui.theme.DynoPowerCyan
-import com.example.ui.theme.DynoSuccessGreen
-import com.example.ui.theme.DynoTextMuted
-import com.example.ui.theme.DynoTextPrimary
-import com.example.ui.theme.DynoTextSecondary
-import com.example.ui.theme.DynoTorqueAmber
-import kotlinx.coroutines.launch
+import com.example.data.VehicleDatabase
+import com.example.model.VehicleCalculations
+import com.example.model.VehicleProfile
+import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GarageScreen(
-    vehicleRepository: VehicleRepository,
-    onNavigateBack: () -> Unit,
-    onNavigateToAddVehicle: () -> Unit,
-    onNavigateToEditVehicle: (String) -> Unit,
-    modifier: Modifier = Modifier
+  vehicles: List<VehicleProfile>,
+  onAddVehicle: () -> Unit,
+  onEditVehicle: (VehicleProfile) -> Unit,
+  onDuplicateVehicle: (String) -> Unit = {},
+  onSetPrimaryVehicle: (String) -> Unit,
+  onDeleteVehicle: (String) -> Unit,
+  onTestVehicle: (VehicleProfile) -> Unit = {},
+  onNavigateToHome: () -> Unit = {},
+  modifier: Modifier = Modifier
 ) {
-    val vehicles by vehicleRepository.allVehicles.collectAsStateWithLifecycle(initialValue = emptyList())
-    val coroutineScope = rememberCoroutineScope()
+  var vehicleToDelete by remember { mutableStateOf<VehicleProfile?>(null) }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        containerColor = DynoBg,
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = "GARAGEM DE VEÍCULOS",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
-                        ),
-                        color = DynoTextPrimary
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Voltar",
-                            tint = DynoTextPrimary
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DynoBg)
+  Box(
+    modifier = modifier
+      .fillMaxSize()
+      .padding(horizontal = 20.dp),
+    contentAlignment = Alignment.TopCenter
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxSize()
+        .widthIn(max = 500.dp)
+        .padding(vertical = 16.dp),
+      verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+      // Header Section
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Column {
+          Text(
+            text = "MINHA GARAGEM",
+            style = MaterialTheme.typography.titleLarge.copy(
+              fontWeight = FontWeight.Bold,
+              letterSpacing = 0.5.sp,
+              fontSize = 20.sp
+            ),
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.testTag("garage_title")
+          )
+          Text(
+            text = "${vehicles.size} ${if (vehicles.size == 1) "veículo cadastrado" else "veículos cadastrados"}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+          )
+        }
+
+        Button(
+          onClick = onAddVehicle,
+          modifier = Modifier
+            .height(42.dp)
+            .testTag("btn_add_vehicle_top"),
+          shape = RoundedCornerShape(12.dp),
+          colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary
+          ),
+          contentPadding = PaddingValues(horizontal = 14.dp)
+        ) {
+          Icon(
+            imageVector = Icons.Default.Add,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp)
+          )
+          Spacer(modifier = Modifier.width(4.dp))
+          Text(
+            text = "ADICIONAR",
+            style = MaterialTheme.typography.labelLarge.copy(
+              fontWeight = FontWeight.Bold,
+              fontSize = 13.sp
             )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = onNavigateToAddVehicle,
-                containerColor = DynoPowerCyan,
-                contentColor = DynoBg
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Adicionar Veículo")
-            }
+          )
         }
-    ) { innerPadding ->
-        if (vehicles.isEmpty()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
+      }
+
+      if (vehicles.isEmpty()) {
+        Card(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 20.dp),
+          shape = RoundedCornerShape(20.dp),
+          colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+          ),
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        ) {
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+          ) {
+            Icon(
+              imageVector = Icons.Outlined.DirectionsCar,
+              contentDescription = null,
+              modifier = Modifier.size(52.dp),
+              tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
+
+            Text(
+              text = "Sua garagem está vazia",
+              style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.Bold,
+                fontSize = 17.sp
+              ),
+              color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Text(
+              text = "Adicione seu primeiro veículo para começar a preparar as medições de potência.",
+              style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              textAlign = TextAlign.Center
+            )
+
+            Button(
+              onClick = onAddVehicle,
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .testTag("btn_garage_empty_add"),
+              shape = RoundedCornerShape(12.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.DirectionsCar,
-                    contentDescription = null,
-                    tint = DynoTextMuted,
-                    modifier = Modifier.size(64.dp)
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Nenhum veículo na garagem",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = DynoTextPrimary
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Cadastre o primeiro carro para medir potência e torque com precisão.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = DynoTextSecondary
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-                Button(
-                    onClick = onNavigateToAddVehicle,
-                    colors = ButtonDefaults.buttonColors(containerColor = DynoPowerCyan)
-                ) {
-                    Text("CADASTRAR VEÍCULO", color = DynoBg, fontWeight = FontWeight.Bold)
-                }
+              Text("CADASTRAR VEÍCULO")
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(vehicles, key = { it.id }) { vehicle ->
-                    VehicleCard(
-                        vehicle = vehicle,
-                        onSelectPrimary = {
-                            coroutineScope.launch {
-                                vehicleRepository.setPrimaryVehicle(vehicle.id)
-                            }
-                        },
-                        onEdit = { onNavigateToEditVehicle(vehicle.id) },
-                        onDelete = {
-                            coroutineScope.launch {
-                                vehicleRepository.deleteVehicle(vehicle.id)
-                            }
-                        }
-                    )
-                }
-                item {
-                    Spacer(modifier = Modifier.height(80.dp))
-                }
-            }
+          }
         }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        OutlinedButton(
+          onClick = onNavigateToHome,
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .testTag("btn_back_to_home_from_garage_empty"),
+          shape = RoundedCornerShape(12.dp),
+          colors = ButtonDefaults.outlinedButtonColors(
+            contentColor = MaterialTheme.colorScheme.onSurface
+          ),
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        ) {
+          Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp)
+          )
+          Spacer(modifier = Modifier.width(8.dp))
+          Text(
+            text = "VOLTAR AO INÍCIO",
+            style = MaterialTheme.typography.labelLarge.copy(
+              fontWeight = FontWeight.SemiBold,
+              fontSize = 13.5.sp,
+              letterSpacing = 0.5.sp
+            )
+          )
+        }
+      } else {
+        LazyColumn(
+          modifier = Modifier.fillMaxSize(),
+          verticalArrangement = Arrangement.spacedBy(14.dp),
+          contentPadding = PaddingValues(bottom = 24.dp)
+        ) {
+          items(vehicles, key = { it.id }) { vehicle ->
+            VehicleGarageCard(
+              vehicle = vehicle,
+              isOnlyVehicle = vehicles.size == 1,
+              onTestVehicle = { onTestVehicle(vehicle) },
+              onSelectPrimary = { onSetPrimaryVehicle(vehicle.id) },
+              onEdit = { onEditVehicle(vehicle) },
+              onDuplicate = { onDuplicateVehicle(vehicle.id) },
+              onDelete = { vehicleToDelete = vehicle }
+            )
+          }
+
+          item {
+            Spacer(modifier = Modifier.height(6.dp))
+            OutlinedButton(
+              onClick = onNavigateToHome,
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .testTag("btn_back_to_home_from_garage"),
+              shape = RoundedCornerShape(12.dp),
+              colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = MaterialTheme.colorScheme.onSurface
+              ),
+              border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
+              )
+              Spacer(modifier = Modifier.width(8.dp))
+              Text(
+                text = "VOLTAR AO INÍCIO",
+                style = MaterialTheme.typography.labelLarge.copy(
+                  fontWeight = FontWeight.SemiBold,
+                  fontSize = 13.5.sp,
+                  letterSpacing = 0.5.sp
+                )
+              )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+          }
+        }
+      }
     }
+  }
+
+  vehicleToDelete?.let { vehicle ->
+    AlertDialog(
+      onDismissRequest = { vehicleToDelete = null },
+      title = {
+        Text(
+          text = "Excluir veículo?",
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+        )
+      },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+          Text(
+            text = "Tem certeza que deseja remover ${vehicle.manufacturer} ${vehicle.model} da sua garagem?",
+            style = MaterialTheme.typography.bodyMedium
+          )
+          Text(
+            text = "Aviso: Os resultados permanecerão no histórico, mas o perfil do veículo será removido.",
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+            color = MaterialTheme.colorScheme.error
+          )
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            onDeleteVehicle(vehicle.id)
+            vehicleToDelete = null
+          },
+          colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.error,
+            contentColor = MaterialTheme.colorScheme.onError
+          )
+        ) {
+          Text("EXCLUIR")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { vehicleToDelete = null }) {
+          Text("CANCELAR")
+        }
+      }
+    )
+  }
 }
 
 @Composable
-fun VehicleCard(
-    vehicle: Vehicle,
-    onSelectPrimary: () -> Unit,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit
+private fun VehicleGarageCard(
+  vehicle: VehicleProfile,
+  isOnlyVehicle: Boolean,
+  onTestVehicle: () -> Unit,
+  onSelectPrimary: () -> Unit,
+  onEdit: () -> Unit,
+  onDuplicate: () -> Unit,
+  onDelete: () -> Unit,
+  modifier: Modifier = Modifier
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onSelectPrimary() },
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (vehicle.isPrimary) DynoCardSurface else DynoCardBg
-        ),
-        border = BorderStroke(
-            1.dp,
-            if (vehicle.isPrimary) DynoPowerCyan else DynoCardBorder
-        )
+  val totalWeight = VehicleCalculations.calculateTotalWeight(
+    curbWeightKg = vehicle.curbWeightKg,
+    driverWeightKg = vehicle.driverWeightKg,
+    passengerWeightKg = vehicle.passengerWeightKg,
+    cargoWeightKg = vehicle.cargoWeightKg,
+    audioWeightKg = vehicle.audioWeightKg,
+    gnvWeightKg = vehicle.gnvWeightKg,
+    otherWeightKg = vehicle.otherWeightKg,
+    removedWeightKg = vehicle.removedWeightKg,
+    measuredTotalWeightKg = vehicle.measuredTotalWeightKg,
+    useMeasuredWeight = vehicle.useMeasuredWeight
+  )
+
+  val transmissionLabel = when {
+    vehicle.transmissionId != null ->
+      VehicleDatabase.getTransmission(vehicle.transmissionId)?.displayName ?: "Original"
+    !vehicle.customTransmissionName.isNullOrBlank() ->
+      vehicle.customTransmissionName
+    else -> "Original"
+  }
+
+  val isDataComplete = vehicle.tireWidthMm > 0 &&
+    vehicle.tireAspectRatio > 0 &&
+    vehicle.wheelDiameterInches > 0 &&
+    totalWeight > 300f
+
+  val dataStatusLabel = if (vehicle.useMeasuredWeight) {
+    "Dados verificados"
+  } else if (isDataComplete) {
+    "Dados conferidos"
+  } else {
+    "Dados parciais"
+  }
+
+  val isEffectivelyPrimary = vehicle.isPrimary || isOnlyVehicle
+
+  Card(
+    modifier = modifier
+      .fillMaxWidth()
+      .testTag("vehicle_card_${vehicle.id}")
+      .clickable { onEdit() },
+    shape = RoundedCornerShape(16.dp),
+    colors = CardDefaults.cardColors(
+      containerColor = if (isEffectivelyPrimary)
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+      else
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+    ),
+    border = BorderStroke(
+      1.dp,
+      if (isEffectivelyPrimary)
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+      else
+        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+    )
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(14.dp),
+      verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = if (vehicle.isPrimary) Icons.Default.CheckCircle else Icons.Outlined.Circle,
-                        contentDescription = if (vehicle.isPrimary) "Veículo Ativo" else "Selecionar",
-                        tint = if (vehicle.isPrimary) DynoPowerCyan else DynoTextMuted,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Text(
-                        text = if (vehicle.isPrimary) "VEÍCULO PRINCIPAL" else "SELECIONAR COMO PRINCIPAL",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.5.sp
-                        ),
-                        color = if (vehicle.isPrimary) DynoPowerCyan else DynoTextSecondary
-                    )
-                }
-
-                Row {
-                    IconButton(onClick = onEdit) {
-                        Icon(Icons.Default.Edit, contentDescription = "Editar", tint = DynoTextSecondary)
-                    }
-                    IconButton(onClick = onDelete) {
-                        Icon(Icons.Default.Delete, contentDescription = "Excluir", tint = DynoErrorRed.copy(alpha = 0.8f))
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = vehicle.name,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = DynoTextPrimary
-            )
-            Text(
-                text = "${vehicle.brand} ${vehicle.model} (${vehicle.year})",
-                style = MaterialTheme.typography.bodyMedium,
-                color = DynoTextSecondary
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                TagBadge(text = "${vehicle.totalMassKg.toInt()} kg", color = DynoPowerCyan)
-                TagBadge(text = vehicle.aspiration.displayName, color = DynoTorqueAmber)
-                TagBadge(text = "${vehicle.engineDisplacementCc} cc", color = DynoSuccessGreen)
-                TagBadge(text = "${vehicle.tireSpec.widthMm}/${vehicle.tireSpec.profilePercent} R${vehicle.tireSpec.rimInches}", color = DynoTextSecondary)
-            }
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Column(modifier = Modifier.weight(1f)) {
+          Text(
+            text = "${vehicle.manufacturer} ${vehicle.model}",
+            style = MaterialTheme.typography.titleMedium.copy(
+              fontWeight = FontWeight.Bold,
+              fontSize = 17.sp
+            ),
+            color = MaterialTheme.colorScheme.onSurface
+          )
+          val sub = listOfNotNull(
+            vehicle.year.toString(),
+            vehicle.engine.ifBlank { null },
+            vehicle.version.ifBlank { null }
+          ).joinToString(" • ")
+          Text(
+            text = sub,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+          )
         }
+
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh
+          ) {
+            Text(
+              text = dataStatusLabel,
+              style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Medium,
+                fontSize = 10.5.sp
+              ),
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+            )
+          }
+
+          if (isEffectivelyPrimary) {
+            Surface(
+              shape = CircleShape,
+              color = MaterialTheme.colorScheme.primaryContainer
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Star,
+                  contentDescription = null,
+                  tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                  modifier = Modifier.size(14.dp)
+                )
+                Text(
+                  text = "Principal",
+                  style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp
+                  ),
+                  color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+              }
+            }
+          }
+        }
+      }
+
+      HorizontalDivider(
+        thickness = 0.8.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+      )
+
+      // Specs summary with proper wrapping and space allocation
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+      ) {
+        Column(modifier = Modifier.weight(1f)) {
+          Text(
+            text = "Peso Total",
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+          )
+          Text(
+            text = String.format(Locale.US, "%.0f kg", totalWeight),
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface
+          )
+        }
+
+        Column(modifier = Modifier.weight(1.3f)) {
+          Text(
+            text = "Pneu",
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+          )
+          Text(
+            text = "${vehicle.tireWidthMm}/${vehicle.tireAspectRatio} R${vehicle.wheelDiameterInches}",
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface
+          )
+        }
+
+        Column(modifier = Modifier.weight(1.4f)) {
+          Text(
+            text = "Câmbio",
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+          )
+          Text(
+            text = transmissionLabel,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+          )
+        }
+
+        if (vehicle.factoryPowerCv != null && vehicle.factoryPowerCv > 0f) {
+          Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+            Text(
+              text = "Potência",
+              style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+              color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
+            Text(
+              text = String.format(Locale.US, "%.0f cv", vehicle.factoryPowerCv),
+              style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+              color = MaterialTheme.colorScheme.onSurface
+            )
+          }
+        }
+      }
+
+      HorizontalDivider(
+        thickness = 0.8.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+      )
+
+      // Test Vehicle Action Button (Wide / Largo)
+      val actionButtonLabel = if (isEffectivelyPrimary) "TESTAR ESTE VEÍCULO" else "USAR NESTE TESTE"
+      val actionButtonTag = if (isEffectivelyPrimary) "btn_test_vehicle_${vehicle.id}" else "btn_use_in_test_${vehicle.id}"
+
+      Button(
+        onClick = onTestVehicle,
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(48.dp)
+          .testTag(actionButtonTag),
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(
+          containerColor = MaterialTheme.colorScheme.primary,
+          contentColor = MaterialTheme.colorScheme.onPrimary
+        )
+      ) {
+        Icon(
+          imageVector = Icons.Default.PlayArrow,
+          contentDescription = null,
+          modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+          text = actionButtonLabel,
+          style = MaterialTheme.typography.labelLarge.copy(
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.6.sp,
+            fontSize = 13.5.sp
+          )
+        )
+      }
+
+      // Secondary action buttons (Tornar principal, Duplicar, Editar, Excluir)
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        if (!isEffectivelyPrimary) {
+          TextButton(
+            onClick = onSelectPrimary,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.testTag("btn_set_primary_${vehicle.id}")
+          ) {
+            Icon(
+              imageVector = Icons.Outlined.StarOutline,
+              contentDescription = "Tornar veículo principal",
+              modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+              text = "Tornar principal",
+              style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp)
+            )
+          }
+        } else {
+          Spacer(modifier = Modifier.width(1.dp))
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+          IconButton(
+            onClick = onDuplicate,
+            modifier = Modifier.size(36.dp).testTag("btn_duplicate_${vehicle.id}")
+          ) {
+            Icon(
+              imageVector = Icons.Outlined.ContentCopy,
+              contentDescription = "Duplicar veículo",
+              tint = MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.size(18.dp)
+            )
+          }
+
+          IconButton(
+            onClick = onEdit,
+            modifier = Modifier.size(36.dp).testTag("btn_edit_${vehicle.id}")
+          ) {
+            Icon(
+              imageVector = Icons.Outlined.Edit,
+              contentDescription = "Editar veículo",
+              tint = MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.size(18.dp)
+            )
+          }
+
+          IconButton(
+            onClick = onDelete,
+            modifier = Modifier.size(36.dp).testTag("btn_delete_${vehicle.id}")
+          ) {
+            Icon(
+              imageVector = Icons.Outlined.DeleteOutline,
+              contentDescription = "Excluir veículo",
+              tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+              modifier = Modifier.size(18.dp)
+            )
+          }
+        }
+      }
     }
+  }
 }

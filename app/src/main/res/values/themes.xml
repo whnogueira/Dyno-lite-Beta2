@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.DynoLite" parent="android:Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">#FF0A0D12</item>
-        <item name="android:navigationBarColor">#FF0A0D12</item>
-        <item name="android:windowBackground">#FF0A0D12</item>
+    <style name="Theme.MyApplication" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/dyno_background</item>
+        <item name="android:statusBarColor">@color/dyno_background</item>
+        <item name="android:navigationBarColor">@color/dyno_background</item>
+        <item name="android:windowSplashScreenBackground">@color/dyno_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_dyno_symbol</item>
     </style>
 </resources>

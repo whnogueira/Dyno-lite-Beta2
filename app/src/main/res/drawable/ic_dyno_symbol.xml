@@ -1,13 +1,68 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp"
-    android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Semicircular Gauge Track (Background Arc) -->
     <path
-        android:fillColor="#FFFF3B30"
-        android:pathData="M12,2 C6.48,2 2,6.48 2,12 C2,17.52 6.48,22 12,22 C17.52,22 22,17.52 22,12 C22,6.48 17.52,2 12,2 Z M12,20 C7.58,20 4,16.42 4,12 C4,7.58 7.58,4 12,4 C16.42,4 20,7.58 20,12 C20,16.42 16.42,20 12,20 Z" />
+        android:pathData="M 30,70 A 32,32 0 1,1 78,70"
+        android:strokeWidth="6"
+        android:strokeColor="#242832"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Active Power Arc (Cyan #39C6F4) -->
     <path
-        android:fillColor="#FF00F0FF"
-        android:pathData="M12,6 L14,12 L10,12 Z" />
+        android:pathData="M 30,70 A 32,32 0 0,1 74,40"
+        android:strokeWidth="6"
+        android:strokeColor="#39C6F4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Ascending Power Dynamic Wave (Subtle curve) -->
+    <path
+        android:pathData="M 34,66 Q 50,64 62,48 T 76,38"
+        android:strokeWidth="2.5"
+        android:strokeColor="#9DBEFF"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Center Pivot Circle -->
+    <path
+        android:pathData="M 54,62 m -6,0 a 6,6 0 1,0 12,0 a 6,6 0 1,0 -12,0"
+        android:fillColor="#303540" />
+
+    <!-- Orange Needle pointing Up-Right (#FF8A3D) -->
+    <path
+        android:pathData="M 54,62 L 72,40"
+        android:strokeWidth="3.5"
+        android:strokeColor="#FF8A3D"
+        android:strokeLineCap="round" />
+
+    <!-- Inner Pivot Dot -->
+    <path
+        android:pathData="M 54,62 m -2.5,0 a 2.5,2.5 0 1,0 5,0 a 2.5,2.5 0 1,0 -5,0"
+        android:fillColor="#FF8A3D" />
+
+    <!-- Discrete DL Letters text indicator -->
+    <!-- Letter D -->
+    <path
+        android:pathData="M 46,74 L 46,80 M 46,74 L 48.5,74 C 50.5,74 51.5,75 51.5,77 C 51.5,79 50.5,80 48.5,80 L 46,80"
+        android:strokeWidth="1.6"
+        android:strokeColor="#B7BCC7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+
+    <!-- Letter L -->
+    <path
+        android:pathData="M 55,74 L 55,80 L 59,80"
+        android:strokeWidth="1.6"
+        android:strokeColor="#B7BCC7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+
 </vector>

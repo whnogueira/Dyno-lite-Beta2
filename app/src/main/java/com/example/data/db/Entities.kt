@@ -1,89 +1,162 @@
 package com.example.data.db
 
 import androidx.room.Entity
+import androidx.room.ForeignKey
+import androidx.room.Index
 import androidx.room.PrimaryKey
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
+/**
+ * Entidade da tabela "tests" conforme especificação DynoMobileDB v1.
+ */
+@Entity(
+  tableName = "tests",
+  indices = [
+    Index(value = ["vehicleId"]),
+    Index(value = ["status"]),
+    Index(value = ["createdAt"])
+  ]
+)
+data class TestEntity(
+  @PrimaryKey
+  val id: String,
+  val vehicleId: String? = null,
+  val name: String = "",
+  val createdAt: String = currentIsoUtc(),
+  val completedAt: String? = null,
+  val status: String = "recording", // "recording", "completed", "cancelled", "interrupted"
+  val startSpeed: Float = 0f,
+  val endSpeed: Float = 0f,
+  val elapsedTime: Float = 0f,
+  val distance: Float = 0f,
+  val maxWheelPowerCv: Float = 0f,
+  val estimatedEnginePowerCv: Float = 0f,
+  val maxTorqueKgfm: Float = 0f,
+  val maxRpm: Int? = null,
+  val maxG: Float = 0f,
+  val averageGpsAccuracy: Float = 0f,
+  val confidence: String = "ALTA",
+  val sampleCount: Int = 0,
+  val quality: String = "BOA",
+  val finishReason: String? = null,
+  val invalidationReason: String? = null,
+  val averageSpeedDifferenceKmh: Float = 0f,
+  val maximumSpeedDifferenceKmh: Float = 0f,
+  val time0to60Kmh: Float? = null,
+  val time0to100Kmh: Float? = null,
+  val time60to100Kmh: Float? = null,
+  val time80to120Kmh: Float? = null,
+  val time100to200Kmh: Float? = null,
+  val time60Feet: Float? = null,
+  val time100M: Float? = null,
+  val time201M: Float? = null,
+  val time402M: Float? = null,
+  val appVersion: String = "0.20.0",
+  val configurationSnapshot: String = "{}"
+)
+
+/**
+ * Entidade da tabela "testSamples" indexada por testId.
+ */
+@Entity(
+  tableName = "testSamples",
+  indices = [
+    Index(value = ["testId"]),
+    Index(value = ["testId", "sampleIndex"])
+  ]
+)
+data class TestSampleEntity(
+  @PrimaryKey
+  val id: String,
+  val testId: String,
+  val sampleIndex: Int = 0,
+  val timestamp: String = currentIsoUtc(),
+  val elapsedTimeMs: Long = 0L,
+  val speed: Float = 0f,
+  val filteredSpeed: Float = 0f,
+  val acceleration: Float = 0f,
+  val filteredAccelerationZ: Float = 0f,
+  val correctedAccelerationZ: Float = 0f,
+  val longitudinalG: Float = 0f,
+  val rpm: Int? = null,
+  val distance: Float = 0f,
+  val wheelPowerCv: Float = 0f,
+  val enginePowerCv: Float = 0f,
+  val torqueKgfm: Float = 0f,
+  val gpsAccuracy: Float = 0f,
+  val gyroMagnitude: Float = 0f,
+  val confidence: String = "ALTA",
+  val isValid: Boolean = true,
+  val rejectionReason: String? = null
+)
+
+/**
+ * Entidade da tabela "vehicles".
+ */
 @Entity(tableName = "vehicles")
 data class VehicleEntity(
-    @PrimaryKey val id: String,
-    val name: String,
-    val brand: String,
-    val model: String,
-    val year: Int,
-    val curbWeightKg: Float,
-    val driverWeightKg: Float,
-    val additionalWeightKg: Float,
-    val frontalAreaM2: Float,
-    val dragCoefficientCd: Float,
-    val drivetrainLossPercent: Float,
-    val tireWidthMm: Int,
-    val tireProfilePercent: Int,
-    val tireRimInches: Int,
-    val finalDriveRatio: Float,
-    val gearRatiosJson: String,
-    val testGearIndex: Int,
-    val engineDisplacementCc: Int,
-    val aspiration: String,
-    val fuelType: String,
-    val revLimitRpm: Int,
-    val isPrimary: Boolean
+  @PrimaryKey
+  val id: String,
+  val name: String = "",
+  val manufacturer: String = "",
+  val model: String = "",
+  val year: Int = 2010,
+  val isPrimary: Boolean = false,
+  val fullJson: String = "{}"
 )
 
-@Entity(tableName = "run_results")
-data class RunResultEntity(
-    @PrimaryKey val id: String,
-    val vehicleId: String,
-    val vehicleName: String,
-    val testDateTimestamp: Long,
-    val peakEnginePowerCv: Float = 0f,
-    val peakEnginePowerRpm: Int = 0,
-    val peakEnginePowerSpeedKmh: Float = 0f,
-    val peakWheelPowerCv: Float = 0f,
-    val peakEngineTorqueKgm: Float = 0f,
-    val peakEngineTorqueRpm: Int = 0,
-    val peakLongitudinalG: Float = 0f,
-    val startSpeedKmh: Float = 0f,
-    val endSpeedKmh: Float = 0f,
-    val testGear: Int = 3,
-    val durationSeconds: Float = 0f,
-    val zeroToHundredSeconds: Float? = null,
-    val eightyToOneTwentySeconds: Float? = null,
-    val oneHundredToTwoHundredSeconds: Float? = null,
-    val quarterMileSeconds: Float? = null,
-    val quarterMileSpeedKmh: Float? = null,
-    val temperatureCelsius: Float = 25f,
-    val pressureHpa: Float = 1013.25f,
-    val saeCorrectionFactor: Float = 1f,
-    val totalVehicleMassKg: Float = 0f,
-    val gearUsed: String = "",
-    val gearRatioUsed: Float = 1.0f,
-    val finalDriveUsed: Float = 1.0f,
-    val drivetrainLossPercent: Float = 0f,
-    val cdUsed: Float = 0.34f,
-    val frontalAreaUsed: Float = 2.10f,
-    val crrUsed: Float = 0.015f,
-    val airDensityUsed: Float = 1.225f,
-    val slopeModeUsed: String = "FLAT",
-    val slopePercentUsed: Float = 0f,
-    val configurationSnapshotJson: String = "{}",
-    val samplesJson: String = "[]",
-    val qualityStatus: String = "VALID",
-    val technicalFailureReason: String? = null
+/**
+ * Entidade da tabela "simulations".
+ */
+@Entity(tableName = "simulations")
+data class SimulationEntity(
+  @PrimaryKey
+  val id: String,
+  val vehicleId: String? = null,
+  val name: String = "",
+  val createdAt: String = currentIsoUtc(),
+  val powerGainCv: Float = 0f,
+  val torqueGainKgfm: Float = 0f,
+  val payloadJson: String = "{}"
 )
 
-@Entity(tableName = "pending_sessions")
-data class PendingSessionEntity(
-    @PrimaryKey val sessionId: String,
-    val vehicleId: String,
-    val vehicleName: String,
-    val startTimeMs: Long,
-    val endTimeMs: Long,
-    val sampleCount: Int,
-    val status: String,
-    val errorMessage: String? = null,
-    val errorStage: String? = null,
-    val errorExceptionType: String? = null,
-    val invalidField: String? = null,
-    val samplesJson: String,
-    val lastAttemptTimestamp: Long = System.currentTimeMillis()
+/**
+ * Entidade da tabela "settings".
+ */
+@Entity(tableName = "settings")
+data class SettingEntity(
+  @PrimaryKey
+  val key: String,
+  val value: String = ""
 )
+
+fun currentIsoUtc(): String {
+  val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+  sdf.timeZone = TimeZone.getTimeZone("UTC")
+  return sdf.format(Date())
+}
+
+fun Long.toIsoUtc(): String {
+  val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+  sdf.timeZone = TimeZone.getTimeZone("UTC")
+  return sdf.format(Date(this))
+}
+
+fun String.isoToTimestampMs(): Long {
+  return try {
+    val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+    sdf.timeZone = TimeZone.getTimeZone("UTC")
+    sdf.parse(this)?.time ?: System.currentTimeMillis()
+  } catch (e: Exception) {
+    try {
+      val sdf2 = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+      sdf2.timeZone = TimeZone.getTimeZone("UTC")
+      sdf2.parse(this)?.time ?: System.currentTimeMillis()
+    } catch (e2: Exception) {
+      System.currentTimeMillis()
+    }
+  }
+}
