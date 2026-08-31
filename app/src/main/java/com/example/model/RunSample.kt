@@ -38,5 +38,7 @@ data class RunSample(
   val engineTorqueNm: Float = 0f,
   val confidenceLevel: String = "ALTA", // "ALTA", "MEDIA", "BAIXA"
   val isValid: Boolean = true,
+  val isGearShift: Boolean = false,
+  val isClutchDisengaged: Boolean = false,
   val rejectionReason: String? = null
 )

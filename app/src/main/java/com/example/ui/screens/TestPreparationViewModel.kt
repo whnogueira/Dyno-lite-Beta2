@@ -1484,48 +1484,6 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
       val rejectionRatio = if (totalInertialSamples > 0) rejectedInertialSamples.toFloat() / totalInertialSamples.toFloat() else 0f
       val speedGainKmh = maxGpsSpeedKmh - startGpsKmh
 
-      var invalidReasonText: String? = null
-
-      val isCompletePass = elapsedSec >= (DynoConfig.MIN_VALID_DURATION_MS / 1000f) &&
-        validCount >= DynoConfig.MIN_VALID_SAMPLES &&
-        validGpsUpdatesDuringRunCount >= DynoConfig.MIN_GPS_UPDATES &&
-        speedGainKmh >= DynoConfig.MIN_SPEED_GAIN_KMH
-
-      val runQualityStr = when {
-        reason == FinishReason.CANCELLED || (reason == FinishReason.USER_STOP && !isCompletePass) -> {
-          invalidReasonText = "Teste encerrado antes dos critérios mínimos de validação."
-          "INVÁLIDA"
-        }
-        reason == FinishReason.TIMEOUT -> {
-          invalidReasonText = "Tempo limite de medição atingido (> 25s)."
-          "INVÁLIDA"
-        }
-        elapsedSec < (DynoConfig.MIN_VALID_DURATION_MS / 1000f) -> {
-          invalidReasonText = "Duração insuficiente (${String.format(Locale.US, "%.2f", elapsedSec)}s < 2.50s) para registrar curva completa."
-          "INVÁLIDA"
-        }
-        speedGainKmh < DynoConfig.MIN_SPEED_GAIN_KMH -> {
-          invalidReasonText = "Ganho de velocidade GPS insuficiente (${String.format(Locale.US, "%.1f", speedGainKmh)} km/h < 8.0 km/h)."
-          "INVÁLIDA"
-        }
-        validGpsUpdatesDuringRunCount < DynoConfig.MIN_GPS_UPDATES -> {
-          invalidReasonText = "Poucas leituras de GPS válidas ($validGpsUpdatesDuringRunCount < ${DynoConfig.MIN_GPS_UPDATES})."
-          "INVÁLIDA"
-        }
-        lastGpsAccuracyMeters > 15f -> {
-          invalidReasonText = "Precisão horizontal do GPS insuficiente (${String.format(Locale.US, "%.1f", lastGpsAccuracyMeters)}m > 15m)."
-          "INVÁLIDA"
-        }
-        avgDiff <= 6.0f && lastGpsAccuracyMeters <= 8f && rejectionRatio <= 0.15f -> "BOA"
-        else -> "REGULAR"
-      }
-
-      val confidenceLevelStr = when (runQualityStr) {
-        "BOA" -> "ALTA"
-        "REGULAR" -> "MEDIA"
-        else -> "BAIXA"
-      }
-
       val avgHz = if (elapsedSec > 0f) finalSamples.size / elapsedSec else 0f
       val gpsFreqHz = if (elapsedSec > 0f) validGpsUpdatesDuringRunCount / elapsedSec else 0f
 
@@ -1552,18 +1510,6 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
         val drivetrain = profileToUse.drivetrain
         val efficiency = VehicleCalculations.getDrivetrainEfficiency(drivetrain, profileToUse.customDrivetrainLossPercent)
         drivetrainLossPercent = VehicleCalculations.getDrivetrainLossPercent(drivetrain, profileToUse.customDrivetrainLossPercent)
-
-        val confidence = VehicleCalculations.evaluateWeightConfidence(
-          useMeasuredWeight = profileToUse.useMeasuredWeight,
-          audioPreset = profileToUse.audioPreset,
-          hasGnv = profileToUse.gnvWeightKg > 0f,
-          hasCargo = profileToUse.cargoWeightKg > 0f
-        )
-        marginPercent = when (confidence) {
-          WeightConfidence.HIGH -> 7.0f
-          WeightConfidence.GOOD -> 10.0f
-          WeightConfidence.ESTIMATED -> 14.0f
-        }
 
         val tireCalc = VehicleCalculations.calculateTireDimensions(
           widthMm = profileToUse.tireWidthMm,
@@ -1592,12 +1538,17 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
           val sampleEnginePowerCv = VehicleCalculations.calculateEnginePowerCv(sampleWheelPowerCv, drivetrain, profileToUse.customDrivetrainLossPercent)
 
           val sampleRpm = VehicleCalculations.calculateRpmFromSpeed(vMps, tireCalc.circumferenceM, gearRatio, finalDrive)?.toInt()
-          val sampleEngineTorqueKgfm = if (sampleRpm != null && sampleRpm > 500) {
-            VehicleCalculations.calculateTorqueKgfm(sampleEnginePowerCv, sampleRpm.toFloat()) ?: 0f
-          } else 0f
-          val sampleWheelTorqueKgfm = if (sampleRpm != null && sampleRpm > 500) {
-            VehicleCalculations.calculateTorqueKgfm(sampleWheelPowerCv, sampleRpm.toFloat()) ?: 0f
-          } else 0f
+          val sampleTorquePair = if (sampleRpm != null && sampleRpm > 500) {
+            val engineWatts = VehicleCalculations.convertCvToWatts(sampleEnginePowerCv)
+            VehicleCalculations.calculateTorqueFromPowerWatts(engineWatts, sampleRpm.toFloat())
+          } else null
+
+          val sampleWheelTorquePair = if (sampleRpm != null && sampleRpm > 500) {
+            VehicleCalculations.calculateTorqueFromPowerWatts(wWatts, sampleRpm.toFloat())
+          } else null
+
+          val sampleEngineTorqueKgfm = sampleTorquePair?.second ?: 0f
+          val sampleWheelTorqueKgfm = sampleWheelTorquePair?.second ?: 0f
 
           sample.copy(
             longitudinalG = g,
@@ -1612,33 +1563,55 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
             enginePowerCv = sampleEnginePowerCv,
             wheelTorqueKgfm = sampleWheelTorqueKgfm,
             engineTorqueKgfm = sampleEngineTorqueKgfm,
-            wheelTorqueNm = sampleWheelTorqueKgfm * 9.80665f,
-            engineTorqueNm = sampleEngineTorqueKgfm * 9.80665f,
+            wheelTorqueNm = sampleWheelTorquePair?.first ?: 0f,
+            engineTorqueNm = sampleTorquePair?.first ?: 0f,
             engineRpm = sampleRpm
           )
         }
 
+        val sampleRpms = computedSamples.mapNotNull { it.engineRpm }.filter { it > 500 }
+        val sampleRpmSpan = if (sampleRpms.isNotEmpty()) ((sampleRpms.maxOrNull() ?: 0) - (sampleRpms.minOrNull() ?: 0)) else null
+        val isRpmValid = (sampleRpms.size >= 6 && sampleRpmSpan != null && sampleRpmSpan >= 800)
+
+        // Classificação técnica da passagem
+        val hasGearShift = finalSamples.any { it.isGearShift || it.isClutchDisengaged }
+        val isStable = _uiState.value.isPhoneStable && !_uiState.value.hasPhoneMovedAfterCalib
+
+        val qualityEval = VehicleCalculations.classifyRunQuality(
+          speedGainKmh = speedGainKmh,
+          validGpsLocationsCount = validGpsUpdatesDuringRunCount,
+          elapsedSec = elapsedSec,
+          lastGpsAccuracyMeters = lastGpsAccuracyMeters,
+          avgSyncDiffKmh = avgDiff,
+          rejectionRatio = rejectionRatio,
+          finishReason = reason,
+          isPhoneStable = isStable,
+          gearShiftDetected = hasGearShift,
+          finalGpsSpeedKmh = finalGpsKmh,
+          startGpsSpeedKmh = startGpsKmh,
+          rpmSpan = sampleRpmSpan
+        )
+
+        val runQualityStr = qualityEval.quality
+        val confidenceLevelStr = qualityEval.confidenceLevel
+        val invalidReasonText = qualityEval.invalidationReason
+        marginPercent = qualityEval.marginPercent
+
+        // Detecção de picos sustentados (evita pico isolado de vibração)
+        val peaks = VehicleCalculations.findSustainedPeaks(computedSamples, isRpmValid = isRpmValid)
+        wheelPowerCv = peaks.peakWheelPowerCv
+        enginePowerCv = peaks.peakEnginePowerCv
+        peakLongG = peaks.peakLongitudinalG
+        peakPowerRpm = peaks.peakPowerRpm
+        peakTorqueRpm = peaks.peakTorqueRpm
+        peakPowerSpeedKmh = peaks.peakPowerSpeedKmh
+        peakTorqueSpeedKmh = peaks.peakTorqueSpeedKmh
+        wheelTorqueKgfm = peaks.wheelTorqueKgfm
+        engineTorqueKgfm = peaks.engineTorqueKgfm
+
         val validComputed = computedSamples.filter { it.isValid && it.finalAccelerationMps2 > 0.05f }
         if (validComputed.isNotEmpty()) {
-          peakLongG = maxOf(peakLongG, validComputed.map { it.longitudinalG }.maxOrNull() ?: 0f)
           avgLongG = validComputed.map { it.longitudinalG }.average().toFloat()
-
-          val maxPowerSample = validComputed.maxByOrNull { it.enginePowerCv }
-          if (maxPowerSample != null) {
-            wheelPowerCv = maxPowerSample.wheelPowerCv
-            enginePowerCv = maxPowerSample.enginePowerCv
-            peakPowerRpm = maxPowerSample.engineRpm
-            peakPowerSpeedKmh = maxPowerSample.gpsSpeedKmh
-          }
-
-          val maxTorqueSample = validComputed.filter { (it.engineRpm ?: 0) in 1000..7500 }.maxByOrNull { it.engineTorqueKgfm }
-            ?: validComputed.maxByOrNull { it.engineTorqueKgfm }
-          if (maxTorqueSample != null) {
-            wheelTorqueKgfm = maxTorqueSample.wheelTorqueKgfm
-            engineTorqueKgfm = maxTorqueSample.engineTorqueKgfm
-            peakTorqueRpm = maxTorqueSample.engineRpm
-            peakTorqueSpeedKmh = maxTorqueSample.gpsSpeedKmh
-          }
         }
 
         val avgAccuracy = if (gpsFixHistory.isNotEmpty()) {

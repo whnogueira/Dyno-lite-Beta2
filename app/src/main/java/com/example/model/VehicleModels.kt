@@ -35,6 +35,40 @@ enum class WeightConfidence(
   )
 }
 
+data class RunQualityEvaluation(
+  val quality: String, // "BOA", "REGULAR", "DADOS INSUFICIENTES", "INVÁLIDA"
+  val confidenceLevel: String, // "ALTA", "MEDIA", "BAIXA"
+  val marginPercent: Float, // 10f, 15f, 25f
+  val marginDisplay: String, // "±10%", "±15%", "acima de ±20%", "Não homologada"
+  val invalidationReason: String? = null,
+  val isPreliminary: Boolean = false,
+  val canCompare: Boolean = false,
+  val isEligibleForComparison: Boolean = canCompare
+)
+
+data class SustainedPeaks(
+  val peakEnginePowerCv: Float,
+  val peakWheelPowerCv: Float,
+  val peakLongitudinalG: Float,
+  val peakPowerRpm: Int?,
+  val peakTorqueRpm: Int?,
+  val peakPowerSpeedKmh: Float,
+  val peakTorqueSpeedKmh: Float,
+  val engineTorqueKgfm: Float,
+  val wheelTorqueKgfm: Float
+)
+
+enum class CurveDisplayType {
+  RPM,
+  SPEED,
+  INSUFFICIENT
+}
+
+data class TorqueResult(
+  val torqueNm: Float = 0f,
+  val torqueKgfm: Float = 0f
+)
+
 data class TransmissionProfile(
   val id: String,
   val manufacturer: String,
@@ -291,22 +325,322 @@ object VehicleCalculations {
     return if (engineRpm in 400f..14000f) engineRpm else null
   }
 
+  fun calculateTorqueFromPowerWatts(powerWatts: Double, rpm: Int): TorqueResult {
+    if (rpm <= 0 || powerWatts <= 0.0 || powerWatts.isNaN() || powerWatts.isInfinite()) {
+      return TorqueResult(0f, 0f)
+    }
+    val omega = rpm * (2.0 * kotlin.math.PI / 60.0)
+    if (omega <= 0.0) return TorqueResult(0f, 0f)
+    val torqueNm = (powerWatts / omega).toFloat()
+    val torqueKgfm = torqueNm / 9.80665f
+    if (torqueNm.isNaN() || torqueNm.isInfinite() || torqueKgfm.isNaN() || torqueKgfm.isInfinite()) {
+      return TorqueResult(0f, 0f)
+    }
+    return TorqueResult(torqueNm, torqueKgfm)
+  }
+
+  fun calculateTorqueFromPowerWatts(powerWatts: Float, rpm: Float): Pair<Float, Float>? {
+    if (rpm <= 500f || rpm > 14000f || powerWatts <= 0f || rpm.isNaN() || powerWatts.isNaN()) return null
+    val res = calculateTorqueFromPowerWatts(powerWatts.toDouble(), rpm.toInt())
+    return if (res.torqueKgfm in 0.1f..2000f) Pair(res.torqueNm, res.torqueKgfm) else null
+  }
+
   fun calculateTorqueKgfm(powerCv: Float, rpm: Float): Float? {
-    if (rpm <= 500f || powerCv <= 0f) return null
-    // T (kgf.m) = (P (cv) * 716.2) / RPM
-    val torque = (powerCv * 716.2f) / rpm
-    return if (torque in 0.1f..1000f) torque else null
+    if (rpm <= 500f || powerCv <= 0f || rpm.isNaN() || powerCv.isNaN()) return null
+    val powerWatts = convertCvToWatts(powerCv)
+    return calculateTorqueFromPowerWatts(powerWatts, rpm)?.second
+  }
+
+  fun calculateTorqueNm(powerCv: Float, rpm: Float): Float? {
+    if (rpm <= 500f || powerCv <= 0f || rpm.isNaN() || powerCv.isNaN()) return null
+    val powerWatts = convertCvToWatts(powerCv)
+    return calculateTorqueFromPowerWatts(powerWatts, rpm)?.first
   }
 
   fun calculateTorqueNm(torqueKgfm: Float): Float {
-    return torqueKgfm * STANDARD_GRAVITY
+    if (torqueKgfm <= 0f || torqueKgfm.isNaN() || torqueKgfm.isInfinite()) return 0f
+    return torqueKgfm * 9.80665f
   }
 
-  fun calculateTorqueNmFromPower(powerWatts: Float, rpm: Float): Float? {
-    if (rpm <= 500f || powerWatts <= 0f) return null
-    val omega = (rpm * PI / 30.0).toFloat()
-    val torqueNm = powerWatts / omega
-    return if (torqueNm in 1f..10000f) torqueNm else null
+  fun calculateTorqueKgfmFromPower(powerCv: Float, rpm: Float): Float? {
+    return calculateTorqueKgfm(powerCv, rpm)
+  }
+
+  fun classifyRunQuality(
+    speedGainKmh: Float,
+    validGpsLocationsCount: Int = 10,
+    elapsedSec: Float = 5.0f,
+    lastGpsAccuracyMeters: Float = 5f,
+    avgSyncDiffKmh: Float = 2f,
+    rejectionRatio: Float = 0.05f,
+    finishReason: FinishReason = FinishReason.GPS_DECELERATION,
+    isPhoneStable: Boolean = true,
+    gearShiftDetected: Boolean = false,
+    finalGpsSpeedKmh: Float = 50f,
+    startGpsSpeedKmh: Float = 40f,
+    rpmSpan: Int? = null,
+    maxSpeedKmh: Float = finalGpsSpeedKmh,
+    startSpeedKmh: Float = startGpsSpeedKmh,
+    validGpsCount: Int = validGpsLocationsCount,
+    elapsedSeconds: Float = elapsedSec,
+    gpsAccuracy: Float = lastGpsAccuracyMeters,
+    isMountedStable: Boolean = isPhoneStable,
+    hasGearShift: Boolean = gearShiftDetected,
+    hasExcessiveVibration: Boolean = false,
+    hasBraking: Boolean = false,
+    hasLossOfGps: Boolean = false,
+    isReverseMovement: Boolean = false,
+    isSpeedDecrease: Boolean = false
+  ): RunQualityEvaluation {
+    val effectiveGpsCount = if (validGpsCount != 10) validGpsCount else validGpsLocationsCount
+    val effectiveElapsedSec = if (elapsedSeconds != 5.0f) elapsedSeconds else elapsedSec
+    val effectiveAccuracy = if (gpsAccuracy != 5f) gpsAccuracy else lastGpsAccuracyMeters
+    val effectiveStable = isPhoneStable && isMountedStable && !hasExcessiveVibration
+    val effectiveGearShift = gearShiftDetected || hasGearShift
+    val effectiveFinalSpeed = if (maxSpeedKmh != 50f) maxSpeedKmh else finalGpsSpeedKmh
+    val effectiveStartSpeed = if (startSpeedKmh != 40f) startSpeedKmh else startGpsSpeedKmh
+
+    // 1. Condições de INVÁLIDA
+    if (finishReason == FinishReason.CANCELLED || finishReason == FinishReason.GPS_LOST || hasLossOfGps) {
+      return RunQualityEvaluation(
+        quality = "INVÁLIDA",
+        confidenceLevel = "BAIXA",
+        marginPercent = 0f,
+        marginDisplay = "Não homologada",
+        invalidationReason = "Teste cancelado ou sinal GPS perdido.",
+        isPreliminary = false,
+        canCompare = false
+      )
+    }
+    if (hasBraking || isReverseMovement || isSpeedDecrease) {
+      return RunQualityEvaluation(
+        quality = "INVÁLIDA",
+        confidenceLevel = "BAIXA",
+        marginPercent = 0f,
+        marginDisplay = "Não homologada",
+        invalidationReason = "Frenagem, redução de velocidade ou movimento reverso detectado.",
+        isPreliminary = false,
+        canCompare = false
+      )
+    }
+    if (effectiveGpsCount < 4) {
+      return RunQualityEvaluation(
+        quality = "INVÁLIDA",
+        confidenceLevel = "BAIXA",
+        marginPercent = 0f,
+        marginDisplay = "Não homologada",
+        invalidationReason = "Menos de 4 leituras GPS válidas ($effectiveGpsCount < 4).",
+        isPreliminary = false,
+        canCompare = false
+      )
+    }
+    if (effectiveElapsedSec <= 0.05f) {
+      return RunQualityEvaluation(
+        quality = "INVÁLIDA",
+        confidenceLevel = "BAIXA",
+        marginPercent = 0f,
+        marginDisplay = "Não homologada",
+        invalidationReason = "Duração zero ou dados corrompidos.",
+        isPreliminary = false,
+        canCompare = false
+      )
+    }
+    if (effectiveFinalSpeed < (effectiveStartSpeed - 1.0f) || speedGainKmh <= 0f) {
+      return RunQualityEvaluation(
+        quality = "INVÁLIDA",
+        confidenceLevel = "BAIXA",
+        marginPercent = 0f,
+        marginDisplay = "Não homologada",
+        invalidationReason = "Velocidade final menor que a inicial.",
+        isPreliminary = false,
+        canCompare = false
+      )
+    }
+    if (effectiveGearShift) {
+      return RunQualityEvaluation(
+        quality = "INVÁLIDA",
+        confidenceLevel = "BAIXA",
+        marginPercent = 0f,
+        marginDisplay = "Não homologada",
+        invalidationReason = "Troca de marcha detectada durante a medição.",
+        isPreliminary = false,
+        canCompare = false
+      )
+    }
+    if (effectiveAccuracy > 25f) {
+      return RunQualityEvaluation(
+        quality = "INVÁLIDA",
+        confidenceLevel = "BAIXA",
+        marginPercent = 0f,
+        marginDisplay = "Não homologada",
+        invalidationReason = "Precisão horizontal do GPS degradada (> 25m).",
+        isPreliminary = false,
+        canCompare = false
+      )
+    }
+
+    // 2. Condições de DADOS INSUFICIENTES (ex: ganho de 6,4 km/h ou 14,9 km/h)
+    if (speedGainKmh < 15.0f || effectiveElapsedSec < 3.0f || effectiveGpsCount < 6 || (rpmSpan != null && rpmSpan < 800)) {
+      val reasonDesc = when {
+        speedGainKmh < 15.0f -> "Ganho de velocidade GPS insuficiente (${String.format(java.util.Locale.US, "%.1f", speedGainKmh)} km/h < 15.0 km/h)."
+        effectiveElapsedSec < 3.0f -> "Duração da passagem insuficiente (${String.format(java.util.Locale.US, "%.2f", effectiveElapsedSec)}s < 3.00s)."
+        effectiveGpsCount < 6 -> "Poucas leituras de GPS válidas ($effectiveGpsCount < 6)."
+        rpmSpan != null && rpmSpan < 800 -> "Faixa de RPM insuficiente ($rpmSpan RPM < 800 RPM)."
+        else -> "Faixa de aceleração insuficiente."
+      }
+      return RunQualityEvaluation(
+        quality = "DADOS INSUFICIENTES",
+        confidenceLevel = "BAIXA",
+        marginPercent = 25.0f,
+        marginDisplay = "acima de ±20%",
+        invalidationReason = reasonDesc,
+        isPreliminary = true,
+        canCompare = false
+      )
+    }
+
+    // 3. Condições de BOA
+    val isGpsGood = effectiveAccuracy <= 10.0f && avgSyncDiffKmh <= 8.0f && rejectionRatio <= 0.20f
+    if (speedGainKmh >= 20.0f && effectiveGpsCount >= 8 && effectiveElapsedSec in 3.0f..25.0f && isGpsGood && effectiveStable) {
+      return RunQualityEvaluation(
+        quality = "BOA",
+        confidenceLevel = "ALTA",
+        marginPercent = 10.0f,
+        marginDisplay = "±10%",
+        invalidationReason = null,
+        isPreliminary = false,
+        canCompare = true
+      )
+    }
+
+    // 4. Caso contrário: REGULAR (ganho entre 15.0 e 19.9 km/h ou dados utilizáveis)
+    return RunQualityEvaluation(
+      quality = "REGULAR",
+      confidenceLevel = "MEDIA",
+      marginPercent = 15.0f,
+      marginDisplay = "±15%",
+      invalidationReason = null,
+      isPreliminary = false,
+      canCompare = true
+    )
+  }
+
+  fun findSustainedPeaks(
+    samples: List<RunSample>,
+    isRpmValid: Boolean = true
+  ): SustainedPeaks {
+    val validSamples = samples.filter { it.isValid && (it.finalAccelerationMps2 > 0.05f || it.longitudinalG > 0.01f || it.enginePowerCv > 1f) }
+    if (validSamples.isEmpty()) {
+      return SustainedPeaks(
+        peakEnginePowerCv = 0f,
+        peakWheelPowerCv = 0f,
+        peakLongitudinalG = 0f,
+        peakPowerRpm = null,
+        peakTorqueRpm = null,
+        peakPowerSpeedKmh = 0f,
+        peakTorqueSpeedKmh = 0f,
+        engineTorqueKgfm = 0f,
+        wheelTorqueKgfm = 0f
+      )
+    }
+
+    val candidates = mutableListOf<RunSample>()
+    for (i in validSamples.indices) {
+      val sample = validSamples[i]
+      val prev = validSamples.getOrNull(i - 1)
+      val next = validSamples.getOrNull(i + 1)
+
+      val isSustainedG = when {
+        prev != null && next != null -> {
+          val avgNeighborG = (prev.longitudinalG + next.longitudinalG) / 2f
+          sample.longitudinalG <= (avgNeighborG * 1.6f + 0.05f)
+        }
+        else -> true
+      }
+
+      val isSustainedPower = when {
+        prev != null && next != null -> {
+          val avgNeighborP = (prev.enginePowerCv + next.enginePowerCv) / 2f
+          sample.enginePowerCv <= (avgNeighborP * 1.6f + 5f)
+        }
+        else -> true
+      }
+
+      if (isSustainedG && isSustainedPower) {
+        candidates.add(sample)
+      }
+    }
+
+    val pool = if (candidates.size >= 3) candidates else validSamples
+
+    val maxPowerSample = pool.maxByOrNull { it.enginePowerCv } ?: pool.first()
+    val maxEnginePowerCv = maxPowerSample.enginePowerCv
+    val maxWheelPowerCv = maxPowerSample.wheelPowerCv
+    val peakPowerRpm = if (isRpmValid) maxPowerSample.engineRpm else null
+    val peakPowerSpeedKmh = maxPowerSample.gpsSpeedKmh
+    val maxG = pool.map { it.longitudinalG }.maxOrNull() ?: 0f
+
+    var maxEngineTorqueKgfm = 0f
+    var maxWheelTorqueKgfm = 0f
+    var peakTorqueRpm: Int? = null
+    var peakTorqueSpeedKmh = peakPowerSpeedKmh
+
+    if (isRpmValid) {
+      val torquePool = pool.filter { (it.engineRpm ?: 0) in 1000..7500 && it.engineTorqueKgfm > 0f }
+      val maxTorqueSample = torquePool.maxByOrNull { it.engineTorqueKgfm } ?: pool.filter { it.engineTorqueKgfm > 0f }.maxByOrNull { it.engineTorqueKgfm }
+      if (maxTorqueSample != null && (maxTorqueSample.engineRpm ?: 0) > 500) {
+        maxEngineTorqueKgfm = maxTorqueSample.engineTorqueKgfm
+        maxWheelTorqueKgfm = maxTorqueSample.wheelTorqueKgfm
+        peakTorqueRpm = maxTorqueSample.engineRpm
+        peakTorqueSpeedKmh = maxTorqueSample.gpsSpeedKmh
+      }
+    }
+
+    return SustainedPeaks(
+      peakEnginePowerCv = maxEnginePowerCv,
+      peakWheelPowerCv = maxWheelPowerCv,
+      peakLongitudinalG = maxG,
+      peakPowerRpm = peakPowerRpm,
+      peakTorqueRpm = peakTorqueRpm,
+      peakPowerSpeedKmh = peakPowerSpeedKmh,
+      peakTorqueSpeedKmh = peakTorqueSpeedKmh,
+      engineTorqueKgfm = maxEngineTorqueKgfm,
+      wheelTorqueKgfm = maxWheelTorqueKgfm
+    )
+  }
+
+  fun evaluateCurveEligibility(
+    samples: List<RunSample>,
+    gearUsed: String?,
+    gearRatio: Float?,
+    finalDrive: Float?,
+    tireCircumferenceM: Double?,
+    speedGainKmh: Float
+  ): CurveDisplayType {
+    val validSamples = samples.filter {
+      it.isValid &&
+      it.filteredSpeedKmh > 0f &&
+      (it.enginePowerCv > 0f || it.wheelPowerCv > 0f) &&
+      !it.filteredSpeedKmh.isNaN() &&
+      !it.filteredSpeedKmh.isInfinite()
+    }
+    if (validSamples.size < 3 || speedGainKmh < 10.0f) {
+      return CurveDisplayType.INSUFFICIENT
+    }
+
+    val hasValidGear = !gearUsed.isNullOrBlank() && (gearRatio ?: 0f) > 0f && (finalDrive ?: 0f) > 0f && (tireCircumferenceM ?: 0.0) > 0.0
+    val rpms = validSamples.mapNotNull { it.engineRpm }.filter { it > 500 }
+    val rpmSpan = if (rpms.isNotEmpty()) ((rpms.maxOrNull() ?: 0) - (rpms.minOrNull() ?: 0)) else 0
+
+    if (hasValidGear && speedGainKmh >= 15.0f && rpmSpan >= 800 && rpms.size >= 8) {
+      return CurveDisplayType.RPM
+    }
+
+    if (speedGainKmh >= 10.0f && validSamples.size >= 6) {
+      return CurveDisplayType.SPEED
+    }
+
+    return CurveDisplayType.INSUFFICIENT
   }
 
   /**

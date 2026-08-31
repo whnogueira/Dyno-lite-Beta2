@@ -88,6 +88,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.RunResultRepository
+import com.example.model.CurveDisplayType
 import com.example.model.FinishReason
 import com.example.model.RunResult
 import com.example.model.RunSample
@@ -150,13 +151,20 @@ fun ResultsScreen(
   var selfTestResultMessage by remember { mutableStateOf<String?>(null) }
   var isRunningSelfTest by remember { mutableStateOf(false) }
 
-  // Check valid tests for the current vehicle to evaluate comparison eligibility
+  // Check valid tests for the current vehicle to evaluate comparison eligibility (BOA/REGULAR with gain >= 15 km/h)
   val currentVehicleName = currentDisplayedResult?.vehicleName ?: ""
   val validRunsForVehicle = remember(results, currentVehicleName) {
     if (currentVehicleName.isNotEmpty()) {
-      results.filter { it.vehicleName == currentVehicleName && it.quality != "INVÁLIDA" }
+      results.filter {
+        it.vehicleName == currentVehicleName &&
+        (it.quality == "BOA" || it.quality == "REGULAR") &&
+        it.speedGainKmh >= 15.0f
+      }
     } else {
-      results.filter { it.quality != "INVÁLIDA" }
+      results.filter {
+        (it.quality == "BOA" || it.quality == "REGULAR") &&
+        it.speedGainKmh >= 15.0f
+      }
     }
   }
   val canCompare = validRunsForVehicle.size >= 2
@@ -583,6 +591,51 @@ fun ResultsScreen(
             // -------------------------------------------------------------
             // FLUXO DE PASSAGEM VÁLIDA (SEM POTÊNCIA OU COM POTÊNCIA)
             // -------------------------------------------------------------
+            // Banner de DADOS INSUFICIENTES se a passagem teve ganho de velocidade insuficiente
+            if (run.quality == "DADOS INSUFICIENTES") {
+              Surface(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .testTag("banner_insufficient_data"),
+                shape = RoundedCornerShape(14.dp),
+                color = Color(0xFFFEF3C7),
+                border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.6f))
+              ) {
+                Row(
+                  modifier = Modifier.padding(14.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                  Surface(
+                    shape = CircleShape,
+                    color = Color(0xFFF59E0B),
+                    modifier = Modifier.size(36.dp)
+                  ) {
+                    Box(contentAlignment = Alignment.Center) {
+                      Icon(
+                        imageVector = Icons.Outlined.Info,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                      )
+                    }
+                  }
+                  Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                      text = "DADOS INSUFICIENTES",
+                      style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Black),
+                      color = Color(0xFF92400E)
+                    )
+                    Text(
+                      text = run.invalidationReason ?: "Estimativa preliminar — faixa de aceleração insuficiente.",
+                      style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, lineHeight = 16.sp),
+                      color = Color(0xFFB45309)
+                    )
+                  }
+                }
+              }
+            }
+
             // 1. VEÍCULO E DATA
             Surface(
               modifier = Modifier.fillMaxWidth(),
@@ -667,6 +720,7 @@ fun ResultsScreen(
             // 3. CARTÕES DE POTÊNCIA, TORQUE E FORÇA G (ESTIMADOS)
             if (run.estimatedPowerCv > 0f || run.peakLongitudinalG > 0f) {
               val runSamples = remember(run.id) { runResultRepository.getOrderedRunSamples(run.id) }
+              val isInsufficient = run.quality == "DADOS INSUFICIENTES"
 
               Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
@@ -687,11 +741,13 @@ fun ResultsScreen(
                         verticalAlignment = Alignment.CenterVertically
                       ) {
                         Text("POTÊNCIA MOTOR", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.5.sp), color = Color(0xFF38BDF8))
-                        Text("est.", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if (isInsufficient) "preliminar" else "est.", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = if (isInsufficient) FontWeight.Bold else FontWeight.Normal), color = if (isInsufficient) Color(0xFFF59E0B) else MaterialTheme.colorScheme.onSurfaceVariant)
                       }
                       val pCv = if (run.enginePowerCv > 0f) run.enginePowerCv else run.estimatedPowerCv
                       Text(String.format(Locale.US, "%.1f cv", pCv), style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace), color = MaterialTheme.colorScheme.onSurface)
-                      if (run.wheelPowerCv > 0f) {
+                      if (isInsufficient) {
+                        Text("Faixa insuficiente", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp, color = Color(0xFFF59E0B)))
+                      } else if (run.wheelPowerCv > 0f) {
                         Text(String.format(Locale.US, "Roda: %.1f cv", run.wheelPowerCv), style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                       }
                     }
@@ -711,12 +767,18 @@ fun ResultsScreen(
                         verticalAlignment = Alignment.CenterVertically
                       ) {
                         Text("TORQUE MOTOR", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.5.sp), color = Color(0xFFFB923C))
-                        Text("est.", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if (isInsufficient) "preliminar" else "est.", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                       }
                       val tKgfm = if (run.engineTorqueKgfm > 0f) run.engineTorqueKgfm else run.estimatedTorqueKgfm
-                      Text(String.format(Locale.US, "%.1f kgfm", tKgfm), style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace), color = MaterialTheme.colorScheme.onSurface)
-                      if (run.wheelTorqueKgfm > 0f) {
-                        Text(String.format(Locale.US, "Roda: %.1f kgfm", run.wheelTorqueKgfm), style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                      val hasValidTorque = !isInsufficient && tKgfm > 0f && (run.peakTorqueRpm ?: 0) > 500
+                      if (hasValidTorque) {
+                        Text(String.format(Locale.US, "%.1f kgfm", tKgfm), style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace), color = MaterialTheme.colorScheme.onSurface)
+                        if (run.wheelTorqueKgfm > 0f) {
+                          Text(String.format(Locale.US, "Roda: %.1f kgfm", run.wheelTorqueKgfm), style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                      } else {
+                        Text("Indisponível", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("RPM não confiável", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                       }
                     }
                   }
@@ -741,13 +803,17 @@ fun ResultsScreen(
 
                 // Gráfico Dinamômetro com Curva de Potência e Torque
                 DynoPowerTorqueGraphCard(
+                  run = run,
                   samples = runSamples,
                   hasVehicleConfig = true,
                   peakPowerCv = if (run.enginePowerCv > 0f) run.enginePowerCv else run.estimatedPowerCv,
                   peakTorqueKgfm = if (run.engineTorqueKgfm > 0f) run.engineTorqueKgfm else run.estimatedTorqueKgfm,
                   modifier = Modifier.fillMaxWidth()
                 )
-                DynoGraphLegend(modifier = Modifier.fillMaxWidth())
+                DynoGraphLegend(
+                  showTorque = !isInsufficient && ((run.engineTorqueKgfm > 0f || run.estimatedTorqueKgfm > 0f) && (run.peakTorqueRpm ?: 0) > 500),
+                  modifier = Modifier.fillMaxWidth()
+                )
 
                 // Splits de Aceleração (se houver tempos registrados)
                 if (hasAnySplits(run)) {
@@ -770,10 +836,16 @@ fun ResultsScreen(
                       imageVector = Icons.Outlined.Info,
                       contentDescription = null,
                       modifier = Modifier.size(16.dp),
-                      tint = MaterialTheme.colorScheme.primary
+                      tint = if (isInsufficient) Color(0xFFF59E0B) else MaterialTheme.colorScheme.primary
                     )
+                    val marginText = when (run.quality) {
+                      "BOA" -> "Estimativa Dyno Lite (margem ±10% com base em peso e arrasto). Não substitui dinamômetro certificado."
+                      "REGULAR" -> "Estimativa Dyno Lite (margem ±15% com base em peso e arrasto). Não substitui dinamômetro certificado."
+                      "DADOS INSUFICIENTES" -> "Estimativa preliminar (acima de ±20%). Faixa de aceleração insuficiente para homologação ou comparação."
+                      else -> "Passagem não homologada para medição de potência."
+                    }
                     Text(
-                      text = "Estimativa Dyno Lite (margem ±${run.estimatedMarginPercent.toInt()}% com base em peso e arrasto). Não substitui dinamômetro certificado.",
+                      text = marginText,
                       style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, lineHeight = 15.sp),
                       color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -836,15 +908,27 @@ fun ResultsScreen(
                   verticalAlignment = Alignment.CenterVertically
                 ) {
                   Text("QUALIDADE DO SINAL E ESTABILIDADE", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp))
+                  val qualityBadgeBg = when (run.quality) {
+                    "BOA" -> MaterialTheme.colorScheme.primaryContainer
+                    "REGULAR" -> MaterialTheme.colorScheme.tertiaryContainer
+                    "DADOS INSUFICIENTES" -> Color(0xFFFEF3C7)
+                    else -> MaterialTheme.colorScheme.errorContainer
+                  }
+                  val qualityBadgeText = when (run.quality) {
+                    "BOA" -> MaterialTheme.colorScheme.onPrimaryContainer
+                    "REGULAR" -> MaterialTheme.colorScheme.onTertiaryContainer
+                    "DADOS INSUFICIENTES" -> Color(0xFF92400E)
+                    else -> MaterialTheme.colorScheme.onErrorContainer
+                  }
                   Surface(
                     shape = CircleShape,
-                    color = if (run.quality == "BOA") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.tertiaryContainer
+                    color = qualityBadgeBg
                   ) {
                     Text(
                       text = run.quality,
                       modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                       style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
-                      color = if (run.quality == "BOA") MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onTertiaryContainer
+                      color = qualityBadgeText
                     )
                   }
                 }
@@ -1289,37 +1373,53 @@ private fun SplitMetricItem(
  * - Altura entre 260 e 320 dp (290 dp)
  * - Cantos arredondados
  * - Tema escuro
- * - Eixo horizontal: RPM (ou km/h se RPM indisponível)
- * - Eixo vertical esquerdo: cv
- * - Eixo vertical direito: kgfm
- * - Desenha as curvas reais a partir dos pontos calculados em telemetria
+ * - Eixo horizontal: RPM (ou km/h se RPM indisponível) com valores numéricos
+ * - Eixo vertical esquerdo: cv com valores numéricos
+ * - Eixo vertical direito: kgfm com valores numéricos
+ * - Marcha, RPM inicial/final e Velocidade Inicial
+ * - Faixa insuficiente para gerar curva confiável quando dados inadequados
  */
 @Composable
 private fun DynoPowerTorqueGraphCard(
+  run: RunResult,
   samples: List<RunSample> = emptyList(),
   hasVehicleConfig: Boolean = true,
   peakPowerCv: Float = 0f,
   peakTorqueKgfm: Float = 0f,
   modifier: Modifier = Modifier
 ) {
-  // Processamento e suavização controlada das amostras para o gráfico (Requisito 9):
-  // - ordenar por RPM ou velocidade
-  // - remover amostras inválidas
-  // - agrupar em faixas (bins)
-  // - usar mediana por faixa
-  // - aplicar suavização moderada
-  // - impedir picos isolados
-  // - não inventar pontos
-  // - potência e torque compartilham o mesmo eixo horizontal
-  val processedPoints = remember(samples) {
-    processSamplesForGraph(samples)
+  val curveType = remember(run, samples) {
+    VehicleCalculations.evaluateCurveEligibility(
+      samples = samples,
+      gearUsed = run.gearUsed,
+      gearRatio = run.gearRatioUsed,
+      finalDrive = run.finalDriveUsed,
+      tireCircumferenceM = 1.9,
+      speedGainKmh = run.speedGainKmh
+    )
   }
 
-  val hasValidPlotData = processedPoints.size >= 3
+  val useRpm = curveType == CurveDisplayType.RPM
+  val processedPoints = remember(samples, curveType) {
+    if (curveType == CurveDisplayType.INSUFFICIENT) {
+      emptyList()
+    } else {
+      processSamplesForGraph(samples, useRpm)
+    }
+  }
+
+  val hasValidPlotData = curveType != CurveDisplayType.INSUFFICIENT && processedPoints.size >= 3
+
+  val startSpeedDisplay = String.format(Locale.US, "%.1f km/h", if (run.runStartGpsSpeedKmh > 0f) run.runStartGpsSpeedKmh else run.startSpeedKmh)
+  val gearDisplay = if (run.gearUsed.isNotBlank()) run.gearUsed else "Indisponível"
+
+  val minRpm = if (useRpm && processedPoints.isNotEmpty()) processedPoints.minOf { it.x }.toInt() else null
+  val maxRpm = if (useRpm && processedPoints.isNotEmpty()) processedPoints.maxOf { it.x }.toInt() else null
+  val rpmRangeDisplay = if (minRpm != null && maxRpm != null && maxRpm > minRpm) "$minRpm - $maxRpm RPM" else "Indisponível"
 
   Card(
     modifier = modifier
-      .height(290.dp)
+      .height(310.dp)
       .testTag("dyno_graph_card"),
     shape = RoundedCornerShape(18.dp),
     colors = CardDefaults.cardColors(
@@ -1327,186 +1427,264 @@ private fun DynoPowerTorqueGraphCard(
     ),
     border = BorderStroke(1.dp, Color(0xFF263042))
   ) {
-    Box(
+    Column(
       modifier = Modifier
         .fillMaxSize()
-        .padding(horizontal = 14.dp, vertical = 12.dp)
+        .padding(horizontal = 14.dp, vertical = 10.dp)
     ) {
-      // Background Grid & Technical Axes Canvas
-      Canvas(modifier = Modifier.fillMaxSize()) {
-        val gridColor = Color(0xFF1E293B)
-        val axisColor = Color(0xFF475569)
-
-        val paddingLeft = 34.dp.toPx()
-        val paddingRight = 34.dp.toPx()
-        val paddingTop = 24.dp.toPx()
-        val paddingBottom = 28.dp.toPx()
-
-        val graphWidth = size.width - paddingLeft - paddingRight
-        val graphHeight = size.height - paddingTop - paddingBottom
-
-        // Draw horizontal grid lines
-        val horizontalSteps = 4
-        for (i in 0..horizontalSteps) {
-          val y = paddingTop + (graphHeight / horizontalSteps) * i
-          drawLine(
-            color = if (i == horizontalSteps) axisColor else gridColor,
-            start = Offset(paddingLeft, y),
-            end = Offset(size.width - paddingRight, y),
-            strokeWidth = if (i == horizontalSteps) 1.5f else 1f,
-            pathEffect = if (i == horizontalSteps) null else PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
+      // Header com Marcha, RPM e Velocidade Inicial
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(bottom = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+          Text(
+            text = "Marcha: $gearDisplay",
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+            color = Color(0xFF94A3B8)
+          )
+          Text(
+            text = "RPM: $rpmRangeDisplay",
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+            color = Color(0xFF94A3B8)
           )
         }
+        Text(
+          text = "V. Inicial: $startSpeedDisplay",
+          style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+          color = Color(0xFF94A3B8)
+        )
+      }
 
-        // Draw vertical grid lines (RPM steps)
-        val verticalSteps = 5
-        for (i in 0..verticalSteps) {
-          val x = paddingLeft + (graphWidth / verticalSteps) * i
-          drawLine(
-            color = if (i == 0 || i == verticalSteps) axisColor else gridColor,
-            start = Offset(x, paddingTop),
-            end = Offset(x, size.height - paddingBottom),
-            strokeWidth = if (i == 0 || i == verticalSteps) 1.5f else 1f,
-            pathEffect = if (i == 0 || i == verticalSteps) null else PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
-          )
-        }
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .weight(1f)
+      ) {
+        // Background Grid & Technical Axes Canvas
+        Canvas(modifier = Modifier.fillMaxSize()) {
+          val gridColor = Color(0xFF1E293B)
+          val axisColor = Color(0xFF475569)
 
-        // Se houver dados reais de potência e torque, traçamos as curvas suavizadas
-        if (hasValidPlotData) {
-          val maxPower = maxOf(peakPowerCv, processedPoints.maxOfOrNull { it.powerCv } ?: 100f) * 1.15f
-          val maxTorque = maxOf(peakTorqueKgfm, processedPoints.maxOfOrNull { it.torqueKgfm } ?: 20f) * 1.15f
+          val paddingLeft = 38.dp.toPx()
+          val paddingRight = 38.dp.toPx()
+          val paddingTop = 16.dp.toPx()
+          val paddingBottom = 26.dp.toPx()
 
-          val minX = processedPoints.minOfOrNull { it.x } ?: 1500f
-          val maxX = processedPoints.maxOfOrNull { it.x } ?: 6500f
-          val rangeX = (maxX - minX).coerceAtLeast(1f)
+          val graphWidth = size.width - paddingLeft - paddingRight
+          val graphHeight = size.height - paddingTop - paddingBottom
 
-          // Curva de Potência (Azul / Ciano)
-          val powerPath = androidx.compose.ui.graphics.Path()
-          var isFirstPower = true
-
-          processedPoints.forEach { pt ->
-            val normX = ((pt.x - minX) / rangeX).coerceIn(0f, 1f)
-            val normY = (pt.powerCv / maxPower.coerceAtLeast(1f)).coerceIn(0f, 1f)
-
-            val px = paddingLeft + normX * graphWidth
-            val py = size.height - paddingBottom - normY * graphHeight
-
-            if (isFirstPower) {
-              powerPath.moveTo(px, py)
-              isFirstPower = false
-            } else {
-              powerPath.lineTo(px, py)
-            }
+          // Draw horizontal grid lines
+          val horizontalSteps = 4
+          for (i in 0..horizontalSteps) {
+            val y = paddingTop + (graphHeight / horizontalSteps) * i
+            drawLine(
+              color = if (i == horizontalSteps) axisColor else gridColor,
+              start = Offset(paddingLeft, y),
+              end = Offset(size.width - paddingRight, y),
+              strokeWidth = if (i == horizontalSteps) 1.5f else 1f,
+              pathEffect = if (i == horizontalSteps) null else PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
+            )
           }
 
-          drawPath(
-            path = powerPath,
-            color = Color(0xFF38BDF8),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
-          )
+          // Draw vertical grid lines
+          val verticalSteps = 4
+          for (i in 0..verticalSteps) {
+            val x = paddingLeft + (graphWidth / verticalSteps) * i
+            drawLine(
+              color = if (i == 0 || i == verticalSteps) axisColor else gridColor,
+              start = Offset(x, paddingTop),
+              end = Offset(x, size.height - paddingBottom),
+              strokeWidth = if (i == 0 || i == verticalSteps) 1.5f else 1f,
+              pathEffect = if (i == 0 || i == verticalSteps) null else PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
+            )
+          }
 
-          // Curva de Torque (Laranja)
-          val torquePath = androidx.compose.ui.graphics.Path()
-          var isFirstTorque = true
+          // Se houver dados reais, traçamos as curvas
+          if (hasValidPlotData) {
+            val maxPower = maxOf(peakPowerCv, processedPoints.maxOfOrNull { it.powerCv } ?: 100f) * 1.15f
+            val maxTorque = maxOf(peakTorqueKgfm, processedPoints.maxOfOrNull { it.torqueKgfm } ?: 20f) * 1.15f
 
-          processedPoints.forEach { pt ->
-            if (pt.torqueKgfm > 0f) {
+            val minX = processedPoints.minOfOrNull { it.x } ?: if (useRpm) 1500f else 20f
+            val maxX = processedPoints.maxOfOrNull { it.x } ?: if (useRpm) 6500f else 100f
+            val rangeX = (maxX - minX).coerceAtLeast(1f)
+
+            // Curva de Potência (Azul / Ciano)
+            val powerPath = androidx.compose.ui.graphics.Path()
+            var isFirstPower = true
+
+            processedPoints.forEach { pt ->
               val normX = ((pt.x - minX) / rangeX).coerceIn(0f, 1f)
-              val normY = (pt.torqueKgfm / maxTorque.coerceAtLeast(1f)).coerceIn(0f, 1f)
+              val normY = (pt.powerCv / maxPower.coerceAtLeast(1f)).coerceIn(0f, 1f)
 
               val px = paddingLeft + normX * graphWidth
               val py = size.height - paddingBottom - normY * graphHeight
 
-              if (isFirstTorque) {
-                torquePath.moveTo(px, py)
-                isFirstTorque = false
+              if (isFirstPower) {
+                powerPath.moveTo(px, py)
+                isFirstPower = false
               } else {
-                torquePath.lineTo(px, py)
+                powerPath.lineTo(px, py)
               }
             }
+
+            drawPath(
+              path = powerPath,
+              color = Color(0xFF38BDF8),
+              style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+            )
+
+            // Curva de Torque (Laranja) - somente com RPM válido
+            if (useRpm) {
+              val torquePath = androidx.compose.ui.graphics.Path()
+              var isFirstTorque = true
+
+              processedPoints.forEach { pt ->
+                if (pt.torqueKgfm > 0f) {
+                  val normX = ((pt.x - minX) / rangeX).coerceIn(0f, 1f)
+                  val normY = (pt.torqueKgfm / maxTorque.coerceAtLeast(1f)).coerceIn(0f, 1f)
+
+                  val px = paddingLeft + normX * graphWidth
+                  val py = size.height - paddingBottom - normY * graphHeight
+
+                  if (isFirstTorque) {
+                    torquePath.moveTo(px, py)
+                    isFirstTorque = false
+                  } else {
+                    torquePath.lineTo(px, py)
+                  }
+                }
+              }
+
+              drawPath(
+                path = torquePath,
+                color = Color(0xFFFB923C),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+              )
+            }
           }
-
-          drawPath(
-            path = torquePath,
-            color = Color(0xFFFB923C),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
-          )
         }
-      }
 
-      // Left Axis Label: cv
-      Text(
-        text = "cv",
-        style = MaterialTheme.typography.labelSmall.copy(
-          fontWeight = FontWeight.Bold,
-          fontSize = 11.sp
-        ),
-        color = Color(0xFF38BDF8),
-        modifier = Modifier
-          .align(Alignment.TopStart)
-          .padding(start = 2.dp, top = 2.dp)
-      )
-
-      // Right Axis Label: kgfm
-      Text(
-        text = "kgfm",
-        style = MaterialTheme.typography.labelSmall.copy(
-          fontWeight = FontWeight.Bold,
-          fontSize = 11.sp
-        ),
-        color = Color(0xFFFB923C),
-        modifier = Modifier
-          .align(Alignment.TopEnd)
-          .padding(end = 2.dp, top = 2.dp)
-      )
-
-      // Bottom Axis Label: RPM ou km/h
-      Text(
-        text = "RPM",
-        style = MaterialTheme.typography.labelSmall.copy(
-          fontWeight = FontWeight.Bold,
-          fontSize = 11.sp,
-          letterSpacing = 0.5.sp
-        ),
-        color = Color(0xFF94A3B8),
-        modifier = Modifier
-          .align(Alignment.BottomCenter)
-          .padding(bottom = 2.dp)
-      )
-
-      // Se não houver pontos suficientes, exibe a moldura informativa
-      if (!hasValidPlotData) {
+        // Left Axis Label & Value: cv
         Column(
           modifier = Modifier
-            .align(Alignment.Center)
-            .padding(horizontal = 24.dp),
-          horizontalAlignment = Alignment.CenterHorizontally,
-          verticalArrangement = Arrangement.spacedBy(8.dp)
+            .align(Alignment.TopStart)
+            .padding(start = 2.dp, top = 2.dp)
         ) {
-          Surface(
-            shape = CircleShape,
-            color = Color(0xFF1E293B)
-          ) {
-            Icon(
-              imageVector = Icons.Outlined.ShowChart,
-              contentDescription = null,
-              tint = Color(0xFF38BDF8),
-              modifier = Modifier
-                .padding(10.dp)
-                .size(24.dp)
+          Text(
+            text = "cv",
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp),
+            color = Color(0xFF38BDF8)
+          )
+          if (hasValidPlotData) {
+            val maxPower = maxOf(peakPowerCv, processedPoints.maxOfOrNull { it.powerCv } ?: 100f) * 1.15f
+            Text(
+              text = "${maxPower.toInt()}",
+              style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontFamily = FontFamily.Monospace),
+              color = Color(0xFF64748B)
             )
           }
+        }
 
-          Text(
-            text = "Curva calculada com base na telemetria GPS e inercial.",
-            style = MaterialTheme.typography.bodySmall.copy(
-              fontSize = 12.sp,
-              lineHeight = 18.sp,
-              fontWeight = FontWeight.Medium
-            ),
-            color = Color(0xFFCBD5E1),
-            textAlign = TextAlign.Center
-          )
+        // Right Axis Label & Value: kgfm
+        if (useRpm) {
+          Column(
+            modifier = Modifier
+              .align(Alignment.TopEnd)
+              .padding(end = 2.dp, top = 2.dp),
+            horizontalAlignment = Alignment.End
+          ) {
+            Text(
+              text = "kgfm",
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp),
+              color = Color(0xFFFB923C)
+            )
+            if (hasValidPlotData) {
+              val maxTorque = maxOf(peakTorqueKgfm, processedPoints.maxOfOrNull { it.torqueKgfm } ?: 20f) * 1.15f
+              Text(
+                text = String.format(Locale.US, "%.0f", maxTorque),
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontFamily = FontFamily.Monospace),
+                color = Color(0xFF64748B)
+              )
+            }
+          }
+        }
+
+        // Bottom Axis Label & Range Values: RPM ou km/h
+        Row(
+          modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .padding(horizontal = 38.dp, vertical = 2.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          if (hasValidPlotData) {
+            val minX = processedPoints.minOf { it.x }.toInt()
+            val maxX = processedPoints.maxOf { it.x }.toInt()
+            Text(
+              text = "$minX",
+              style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp, fontFamily = FontFamily.Monospace),
+              color = Color(0xFF64748B)
+            )
+            Text(
+              text = if (useRpm) "RPM" else "km/h",
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp, letterSpacing = 0.5.sp),
+              color = Color(0xFF94A3B8)
+            )
+            Text(
+              text = "$maxX",
+              style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp, fontFamily = FontFamily.Monospace),
+              color = Color(0xFF64748B)
+            )
+          } else {
+            Spacer(modifier = Modifier.weight(1f))
+            Text(
+              text = if (useRpm) "RPM" else "km/h",
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp, letterSpacing = 0.5.sp),
+              color = Color(0xFF94A3B8)
+            )
+            Spacer(modifier = Modifier.weight(1f))
+          }
+        }
+
+        // Se a faixa for insuficiente ou dados não plotáveis
+        if (!hasValidPlotData) {
+          Column(
+            modifier = Modifier
+              .align(Alignment.Center)
+              .padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            Surface(
+              shape = CircleShape,
+              color = Color(0xFF1E293B)
+            ) {
+              Icon(
+                imageVector = Icons.Outlined.ShowChart,
+                contentDescription = null,
+                tint = if (curveType == CurveDisplayType.INSUFFICIENT) Color(0xFFF59E0B) else Color(0xFF38BDF8),
+                modifier = Modifier
+                  .padding(10.dp)
+                  .size(24.dp)
+              )
+            }
+
+            Text(
+              text = if (curveType == CurveDisplayType.INSUFFICIENT) "Faixa insuficiente para gerar curva confiável." else "Curva calculada com base na telemetria GPS e inercial.",
+              style = MaterialTheme.typography.bodySmall.copy(
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+                fontWeight = FontWeight.Medium
+              ),
+              color = if (curveType == CurveDisplayType.INSUFFICIENT) Color(0xFFFCD34D) else Color(0xFFCBD5E1),
+              textAlign = TextAlign.Center
+            )
+          }
         }
       }
     }
@@ -1517,7 +1695,10 @@ private fun DynoPowerTorqueGraphCard(
  * 5. Legenda das Curvas (Imediatamente abaixo do gráfico e fora da área das curvas)
  */
 @Composable
-private fun DynoGraphLegend(modifier: Modifier = Modifier) {
+private fun DynoGraphLegend(
+  showTorque: Boolean = true,
+  modifier: Modifier = Modifier
+) {
   Row(
     modifier = modifier.padding(horizontal = 8.dp, vertical = 2.dp),
     horizontalArrangement = Arrangement.Center,
@@ -1544,27 +1725,29 @@ private fun DynoGraphLegend(modifier: Modifier = Modifier) {
       )
     }
 
-    Spacer(modifier = Modifier.width(24.dp))
+    if (showTorque) {
+      Spacer(modifier = Modifier.width(24.dp))
 
-    // Linha laranja — Torque
-    Row(
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-      Box(
-        modifier = Modifier
-          .width(20.dp)
-          .height(4.dp)
-          .background(Color(0xFFFB923C), RoundedCornerShape(2.dp))
-      )
-      Text(
-        text = "Torque (kgfm)",
-        style = MaterialTheme.typography.labelMedium.copy(
-          fontWeight = FontWeight.SemiBold,
-          fontSize = 12.sp
-        ),
-        color = MaterialTheme.colorScheme.onSurface
-      )
+      // Linha laranja — Torque
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+      ) {
+        Box(
+          modifier = Modifier
+            .width(20.dp)
+            .height(4.dp)
+            .background(Color(0xFFFB923C), RoundedCornerShape(2.dp))
+        )
+        Text(
+          text = "Torque (kgfm)",
+          style = MaterialTheme.typography.labelMedium.copy(
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 12.sp
+          ),
+          color = MaterialTheme.colorScheme.onSurface
+        )
+      }
     }
   }
 }
@@ -2662,26 +2845,25 @@ private data class GraphPoint(
   val torqueKgfm: Float
 )
 
-private fun processSamplesForGraph(samples: List<RunSample>): List<GraphPoint> {
+private fun processSamplesForGraph(samples: List<RunSample>, useRpm: Boolean): List<GraphPoint> {
   val validSamples = samples.filter { sample ->
     sample.isValid &&
     sample.filteredSpeedKmh > 0f &&
     (sample.enginePowerCv > 0f || sample.wheelPowerCv > 0f) &&
+    (!useRpm || (sample.engineRpm ?: 0) > 500) &&
     !sample.filteredSpeedKmh.isNaN() &&
     !sample.filteredSpeedKmh.isInfinite()
   }
   if (validSamples.size < 3) return emptyList()
 
-  val hasRpm = validSamples.any { (it.engineRpm ?: 0) > 500 }
-
   // 1. Ordenar por RPM ou velocidade
   val sortedSamples = validSamples.sortedBy { sample ->
-    if (hasRpm) (sample.engineRpm ?: 0).toFloat() else sample.filteredSpeedKmh
+    if (useRpm) (sample.engineRpm ?: 0).toFloat() else sample.filteredSpeedKmh
   }
 
   // 2. Agrupar em faixas (bins)
-  val minX = sortedSamples.first().let { if (hasRpm) (it.engineRpm ?: 0).toFloat() else it.filteredSpeedKmh }
-  val maxX = sortedSamples.last().let { if (hasRpm) (it.engineRpm ?: 0).toFloat() else it.filteredSpeedKmh }
+  val minX = sortedSamples.first().let { if (useRpm) (it.engineRpm ?: 0).toFloat() else it.filteredSpeedKmh }
+  val maxX = sortedSamples.last().let { if (useRpm) (it.engineRpm ?: 0).toFloat() else it.filteredSpeedKmh }
   if (maxX <= minX) return emptyList()
 
   val numBins = (sortedSamples.size / 3).coerceIn(12, 30)
@@ -2693,14 +2875,18 @@ private fun processSamplesForGraph(samples: List<RunSample>): List<GraphPoint> {
     val binStart = minX + i * binWidth
     val binEnd = if (i == numBins - 1) maxX + 0.001f else binStart + binWidth
     val inBin = sortedSamples.filter { sample ->
-      val xVal = if (hasRpm) (sample.engineRpm ?: 0).toFloat() else sample.filteredSpeedKmh
+      val xVal = if (useRpm) (sample.engineRpm ?: 0).toFloat() else sample.filteredSpeedKmh
       xVal >= binStart && xVal < binEnd
     }
     if (inBin.isNotEmpty()) {
       // 3. Usar mediana por faixa para evitar picos isolados
-      val medianX = inBin.map { if (hasRpm) (it.engineRpm ?: 0).toFloat() else it.filteredSpeedKmh }.sorted()[inBin.size / 2]
+      val medianX = inBin.map { if (useRpm) (it.engineRpm ?: 0).toFloat() else it.filteredSpeedKmh }.sorted()[inBin.size / 2]
       val medianPower = inBin.map { if (it.enginePowerCv > 0f) it.enginePowerCv else it.wheelPowerCv }.sorted()[inBin.size / 2]
-      val medianTorque = inBin.map { if (it.engineTorqueKgfm > 0f) it.engineTorqueKgfm else it.wheelTorqueKgfm }.sorted()[inBin.size / 2]
+      val medianTorque = if (useRpm) {
+        inBin.map { if (it.engineTorqueKgfm > 0f) it.engineTorqueKgfm else it.wheelTorqueKgfm }.sorted()[inBin.size / 2]
+      } else {
+        0f
+      }
       binnedPoints.add(GraphPoint(medianX, medianPower, medianTorque))
     }
   }
@@ -2715,7 +2901,7 @@ private fun processSamplesForGraph(samples: List<RunSample>): List<GraphPoint> {
     val next = binnedPoints[(i + 1).coerceAtMost(binnedPoints.size - 1)]
 
     val sPower = prev.powerCv * 0.25f + curr.powerCv * 0.50f + next.powerCv * 0.25f
-    val sTorque = prev.torqueKgfm * 0.25f + curr.torqueKgfm * 0.50f + next.torqueKgfm * 0.25f
+    val sTorque = if (useRpm) (prev.torqueKgfm * 0.25f + curr.torqueKgfm * 0.50f + next.torqueKgfm * 0.25f) else 0f
 
     smoothed.add(GraphPoint(curr.x, sPower, sTorque))
   }
