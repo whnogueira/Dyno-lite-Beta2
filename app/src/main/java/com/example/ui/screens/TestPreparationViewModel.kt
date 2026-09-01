@@ -18,6 +18,7 @@ import com.example.data.RunResultRepository
 import com.example.model.FinishReason
 import com.example.model.RunResult
 import com.example.model.RunSample
+import com.example.model.UniqueGpsFix
 import com.example.model.VehicleCalculations
 import com.example.model.VehicleProfile
 import com.example.model.WeightConfidence
@@ -224,6 +225,24 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
   private var filteredGpsAccelerationMps2: Float = 0f
 
   // GPS Tracking & Validação
+  @Volatile private var lastProcessedLocationElapsedRealtimeNanos: Long = 0L
+  @Volatile private var locationCallbackCount: Int = 0
+  @Volatile private var uniqueGpsFixCount: Int = 0
+  @Volatile private var gpsSpeedChangeCount: Int = 0
+  @Volatile private var sensorSampleCount: Int = 0
+  @Volatile private var lastUniqueGpsSpeedKmh: Float = -1f
+  @Volatile private var lastUniqueGpsElapsedRealtimeNs: Long = 0L
+  @Volatile private var maxGpsIntervalMs: Long = 0L
+  @Volatile private var maxGpsAgeMs: Long = 0L
+  @Volatile private var isGpsFrozenDetected: Boolean = false
+  @Volatile private var gpsFrozenStartTimeNs: Long? = null
+  @Volatile private var gpsFrozenSpeedKmh: Float = 0f
+  @Volatile private var gpsFrozenIntegratedStartKmh: Float = 0f
+  @Volatile private var lastProcessedLocationForSampleNs: Long = 0L
+  private val uniqueGpsFixes = mutableListOf<UniqueGpsFix>()
+  private var officialStartSpeedKmh: Float = 0f
+  private var officialMaxSpeedKmh: Float = 0f
+
   @Volatile private var lastProcessedGpsElapsedRealtimeNs: Long = 0L
   @Volatile private var lastProcessedGpsTimestamp: Long = 0L
   @Volatile private var lastGpsArrivalWallTimeMs: Long = 0L
@@ -604,6 +623,7 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
   // 2. CONFIGURAÇÃO DO FUSED LOCATION PROVIDER CLIENT
   private val locationCallback = object : LocationCallback() {
     override fun onLocationResult(result: LocationResult) {
+      locationCallbackCount++
       val locations = result.locations
       if (locations.isNullOrEmpty()) return
 
@@ -617,7 +637,7 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
   fun startLocationUpdates() {
     if (isGpsLocationCallbackActive) return
 
-    val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 150L)
+    val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 100L)
       .setMinUpdateIntervalMillis(100L)
       .setMaxUpdateDelayMillis(0L)
       .setWaitForAccurateLocation(false)
@@ -648,9 +668,23 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     val elapsedRealtimeNs = location.elapsedRealtimeNanos
     val locationTime = location.time
 
-    // Ignorar leituras repetidas ou fora de ordem
-    if (elapsedRealtimeNs <= lastProcessedGpsElapsedRealtimeNs && lastProcessedGpsElapsedRealtimeNs != 0L) {
+    // 1. NÃO CONTAR GPS REPETIDO COMO FIX NOVO
+    // Cada Location deve possuir identidade própria baseada em location.elapsedRealtimeNanos
+    if (elapsedRealtimeNs <= lastProcessedLocationElapsedRealtimeNanos && lastProcessedLocationElapsedRealtimeNanos != 0L) {
       return
+    }
+
+    val intervalSinceLastFixMs = if (lastUniqueGpsElapsedRealtimeNs > 0L) {
+      (elapsedRealtimeNs - lastUniqueGpsElapsedRealtimeNs) / 1_000_000L
+    } else 0L
+
+    if (intervalSinceLastFixMs > maxGpsIntervalMs && lastUniqueGpsElapsedRealtimeNs > 0L) {
+      maxGpsIntervalMs = intervalSinceLastFixMs
+    }
+
+    val gpsAgeMillis = ((SystemClock.elapsedRealtimeNanos() - elapsedRealtimeNs) / 1_000_000L).coerceAtLeast(0L)
+    if (gpsAgeMillis > maxGpsAgeMs) {
+      maxGpsAgeMs = gpsAgeMillis
     }
 
     val nowWallMs = SystemClock.elapsedRealtime()
@@ -665,6 +699,16 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     val speedKmh = (rawSpeedMps * 3.6f).coerceAtLeast(0f)
     val horizontalAccuracy = if (location.hasAccuracy()) location.accuracy else 99f
     val speedAccuracyMps = if (location.hasSpeedAccuracy()) location.speedAccuracyMetersPerSecond else 99f
+
+    val speedDiff = if (lastUniqueGpsSpeedKmh >= 0f) speedKmh - lastUniqueGpsSpeedKmh else 0f
+    if (lastUniqueGpsSpeedKmh >= 0f && kotlin.math.abs(speedKmh - lastUniqueGpsSpeedKmh) > 0.05f) {
+      gpsSpeedChangeCount++
+    }
+
+    lastUniqueGpsSpeedKmh = speedKmh
+    lastUniqueGpsElapsedRealtimeNs = elapsedRealtimeNs
+    lastProcessedLocationElapsedRealtimeNanos = elapsedRealtimeNs
+    uniqueGpsFixCount++
 
     // Média móvel das últimas 5 amostras de velocidade GPS (Requisito 1)
     gpsSpeedMovingAverageBuffer.add(speedKmh)
@@ -718,16 +762,20 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     gpsSpeedMs = rawSpeedMps
     gpsSpeedKmh = speedKmh
 
-    // Ancorar a velocidade inercial auxiliar na velocidade GPS real
-    if (speedKmh > 0f && horizontalAccuracy <= 25.0f) {
-      integratedSpeedKmh = speedKmh
+    val currentState = _uiState.value.testState
+
+    // Ancorar a velocidade inercial auxiliar na velocidade GPS real apenas quando NÃO estiver medindo
+    if (currentState != DynoRunState.MEDINDO_PROTEGIDO &&
+      currentState != DynoRunState.MEDINDO &&
+      currentState != DynoRunState.SUSPEITA_DESACELERACAO) {
+      if (speedKmh > 0f && horizontalAccuracy <= 25.0f) {
+        integratedSpeedKmh = speedKmh
+      }
     }
 
     lastGpsAnchorSpeedMps = rawSpeedMps
     lastGpsAnchorNanoTime = nowNano
     integralSpeedSinceLastGpsMps = 0f
-
-    val currentState = _uiState.value.testState
 
     // 15. LÓGICA DE INÍCIO DA PASSADA (Requisito 5)
     if (currentState == DynoRunState.AGUARDANDO_INICIO) {
@@ -759,10 +807,11 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
       if (speedKmh > maxGpsSpeedKmh) {
         maxGpsSpeedKmh = speedKmh
       }
+      if (speedKmh > officialMaxSpeedKmh) {
+        officialMaxSpeedKmh = speedKmh
+      }
 
-      val gpsAgeMillis = ((SystemClock.elapsedRealtimeNanos() - elapsedRealtimeNs) / 1_000_000L).coerceAtLeast(0L)
-
-      if (location.hasSpeed() && horizontalAccuracy <= 15.0f) {
+      if (location.hasSpeed() && horizontalAccuracy <= 25.0f) {
         validGpsUpdatesDuringRunCount++
         val runElapsedSec = ((System.nanoTime() - runStartTimeNs) / 1_000_000L) / 1000f
 
@@ -778,6 +827,21 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
           longitude = location.longitude
         )
         gpsFixHistory.add(fixRecord)
+
+        val uniqueFix = UniqueGpsFix(
+          elapsedRealtimeNanos = elapsedRealtimeNs,
+          timestamp = locationTime,
+          speedKmh = speedKmh,
+          speedAccuracyMetersPerSecond = speedAccuracyMps,
+          accuracyMeters = horizontalAccuracy,
+          ageMillis = gpsAgeMillis,
+          provider = location.provider ?: "gps",
+          hasSpeed = location.hasSpeed(),
+          isMock = location.isFromMockProvider,
+          speedDifferenceKmh = speedDiff,
+          intervalSinceLastFixMs = intervalSinceLastFixMs
+        )
+        uniqueGpsFixes.add(uniqueFix)
 
         // 4. FUSÃO GPS E ACELERÔMETRO (0.80 GPS / 0.20 SENSOR)
         val finalFusionAccel = (DynoConfig.FUSION_GPS_WEIGHT * filteredGpsAccelerationMps2) +
@@ -1018,6 +1082,28 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
                 rejectedInertialSamples++
               }
 
+              // Detecção de GPS Congelado em Tempo Real
+              if (runDurationMs >= 1000L) {
+                if (gpsFrozenStartTimeNs == null) {
+                  gpsFrozenStartTimeNs = nowNs
+                  gpsFrozenSpeedKmh = gpsSpeedKmh
+                  gpsFrozenIntegratedStartKmh = currentCalcKmh
+                } else {
+                  if (abs(gpsSpeedKmh - gpsFrozenSpeedKmh) <= 0.1f) {
+                    val frozenDurationMs = (nowNs - gpsFrozenStartTimeNs!!) / 1_000_000L
+                    val integratedGain = currentCalcKmh - gpsFrozenIntegratedStartKmh
+                    val isSustainedAccel = zFiltradoRun > 0.20f || currentG > 0.02f
+                    if (frozenDurationMs >= 1500L && isSustainedAccel && integratedGain >= 5.0f) {
+                      isGpsFrozenDetected = true
+                    }
+                  } else {
+                    gpsFrozenStartTimeNs = nowNs
+                    gpsFrozenSpeedKmh = gpsSpeedKmh
+                    gpsFrozenIntegratedStartKmh = currentCalcKmh
+                  }
+                }
+              }
+
               // Salva ponto inercial de alta resolução
               inertialHistory.add(
                 InertialPoint(
@@ -1035,6 +1121,13 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
               // Gravação da série temporal de telemetria (~20 Hz)
               if (nowNs - lastSampleRecordedNs >= 50_000_000L && recordedSamples.size < 600) {
                 lastSampleRecordedNs = nowNs
+                sensorSampleCount++
+
+                val isNewGps = (lastProcessedLocationElapsedRealtimeNanos > lastProcessedLocationForSampleNs && lastProcessedLocationElapsedRealtimeNanos != 0L)
+                if (isNewGps) {
+                  lastProcessedLocationForSampleNs = lastProcessedLocationElapsedRealtimeNanos
+                }
+
                 val diff = abs(currentCalcKmh - gpsSpeedKmh)
 
                 val rejReason = if (!isSampleValid) {
@@ -1127,7 +1220,8 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
                   engineTorqueNm = sampleEngineTorqueKgfm * 9.80665f,
                   confidenceLevel = confidence,
                   isValid = isSampleValid,
-                  rejectionReason = rejReason
+                  rejectionReason = rejReason,
+                  isNewGpsFix = isNewGps
                 )
                 recordedSamples.add(samplePoint)
 
@@ -1390,12 +1484,27 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     lastDistanceSpeedMs = actualGpsSpeed / 3.6f
 
     totalRunDistanceMeters = 0f
+    officialStartSpeedKmh = actualGpsSpeed
+    officialMaxSpeedKmh = actualGpsSpeed
     startCalculatedKmh = actualGpsSpeed
     startGpsKmh = actualGpsSpeed
     integratedSpeedKmh = actualGpsSpeed
     maxIntegratedSpeedKmh = actualGpsSpeed
     maxGpsSpeedKmh = actualGpsSpeed
     maxDisplaySpeedKmh = actualGpsSpeed
+
+    uniqueGpsFixes.clear()
+    isGpsFrozenDetected = false
+    gpsFrozenStartTimeNs = null
+    gpsFrozenSpeedKmh = actualGpsSpeed
+    gpsFrozenIntegratedStartKmh = actualGpsSpeed
+    locationCallbackCount = 0
+    uniqueGpsFixCount = 0
+    gpsSpeedChangeCount = 0
+    sensorSampleCount = 0
+    maxGpsIntervalMs = 0L
+    maxGpsAgeMs = 0L
+    lastProcessedLocationForSampleNs = 0L
 
     splitTime0to60 = null
     splitTime0to100 = null
@@ -1482,10 +1591,23 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
       val validCount = finalSamples.count { it.isValid }
       val rejectedCount = finalSamples.count { !it.isValid }
       val rejectionRatio = if (totalInertialSamples > 0) rejectedInertialSamples.toFloat() / totalInertialSamples.toFloat() else 0f
-      val speedGainKmh = maxGpsSpeedKmh - startGpsKmh
+
+      val officialEndSpeed = finalGpsKmh
+      val effectiveMaxGps = if (officialMaxSpeedKmh > 0f) officialMaxSpeedKmh else maxGpsSpeedKmh
+      val effectiveStartGps = if (officialStartSpeedKmh > 0f) officialStartSpeedKmh else startGpsKmh
+      val speedGainKmh = (effectiveMaxGps - effectiveStartGps).coerceAtLeast(0f)
 
       val avgHz = if (elapsedSec > 0f) finalSamples.size / elapsedSec else 0f
-      val gpsFreqHz = if (elapsedSec > 0f) validGpsUpdatesDuringRunCount / elapsedSec else 0f
+
+      val elapsedGpsSec = if (uniqueGpsFixes.size > 1) {
+        (uniqueGpsFixes.last().elapsedRealtimeNanos - uniqueGpsFixes.first().elapsedRealtimeNanos) / 1_000_000_000.0f
+      } else 0f
+
+      val gpsFreqHz = if (uniqueGpsFixes.size > 1 && elapsedGpsSec > 0.05f) {
+        (uniqueGpsFixes.size - 1) / elapsedGpsSec
+      } else if (elapsedSec > 0f) {
+        validGpsUpdatesDuringRunCount / elapsedSec
+      } else 0f
 
       var wheelPowerCv = 0f
       var enginePowerCv = 0f
@@ -1495,8 +1617,8 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
       var avgLongG = 0f
       var peakPowerRpm: Int? = null
       var peakTorqueRpm: Int? = null
-      var peakPowerSpeedKmh = maxGpsSpeedKmh
-      var peakTorqueSpeedKmh = startGpsKmh + (maxGpsSpeedKmh - startGpsKmh) * 0.45f
+      var peakPowerSpeedKmh = effectiveMaxGps
+      var peakTorqueSpeedKmh = effectiveStartGps + (effectiveMaxGps - effectiveStartGps) * 0.45f
       var totalMassKg = 0f
       var drivetrainLossPercent = 12f
       var marginPercent = 10f
@@ -1579,7 +1701,7 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
 
         val qualityEval = VehicleCalculations.classifyRunQuality(
           speedGainKmh = speedGainKmh,
-          validGpsLocationsCount = validGpsUpdatesDuringRunCount,
+          validGpsLocationsCount = if (uniqueGpsFixCount > 0) uniqueGpsFixCount else validGpsUpdatesDuringRunCount,
           elapsedSec = elapsedSec,
           lastGpsAccuracyMeters = lastGpsAccuracyMeters,
           avgSyncDiffKmh = avgDiff,
@@ -1587,9 +1709,12 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
           finishReason = reason,
           isPhoneStable = isStable,
           gearShiftDetected = hasGearShift,
-          finalGpsSpeedKmh = finalGpsKmh,
-          startGpsSpeedKmh = startGpsKmh,
-          rpmSpan = sampleRpmSpan
+          finalGpsSpeedKmh = officialEndSpeed,
+          startGpsSpeedKmh = effectiveStartGps,
+          rpmSpan = sampleRpmSpan,
+          gpsFrozen = isGpsFrozenDetected,
+          maxIntegratedSpeedKmh = maxIntegratedSpeedKmh,
+          maxGpsSpeedKmh = effectiveMaxGps
         )
 
         val runQualityStr = qualityEval.quality
@@ -1623,14 +1748,20 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
           id = finalTestId,
           vehicleId = profileToUse.id,
           vehicleName = "${profileToUse.manufacturer} ${profileToUse.model} ${profileToUse.engine}".trim(),
+          officialStartSpeedKmh = effectiveStartGps,
+          officialMaxSpeedKmh = effectiveMaxGps,
+          officialEndSpeedKmh = officialEndSpeed,
+          officialSpeedGainKmh = speedGainKmh,
           runStartCalculatedSpeedKmh = startCalculatedKmh,
-          runStartGpsSpeedKmh = startGpsKmh,
-          startSpeedKmh = startGpsKmh,
-          maximumGpsSpeedKmh = maxGpsSpeedKmh,
+          runStartGpsSpeedKmh = effectiveStartGps,
+          startSpeedKmh = effectiveStartGps,
+          maximumGpsSpeedKmh = effectiveMaxGps,
           maximumCalculatedSpeedKmh = maxIntegratedSpeedKmh,
-          finalGpsSpeedKmh = finalGpsKmh,
+          maxIntegratedSpeedKmh = maxIntegratedSpeedKmh,
+          finalGpsSpeedKmh = officialEndSpeed,
           finalCalculatedSpeedKmh = finalCalcSpeedKmh,
-          finalSpeedKmh = finalGpsKmh,
+          finalIntegratedSpeedKmh = finalCalcSpeedKmh,
+          finalSpeedKmh = officialEndSpeed,
           speedGainKmh = speedGainKmh,
           totalDistanceMeters = totalRunDistanceMeters,
           estimatedPowerCv = enginePowerCv,
@@ -1669,7 +1800,15 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
           totalSamples = computedSamples.size,
           rejectedSamples = rejectedCount,
           validSamplesCount = validCount,
-          validGpsLocationsCount = validGpsUpdatesDuringRunCount,
+          validGpsLocationsCount = if (uniqueGpsFixCount > 0) uniqueGpsFixCount else validGpsUpdatesDuringRunCount,
+          locationCallbackCount = locationCallbackCount,
+          uniqueGpsFixCount = if (uniqueGpsFixCount > 0) uniqueGpsFixCount else uniqueGpsFixes.size,
+          gpsSpeedChangeCount = gpsSpeedChangeCount,
+          sensorSampleCount = if (sensorSampleCount > 0) sensorSampleCount else computedSamples.size,
+          maxGpsIntervalMs = maxGpsIntervalMs,
+          maxGpsAgeMs = maxGpsAgeMs,
+          gpsFrozen = isGpsFrozenDetected,
+          isPreliminary = qualityEval.isPreliminary,
           averageSamplingRateHz = avgHz,
           averageGpsFrequencyHz = gpsFreqHz,
           quality = runQualityStr,
@@ -1687,7 +1826,8 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
           time100M = splitTime100M,
           time201M = splitTime201M,
           time402M = splitTime402M,
-          samples = computedSamples
+          samples = computedSamples,
+          uniqueGpsFixes = uniqueGpsFixes.toList()
         )
 
         viewModelScope.launch(Dispatchers.IO) {

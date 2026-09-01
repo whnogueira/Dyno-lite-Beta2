@@ -18,6 +18,20 @@ enum class FinishReason(val code: String, val displayName: String) {
   }
 }
 
+data class UniqueGpsFix(
+  val elapsedRealtimeNanos: Long = 0L,
+  val timestamp: Long = 0L,
+  val speedKmh: Float = 0f,
+  val speedAccuracyMetersPerSecond: Float = 0f,
+  val accuracyMeters: Float = 0f,
+  val ageMillis: Long = 0L,
+  val provider: String = "gps",
+  val hasSpeed: Boolean = true,
+  val isMock: Boolean = false,
+  val speedDifferenceKmh: Float = 0f,
+  val intervalSinceLastFixMs: Long = 0L
+)
+
 data class RunResult(
   val id: String = UUID.randomUUID().toString(),
   val timestamp: Long = System.currentTimeMillis(),
@@ -32,8 +46,10 @@ data class RunResult(
   val startSpeedKmh: Float = 0f,
   val maximumGpsSpeedKmh: Float = 0f,
   val maximumCalculatedSpeedKmh: Float = 0f,
+  val maxIntegratedSpeedKmh: Float = 0f,
   val finalGpsSpeedKmh: Float = 0f,
   val finalCalculatedSpeedKmh: Float = 0f,
+  val finalIntegratedSpeedKmh: Float = 0f,
   val finalSpeedKmh: Float = 0f,
   val speedGainKmh: Float = 0f,
   val totalDistanceMeters: Float = 0f,
@@ -74,6 +90,14 @@ data class RunResult(
   val rejectedSamples: Int = 0,
   val validSamplesCount: Int = 0,
   val validGpsLocationsCount: Int = 0,
+  val locationCallbackCount: Int = 0,
+  val uniqueGpsFixCount: Int = 0,
+  val gpsSpeedChangeCount: Int = 0,
+  val sensorSampleCount: Int = 0,
+  val maxGpsIntervalMs: Long = 0L,
+  val maxGpsAgeMs: Long = 0L,
+  val gpsFrozen: Boolean = false,
+  val isPreliminary: Boolean = false,
   val averageSamplingRateHz: Float = 0f,
   val averageGpsFrequencyHz: Float = 0f,
   val quality: String = "BOA",
@@ -93,7 +117,8 @@ data class RunResult(
   val time100M: Float? = null,
   val time201M: Float? = null, // 1/8 de milha
   val time402M: Float? = null, // 1/4 de milha
-  val samples: List<RunSample> = emptyList()
+  val samples: List<RunSample> = emptyList(),
+  val uniqueGpsFixes: List<UniqueGpsFix> = emptyList()
 ) {
   val peakSpeedDifferenceKmh: Float
     get() = kotlin.math.abs(maximumGpsSpeedKmh - maximumCalculatedSpeedKmh)

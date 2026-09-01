@@ -390,7 +390,10 @@ object VehicleCalculations {
     hasBraking: Boolean = false,
     hasLossOfGps: Boolean = false,
     isReverseMovement: Boolean = false,
-    isSpeedDecrease: Boolean = false
+    isSpeedDecrease: Boolean = false,
+    gpsFrozen: Boolean = false,
+    maxIntegratedSpeedKmh: Float = maxSpeedKmh,
+    maxGpsSpeedKmh: Float = maxSpeedKmh
   ): RunQualityEvaluation {
     val effectiveGpsCount = if (validGpsCount != 10) validGpsCount else validGpsLocationsCount
     val effectiveElapsedSec = if (elapsedSeconds != 5.0f) elapsedSeconds else elapsedSec
@@ -399,6 +402,20 @@ object VehicleCalculations {
     val effectiveGearShift = gearShiftDetected || hasGearShift
     val effectiveFinalSpeed = if (maxSpeedKmh != 50f) maxSpeedKmh else finalGpsSpeedKmh
     val effectiveStartSpeed = if (startSpeedKmh != 40f) startSpeedKmh else startGpsSpeedKmh
+
+    // 0. Detecção de GPS Congelado / Divergência Severa
+    val diffSpeed = kotlin.math.abs(maxGpsSpeedKmh - maxIntegratedSpeedKmh)
+    if (gpsFrozen || (diffSpeed > 10.0f && gpsFrozen)) {
+      return RunQualityEvaluation(
+        quality = "GPS INCONSISTENTE",
+        confidenceLevel = "BAIXA",
+        marginPercent = 25.0f,
+        marginDisplay = "acima de ±20%",
+        invalidationReason = "GPS congelado durante a aceleração. Potência preliminar — GPS não acompanhou toda a aceleração.",
+        isPreliminary = true,
+        canCompare = false
+      )
+    }
 
     // 1. Condições de INVÁLIDA
     if (finishReason == FinishReason.CANCELLED || finishReason == FinishReason.GPS_LOST || hasLossOfGps) {

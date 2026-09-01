@@ -10,6 +10,7 @@ import com.example.data.db.isoToTimestampMs
 import com.example.data.db.toIsoUtc
 import com.example.model.RunResult
 import com.example.model.RunSample
+import com.example.model.UniqueGpsFix
 import com.example.model.VehicleProfile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -421,7 +422,13 @@ class RunResultRepository(context: Context) {
       completedAt = currentIsoUtc(),
       status = status,
       startSpeed = r.startSpeedKmh.sanitize(),
+      maxSpeed = r.maximumGpsSpeedKmh.sanitize(),
       endSpeed = r.finalSpeedKmh.sanitize(),
+      speedGain = r.speedGainKmh.sanitize(),
+      officialStartSpeed = (if (r.officialStartSpeedKmh > 0f) r.officialStartSpeedKmh else r.startSpeedKmh).sanitize(),
+      officialMaxSpeed = (if (r.officialMaxSpeedKmh > 0f) r.officialMaxSpeedKmh else r.maximumGpsSpeedKmh).sanitize(),
+      officialEndSpeed = (if (r.officialEndSpeedKmh > 0f) r.officialEndSpeedKmh else r.finalSpeedKmh).sanitize(),
+      officialSpeedGain = (if (r.officialSpeedGainKmh > 0f) r.officialSpeedGainKmh else r.speedGainKmh).sanitize(),
       elapsedTime = r.elapsedSeconds.sanitize(),
       distance = r.totalDistanceMeters.sanitize(),
       maxWheelPowerCv = r.wheelPowerCv.sanitize(),
@@ -471,6 +478,27 @@ class RunResultRepository(context: Context) {
     var slopeMode = "IGNORE"
     var slopePercent = 0f
 
+    var officialStart = entity.officialStartSpeed
+    var officialMax = entity.officialMaxSpeed
+    var officialEnd = entity.officialEndSpeed
+    var officialGain = entity.officialSpeedGain
+    var maxGpsSpeed = entity.maxSpeed
+    var maxCalcSpeed = entity.maxSpeed
+    var maxIntegratedSpeed = entity.maxSpeed
+    var finalGpsSpeed = entity.endSpeed
+    var finalCalcSpeed = entity.endSpeed
+    var finalIntegratedSpeed = entity.endSpeed
+    var locationCallbackCount = 0
+    var uniqueGpsFixCount = 0
+    var gpsSpeedChangeCount = 0
+    var sensorSampleCount = 0
+    var maxGpsIntervalMs = 0L
+    var maxGpsAgeMs = 0L
+    var gpsFrozen = false
+    var isPreliminary = false
+    var avgGpsFreq = 1.0f
+    val uniqueGpsFixesList = mutableListOf<UniqueGpsFix>()
+
     try {
       if (entity.configurationSnapshot.isNotBlank() && entity.configurationSnapshot != "{}") {
         val snapObj = JSONObject(entity.configurationSnapshot)
@@ -485,23 +513,76 @@ class RunResultRepository(context: Context) {
         airDensity = snapObj.optDouble("airDensityKgM3", 1.225).toFloat()
         slopeMode = snapObj.optString("slopeMode", "IGNORE")
         slopePercent = snapObj.optDouble("slopePercent", 0.0).toFloat()
+
+        if (officialStart <= 0f) officialStart = snapObj.optDouble("officialStartSpeedKmh", 0.0).toFloat()
+        if (officialMax <= 0f) officialMax = snapObj.optDouble("officialMaxSpeedKmh", 0.0).toFloat()
+        if (officialEnd <= 0f) officialEnd = snapObj.optDouble("officialEndSpeedKmh", 0.0).toFloat()
+        if (officialGain <= 0f) officialGain = snapObj.optDouble("officialSpeedGainKmh", 0.0).toFloat()
+        maxGpsSpeed = snapObj.optDouble("maximumGpsSpeedKmh", maxGpsSpeed.toDouble()).toFloat()
+        maxCalcSpeed = snapObj.optDouble("maximumCalculatedSpeedKmh", maxCalcSpeed.toDouble()).toFloat()
+        maxIntegratedSpeed = snapObj.optDouble("maxIntegratedSpeedKmh", maxCalcSpeed.toDouble()).toFloat()
+        finalGpsSpeed = snapObj.optDouble("finalGpsSpeedKmh", finalGpsSpeed.toDouble()).toFloat()
+        finalCalcSpeed = snapObj.optDouble("finalCalculatedSpeedKmh", finalCalcSpeed.toDouble()).toFloat()
+        finalIntegratedSpeed = snapObj.optDouble("finalIntegratedSpeedKmh", finalCalcSpeed.toDouble()).toFloat()
+        locationCallbackCount = snapObj.optInt("locationCallbackCount", 0)
+        uniqueGpsFixCount = snapObj.optInt("uniqueGpsFixCount", 0)
+        gpsSpeedChangeCount = snapObj.optInt("gpsSpeedChangeCount", 0)
+        sensorSampleCount = snapObj.optInt("sensorSampleCount", 0)
+        maxGpsIntervalMs = snapObj.optLong("maxGpsIntervalMs", 0L)
+        maxGpsAgeMs = snapObj.optLong("maxGpsAgeMs", 0L)
+        gpsFrozen = snapObj.optBoolean("gpsFrozen", false)
+        isPreliminary = snapObj.optBoolean("isPreliminary", false)
+        avgGpsFreq = snapObj.optDouble("averageGpsFrequencyHz", 1.0).toFloat()
+
+        val fixesArr = snapObj.optJSONArray("uniqueGpsFixes")
+        if (fixesArr != null) {
+          for (i in 0 until fixesArr.length()) {
+            val fObj = fixesArr.getJSONObject(i)
+            uniqueGpsFixesList.add(
+              UniqueGpsFix(
+                elapsedRealtimeNanos = fObj.optLong("elapsedRealtimeNanos"),
+                timestamp = fObj.optLong("timestamp"),
+                speedKmh = fObj.optDouble("speedKmh").toFloat(),
+                speedAccuracyMetersPerSecond = fObj.optDouble("speedAccuracyMps").toFloat(),
+                accuracyMeters = fObj.optDouble("accuracyM").toFloat(),
+                ageMillis = fObj.optLong("ageMillis"),
+                provider = fObj.optString("provider", "gps"),
+                hasSpeed = fObj.optBoolean("hasSpeed", true),
+                isMock = fObj.optBoolean("isMock", false),
+                speedDifferenceKmh = fObj.optDouble("speedDiffKmh").toFloat(),
+                intervalSinceLastFixMs = fObj.optLong("intervalMs")
+              )
+            )
+          }
+        }
       }
     } catch (_: Exception) {}
+
+    val effectiveStartSpeed = if (officialStart > 0f) officialStart else startGps
+    val effectiveMaxGps = if (officialMax > 0f) officialMax else maxSpeed
+    val effectiveEndSpeed = if (officialEnd > 0f) officialEnd else entity.endSpeed
+    val effectiveGain = if (officialGain > 0f) officialGain else (effectiveMaxGps - effectiveStartSpeed).coerceAtLeast(0f)
 
     return RunResult(
       id = entity.id,
       timestamp = entity.createdAt.isoToTimestampMs(),
       vehicleId = entity.vehicleId,
       vehicleName = entity.name,
+      officialStartSpeedKmh = effectiveStartSpeed,
+      officialMaxSpeedKmh = effectiveMaxGps,
+      officialEndSpeedKmh = effectiveEndSpeed,
+      officialSpeedGainKmh = effectiveGain,
       runStartCalculatedSpeedKmh = entity.startSpeed,
       runStartGpsSpeedKmh = entity.startSpeed,
-      startSpeedKmh = entity.startSpeed,
-      maximumGpsSpeedKmh = maxSpeed,
-      maximumCalculatedSpeedKmh = maxSpeed,
-      finalGpsSpeedKmh = entity.endSpeed,
-      finalCalculatedSpeedKmh = entity.endSpeed,
-      finalSpeedKmh = entity.endSpeed,
-      speedGainKmh = (maxSpeed - startGps).coerceAtLeast(0f),
+      startSpeedKmh = effectiveStartSpeed,
+      maximumGpsSpeedKmh = effectiveMaxGps,
+      maximumCalculatedSpeedKmh = maxCalcSpeed,
+      maxIntegratedSpeedKmh = maxIntegratedSpeed,
+      finalGpsSpeedKmh = effectiveEndSpeed,
+      finalCalculatedSpeedKmh = finalCalcSpeed,
+      finalIntegratedSpeedKmh = finalIntegratedSpeed,
+      finalSpeedKmh = effectiveEndSpeed,
+      speedGainKmh = effectiveGain,
       totalDistanceMeters = entity.distance,
       estimatedPowerCv = powerCv,
       estimatedTorqueKgfm = torqueKgfm,
@@ -521,7 +602,7 @@ class RunResultRepository(context: Context) {
       peakTorqueSpeedKmh = startGps + (maxSpeed - startGps) * 0.45f,
       totalVehicleMassKg = mass,
       drivetrainLossPercent = drivetrainLoss,
-      estimatedMarginPercent = 10f,
+      estimatedMarginPercent = if (isPreliminary) 25f else 10f,
       gearUsed = gearUsed,
       gearRatioUsed = gearRatio,
       finalDriveUsed = finalDrive,
@@ -539,9 +620,17 @@ class RunResultRepository(context: Context) {
       totalSamples = entity.sampleCount,
       rejectedSamples = samples.count { !it.isValid },
       validSamplesCount = samples.count { it.isValid }.takeIf { it > 0 } ?: entity.sampleCount,
-      validGpsLocationsCount = (entity.elapsedTime * 1.5f).toInt().coerceAtLeast(1),
+      validGpsLocationsCount = if (uniqueGpsFixCount > 0) uniqueGpsFixCount else (entity.elapsedTime * 1.5f).toInt().coerceAtLeast(1),
+      locationCallbackCount = locationCallbackCount,
+      uniqueGpsFixCount = if (uniqueGpsFixCount > 0) uniqueGpsFixCount else uniqueGpsFixesList.size,
+      gpsSpeedChangeCount = gpsSpeedChangeCount,
+      sensorSampleCount = if (sensorSampleCount > 0) sensorSampleCount else samples.size,
+      maxGpsIntervalMs = maxGpsIntervalMs,
+      maxGpsAgeMs = maxGpsAgeMs,
+      gpsFrozen = gpsFrozen,
+      isPreliminary = isPreliminary,
       averageSamplingRateHz = if (entity.elapsedTime > 0f) entity.sampleCount / entity.elapsedTime else 0f,
-      averageGpsFrequencyHz = 1.0f,
+      averageGpsFrequencyHz = avgGpsFreq,
       quality = entity.quality,
       finishReason = entity.finishReason ?: "GPS_DECELERATION",
       averageSpeedDifferenceKmh = entity.averageSpeedDifferenceKmh,
@@ -557,7 +646,8 @@ class RunResultRepository(context: Context) {
       time100M = entity.time100M,
       time201M = entity.time201M,
       time402M = entity.time402M,
-      samples = samples
+      samples = samples,
+      uniqueGpsFixes = uniqueGpsFixesList
     )
   }
 
@@ -631,6 +721,45 @@ class RunResultRepository(context: Context) {
       obj.put("slopePercent", r.slopePercentUsed.safeFinite(0.0))
       obj.put("startSpeedKmh", r.startSpeedKmh.safeFinite(40.0))
       obj.put("endSpeedKmh", r.finalSpeedKmh.safeFinite(0.0))
+      obj.put("officialStartSpeedKmh", r.officialStartSpeedKmh.safeFinite(0.0))
+      obj.put("officialMaxSpeedKmh", r.officialMaxSpeedKmh.safeFinite(0.0))
+      obj.put("officialEndSpeedKmh", r.officialEndSpeedKmh.safeFinite(0.0))
+      obj.put("officialSpeedGainKmh", r.officialSpeedGainKmh.safeFinite(0.0))
+      obj.put("maximumGpsSpeedKmh", r.maximumGpsSpeedKmh.safeFinite(0.0))
+      obj.put("maximumCalculatedSpeedKmh", r.maximumCalculatedSpeedKmh.safeFinite(0.0))
+      obj.put("maxIntegratedSpeedKmh", r.maxIntegratedSpeedKmh.safeFinite(0.0))
+      obj.put("finalGpsSpeedKmh", r.finalGpsSpeedKmh.safeFinite(0.0))
+      obj.put("finalCalculatedSpeedKmh", r.finalCalculatedSpeedKmh.safeFinite(0.0))
+      obj.put("finalIntegratedSpeedKmh", r.finalIntegratedSpeedKmh.safeFinite(0.0))
+      obj.put("locationCallbackCount", r.locationCallbackCount)
+      obj.put("uniqueGpsFixCount", r.uniqueGpsFixCount)
+      obj.put("gpsSpeedChangeCount", r.gpsSpeedChangeCount)
+      obj.put("sensorSampleCount", r.sensorSampleCount)
+      obj.put("maxGpsIntervalMs", r.maxGpsIntervalMs)
+      obj.put("maxGpsAgeMs", r.maxGpsAgeMs)
+      obj.put("gpsFrozen", r.gpsFrozen)
+      obj.put("isPreliminary", r.isPreliminary)
+      obj.put("averageGpsFrequencyHz", r.averageGpsFrequencyHz.safeFinite(0.0))
+
+      if (r.uniqueGpsFixes.isNotEmpty()) {
+        val fixesArr = JSONArray()
+        for (fix in r.uniqueGpsFixes) {
+          val fObj = JSONObject()
+          fObj.put("elapsedRealtimeNanos", fix.elapsedRealtimeNanos)
+          fObj.put("timestamp", fix.timestamp)
+          fObj.put("speedKmh", fix.speedKmh.safeFinite(0.0))
+          fObj.put("speedAccuracyMps", fix.speedAccuracyMetersPerSecond.safeFinite(0.0))
+          fObj.put("accuracyM", fix.accuracyMeters.safeFinite(0.0))
+          fObj.put("ageMillis", fix.ageMillis)
+          fObj.put("provider", fix.provider)
+          fObj.put("hasSpeed", fix.hasSpeed)
+          fObj.put("isMock", fix.isMock)
+          fObj.put("speedDiffKmh", fix.speedDifferenceKmh.safeFinite(0.0))
+          fObj.put("intervalMs", fix.intervalSinceLastFixMs)
+          fixesArr.put(fObj)
+        }
+        obj.put("uniqueGpsFixes", fixesArr)
+      }
       obj.toString()
     } catch (e: Exception) {
       Log.e(TAG, "[DynoStorage] Falha ao criar configurationSnapshot: ${e.message}", e)
