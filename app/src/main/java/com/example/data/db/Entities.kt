@@ -29,7 +29,13 @@ data class TestEntity(
   val completedAt: String? = null,
   val status: String = "recording", // "recording", "completed", "cancelled", "interrupted"
   val startSpeed: Float = 0f,
+  val maxSpeed: Float = 0f,
   val endSpeed: Float = 0f,
+  val speedGain: Float = 0f,
+  val officialStartSpeed: Float = 0f,
+  val officialMaxSpeed: Float = 0f,
+  val officialEndSpeed: Float = 0f,
+  val officialSpeedGain: Float = 0f,
   val elapsedTime: Float = 0f,
   val distance: Float = 0f,
   val maxWheelPowerCv: Float = 0f,
