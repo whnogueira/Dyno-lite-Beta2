@@ -141,12 +141,20 @@ data class DynoUiState(
   val runElapsedSeconds: Float = 0f,
   val startSpeedTriggerKmh: Float = 40.0f,
   val selectedGear: String = "2ª",
-  val selectedGearRatio: Float = 1.95f,
-  val selectedFinalDrive: Float = 4.10f,
+  val selectedGearIndex: Int = 1,
+  val selectedGearRatio: Float = 2.14f,
+  val selectedFinalDrive: Float = 4.19f,
   val slopeMode: String = "IGNORE",
   val manualSlopePercent: Float = 0.0f,
   val calibrationStatusText: String = "Não calibrado",
-  val validationIssues: List<String> = emptyList()
+  val validationIssues: List<String> = emptyList(),
+  val curbWeightKg: Float = 1265.0f,
+  val driverWeightKg: Float = 79.0f,
+  val passengerCount: Int = 0,
+  val passengerWeightKg: Float = 0.0f,
+  val cargoWeightKg: Float = 0.0f,
+  val fuelAdjustmentKg: Float = 0.0f,
+  val totalTestWeightKg: Float = 1344.0f
 )
 
 class TestPreparationViewModel(application: Application) : AndroidViewModel(application) {
@@ -170,8 +178,9 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
       isCalibrated = prefs.getBoolean("is_calibrated", false),
       startSpeedTriggerKmh = prefs.getFloat("start_speed_trigger_kmh", 40.0f),
       selectedGear = prefs.getString("selected_gear_name", "2ª") ?: "2ª",
-      selectedGearRatio = prefs.getFloat("selected_gear_ratio", 1.95f),
-      selectedFinalDrive = prefs.getFloat("selected_final_drive", 4.10f),
+      selectedGearIndex = prefs.getInt("selected_gear_index", 1),
+      selectedGearRatio = prefs.getFloat("selected_gear_ratio", 2.14f),
+      selectedFinalDrive = prefs.getFloat("selected_final_drive", 4.19f),
       slopeMode = prefs.getString("slope_mode", "IGNORE") ?: "IGNORE",
       manualSlopePercent = prefs.getFloat("manual_slope_percent", 0.0f),
       calibrationStatusText = if (prefs.getBoolean("is_calibrated", false)) "Calibração concluída" else "Não calibrado"
@@ -356,26 +365,116 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
       val availableGears = getAvailableGears(vehicle)
       val savedGearName = prefs.getString("selected_gear_name", null)
       val savedGearRatio = prefs.getFloat("selected_gear_ratio", 0f)
+      val savedGearIndex = prefs.getInt("selected_gear_index", -1)
 
-      val matchingGear = if (!savedGearName.isNullOrBlank() && savedGearRatio > 0f) {
-        availableGears.firstOrNull { it.first == savedGearName } ?: Pair(savedGearName, savedGearRatio)
-      } else {
-        if (availableGears.size >= 2) availableGears[1] else availableGears.firstOrNull() ?: Pair("2ª", 2.14f)
+      val targetIndex = when {
+        savedGearIndex in availableGears.indices -> savedGearIndex
+        savedGearName != null -> {
+          val idx = availableGears.indexOfFirst { it.first == savedGearName }
+          if (idx >= 0) idx else 1.coerceAtMost(availableGears.size - 1)
+        }
+        else -> 1.coerceAtMost(availableGears.size - 1) // default 2ª marcha (índice 1)
       }
 
-      val ratio = if (savedGearRatio > 0f) savedGearRatio else (vehicle.gearRatio ?: matchingGear.second)
-      val gearName = savedGearName ?: matchingGear.first
+      val selectedPair = if (targetIndex in availableGears.indices) {
+        availableGears[targetIndex]
+      } else {
+        Pair("2ª", 2.14f)
+      }
+
+      val gearName = selectedPair.first
+      val ratio = selectedPair.second
       val finalDrive = vehicle.finalDriveRatio ?: _uiState.value.selectedFinalDrive
+
+      val curb = vehicle.curbWeightKg
+      val driver = if (vehicle.driverWeightKg > 0f) vehicle.driverWeightKg else 79.0f
+      // Passageiros pertencem somente à passagem atual (redefine para 0 em novo veículo/sessão)
+      val passCount = 0
+      val passWeight = 0.0f
+      val cargo = vehicle.cargoWeightKg + vehicle.audioWeightKg + vehicle.gnvWeightKg + vehicle.otherWeightKg - vehicle.removedWeightKg
+      val fuel = 0.0f
+      val totalMass = VehicleCalculations.calculateTotalWeight(
+        curbWeightKg = curb,
+        driverWeightKg = driver,
+        passengerWeightKg = passWeight,
+        cargoWeightKg = cargo,
+        fuelAdjustmentKg = fuel
+      )
+
       _uiState.update {
         it.copy(
           selectedGear = gearName,
+          selectedGearIndex = targetIndex,
           selectedGearRatio = ratio,
           selectedFinalDrive = finalDrive,
           slopeMode = vehicle.slopeMode,
-          manualSlopePercent = vehicle.manualSlopePercent
+          manualSlopePercent = vehicle.manualSlopePercent,
+          curbWeightKg = curb,
+          driverWeightKg = driver,
+          passengerCount = passCount,
+          passengerWeightKg = passWeight,
+          cargoWeightKg = cargo,
+          fuelAdjustmentKg = fuel,
+          totalTestWeightKg = totalMass
         )
       }
       validatePreConditions(vehicle)
+    }
+  }
+
+  fun setPassOccupantsAndCargo(
+    driverKg: Float,
+    passengerCount: Int,
+    passengerKg: Float,
+    cargoKg: Float,
+    fuelKg: Float
+  ) {
+    val curb = activeVehicleProfile?.curbWeightKg ?: _uiState.value.curbWeightKg
+    val total = VehicleCalculations.calculateTotalWeight(
+      curbWeightKg = curb,
+      driverWeightKg = driverKg,
+      passengerWeightKg = passengerKg,
+      cargoWeightKg = cargoKg,
+      fuelAdjustmentKg = fuelKg
+    )
+    _uiState.update {
+      it.copy(
+        driverWeightKg = driverKg,
+        passengerCount = passengerCount,
+        passengerWeightKg = passengerKg,
+        cargoWeightKg = cargoKg,
+        fuelAdjustmentKg = fuelKg,
+        totalTestWeightKg = total
+      )
+    }
+  }
+
+  fun resetPassOccupantsToVehicleProfile(vehicle: VehicleProfile? = activeVehicleProfile) {
+    if (vehicle != null) {
+      val curb = vehicle.curbWeightKg
+      val driver = if (vehicle.driverWeightKg > 0f) vehicle.driverWeightKg else 79.0f
+      val passCount = 0
+      val passWeight = 0.0f
+      val cargo = vehicle.cargoWeightKg + vehicle.audioWeightKg + vehicle.gnvWeightKg + vehicle.otherWeightKg - vehicle.removedWeightKg
+      val fuel = 0.0f
+      val totalMass = VehicleCalculations.calculateTotalWeight(
+        curbWeightKg = curb,
+        driverWeightKg = driver,
+        passengerWeightKg = passWeight,
+        cargoWeightKg = cargo,
+        fuelAdjustmentKg = fuel
+      )
+      _uiState.update {
+        it.copy(
+          curbWeightKg = curb,
+          driverWeightKg = driver,
+          passengerCount = passCount,
+          passengerWeightKg = passWeight,
+          cargoWeightKg = cargo,
+          fuelAdjustmentKg = fuel,
+          totalTestWeightKg = totalMass
+        )
+      }
     }
   }
 
@@ -399,14 +498,23 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     }
   }
 
-  fun setSelectedGear(gearName: String, gearRatio: Float) {
+  fun setSelectedGear(gearName: String, gearRatio: Float, gearIndex: Int = -1) {
+    val computedIndex = if (gearIndex >= 0) gearIndex else {
+      val num = gearName.filter { it.isDigit() }.toIntOrNull()
+      if (num != null && num >= 1) num - 1 else 1
+    }
     if (_uiState.value.testState == DynoRunState.PARADO) {
       prefs.edit()
         .putString("selected_gear_name", gearName)
         .putFloat("selected_gear_ratio", gearRatio)
+        .putInt("selected_gear_index", computedIndex)
         .apply()
       _uiState.update {
-        it.copy(selectedGear = gearName, selectedGearRatio = gearRatio)
+        it.copy(
+          selectedGear = gearName,
+          selectedGearIndex = computedIndex,
+          selectedGearRatio = gearRatio
+        )
       }
     }
   }
@@ -1625,7 +1733,7 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
 
       val profileToUse = vehicle ?: activeVehicleProfile
       if (profileToUse != null) {
-        totalMassKg = profileToUse.totalWeightKg
+        totalMassKg = if (_uiState.value.totalTestWeightKg > 0f) _uiState.value.totalTestWeightKg else profileToUse.totalWeightKg
         val frontalArea = profileToUse.frontalAreaM2
         val cd = profileToUse.dragCoefficient
         val cr = profileToUse.rollingResistanceCoeff
@@ -1647,13 +1755,38 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
         val rollForce = VehicleCalculations.calculateRollingResistanceForce(totalMassKg, cr)
         val slopeForce = VehicleCalculations.calculateSlopeForce(totalMassKg, slopePercent)
 
-        // Processamento detalhado e limpo de cada amostra
+        // Ancoramento e normalização de aceleração com ganho GPS na janela de aceleração
+        val gpsDeltaVMps = speedGainKmh / 3.6f
+        val validWindowSamples = finalSamples.filter {
+          it.isValid && it.filteredSpeedKmh >= (effectiveStartGps - 2f) && it.filteredSpeedKmh <= (effectiveMaxGps + 1f)
+        }
+        val poolForNorm = if (validWindowSamples.isNotEmpty()) validWindowSamples else finalSamples.filter { it.isValid }
+        val rawAccels = poolForNorm.map {
+          if (it.rawAccelerationMps2 > 0.001f) it.rawAccelerationMps2
+          else if (it.sensorAccelerationMps2 > 0.001f) it.sensorAccelerationMps2
+          else it.finalAccelerationMps2
+        }
+        val rawAvgG = if (rawAccels.isNotEmpty()) {
+          rawAccels.average().toFloat() / 9.80665f
+        } else 0f
+        val sensorDeltaVMps = if (elapsedSec > 0.05f) {
+          rawAvgG * 9.80665f * elapsedSec
+        } else 0f
+        val normalizationFactor = if (sensorDeltaVMps > 0.1f && gpsDeltaVMps > 0.1f) {
+          (gpsDeltaVMps / sensorDeltaVMps).coerceIn(0.50f, 1.50f)
+        } else 1.0f
+        val anchoredAvgG = rawAvgG * normalizationFactor
+
+        // Processamento detalhado e limpo de cada amostra com aceleração ancorada
         val computedSamples = finalSamples.map { sample ->
-          val aMps2 = sample.finalAccelerationMps2
-          val g = aMps2 / 9.80665f
+          val rawA = if (sample.rawAccelerationMps2 > 0.001f) sample.rawAccelerationMps2
+                     else if (sample.sensorAccelerationMps2 > 0.001f) sample.sensorAccelerationMps2
+                     else sample.finalAccelerationMps2
+          val anchoredA = rawA * normalizationFactor
+          val g = anchoredA / 9.80665f
           val vMps = sample.filteredSpeedMs
           val fAero = VehicleCalculations.calculateAerodynamicForce(vMps, cd, frontalArea, profileToUse.airDensityKgM3)
-          val fAccel = VehicleCalculations.calculateAccelerationForce(totalMassKg, max(0f, aMps2))
+          val fAccel = VehicleCalculations.calculateAccelerationForce(totalMassKg, max(0f, anchoredA))
           val fTractive = VehicleCalculations.calculateTotalTractiveForce(fAccel, rollForce, fAero, slopeForce)
           val wWatts = VehicleCalculations.calculateWheelPowerWatts(fTractive, vMps)
           val sampleWheelPowerCv = VehicleCalculations.convertWattsToCv(wWatts)
@@ -1673,6 +1806,10 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
           val sampleWheelTorqueKgfm = sampleWheelTorquePair?.second ?: 0f
 
           sample.copy(
+            rawAccelerationMps2 = rawA,
+            anchoredAccelerationMps2 = anchoredA,
+            normalizationFactorApplied = normalizationFactor,
+            finalAccelerationMps2 = anchoredA,
             longitudinalG = g,
             accelerationForceN = fAccel,
             aerodynamicForceN = fAero,
@@ -1714,7 +1851,9 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
           rpmSpan = sampleRpmSpan,
           gpsFrozen = isGpsFrozenDetected,
           maxIntegratedSpeedKmh = maxIntegratedSpeedKmh,
-          maxGpsSpeedKmh = effectiveMaxGps
+          maxGpsSpeedKmh = effectiveMaxGps,
+          sensorDeltaVMps = sensorDeltaVMps,
+          gpsDeltaVMps = gpsDeltaVMps
         )
 
         val runQualityStr = qualityEval.quality
@@ -1734,10 +1873,7 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
         wheelTorqueKgfm = peaks.wheelTorqueKgfm
         engineTorqueKgfm = peaks.engineTorqueKgfm
 
-        val validComputed = computedSamples.filter { it.isValid && it.finalAccelerationMps2 > 0.05f }
-        if (validComputed.isNotEmpty()) {
-          avgLongG = validComputed.map { it.longitudinalG }.average().toFloat()
-        }
+        avgLongG = anchoredAvgG
 
         val avgAccuracy = if (gpsFixHistory.isNotEmpty()) {
           gpsFixHistory.map { it.accuracyM }.average().toFloat()
@@ -1781,11 +1917,23 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
           peakPowerSpeedKmh = peakPowerSpeedKmh,
           peakTorqueSpeedKmh = peakTorqueSpeedKmh,
           totalVehicleMassKg = totalMassKg,
+          curbWeightKg = if (_uiState.value.curbWeightKg > 0f) _uiState.value.curbWeightKg else profileToUse.curbWeightKg,
+          driverWeightKg = _uiState.value.driverWeightKg,
+          passengerCount = _uiState.value.passengerCount,
+          passengerWeightKg = _uiState.value.passengerWeightKg,
+          additionalWeightKg = _uiState.value.cargoWeightKg,
+          fuelAdjustmentKg = _uiState.value.fuelAdjustmentKg,
           drivetrainLossPercent = drivetrainLossPercent,
           estimatedMarginPercent = marginPercent,
           gearUsed = _uiState.value.selectedGear,
+          gearIndexUsed = _uiState.value.selectedGearIndex,
           gearRatioUsed = gearRatio,
           finalDriveUsed = finalDrive,
+          gpsDeltaVMps = gpsDeltaVMps,
+          sensorDeltaVMps = sensorDeltaVMps,
+          normalizationFactor = normalizationFactor,
+          rawAverageLongitudinalG = rawAvgG,
+          anchoredAverageLongitudinalG = anchoredAvgG,
           isAerodynamicsEstimated = true,
           cdUsed = cd,
           frontalAreaUsed = frontalArea,

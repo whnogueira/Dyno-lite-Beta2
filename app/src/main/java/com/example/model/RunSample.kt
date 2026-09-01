@@ -41,5 +41,8 @@ data class RunSample(
   val isValid: Boolean = true,
   val isGearShift: Boolean = false,
   val isClutchDisengaged: Boolean = false,
-  val rejectionReason: String? = null
+  val rejectionReason: String? = null,
+  val rawAccelerationMps2: Float = 0f,
+  val anchoredAccelerationMps2: Float = 0f,
+  val normalizationFactorApplied: Float = 1.0f
 )

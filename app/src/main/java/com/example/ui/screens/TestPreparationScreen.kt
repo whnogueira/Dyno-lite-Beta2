@@ -34,8 +34,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Tune
@@ -50,13 +52,17 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -234,6 +240,7 @@ fun TestPreparationScreen(
   var showCancelConfirmDialog by remember { mutableStateOf(false) }
   var showRecalibrateConfirmDialog by remember { mutableStateOf(false) }
   var showAdvancedDiagnosticDialog by remember { mutableStateOf(false) }
+  var showOccupantsDialog by remember { mutableStateOf(false) }
 
   val isVehicleMoving = uiState.vehicleMotionState == VehicleMotionState.MOVING || uiState.gpsSpeedKmh > 5.0f
   val isReadyToArm = uiState.isReadyToArm
@@ -410,6 +417,33 @@ fun TestPreparationScreen(
     )
   }
 
+  // 13. DIÁLOGO DE OCUPANTES E CARGA DESTA PASSAGEM (Requisito 10)
+  if (showOccupantsDialog) {
+    OccupantsAndCargoDialog(
+      curbWeightKg = vehicle.curbWeightKg,
+      currentDriverWeightKg = uiState.driverWeightKg,
+      currentPassengerCount = uiState.passengerCount,
+      currentPassengerWeightKg = uiState.passengerWeightKg,
+      currentCargoWeightKg = uiState.cargoWeightKg,
+      currentFuelAdjustmentKg = uiState.fuelAdjustmentKg,
+      onDismiss = { showOccupantsDialog = false },
+      onConfirm = { driverKg, passCount, passKg, cargoKg, fuelKg ->
+        viewModel.setPassOccupantsAndCargo(
+          driverKg = driverKg,
+          passengerCount = passCount,
+          passengerKg = passKg,
+          cargoKg = cargoKg,
+          fuelKg = fuelKg
+        )
+        showOccupantsDialog = false
+      },
+      onReset = {
+        viewModel.resetPassOccupantsToVehicleProfile(vehicle)
+        showOccupantsDialog = false
+      }
+    )
+  }
+
   // ESTRUTURA PRINCIPAL DO PAINEL HORIZONTAL
   Box(
     modifier = modifier
@@ -509,25 +543,6 @@ fun TestPreparationScreen(
             ) {
               Column {
                 Text(
-                  text = "PESO",
-                  style = MaterialTheme.typography.labelSmall.copy(
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.SemiBold
-                  ),
-                  color = DynoTextSecondary
-                )
-                Text(
-                  text = String.format(Locale.US, "%.0f kg", totalWeight),
-                  style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp
-                  ),
-                  color = DynoTextPrimary
-                )
-              }
-
-              Column {
-                Text(
                   text = "PNEU",
                   style = MaterialTheme.typography.labelSmall.copy(
                     fontSize = 9.sp,
@@ -562,6 +577,71 @@ fun TestPreparationScreen(
                   ),
                   color = DynoPowerCyan
                 )
+              }
+            }
+
+            // Seção: OCUPANTES E CARGA DESTA PASSAGEM (Requisito 10)
+            Surface(
+              shape = RoundedCornerShape(8.dp),
+              color = if (uiState.passengerCount > 0 || uiState.cargoWeightKg > 0f || uiState.fuelAdjustmentKg > 0f) {
+                DynoPowerCyan.copy(alpha = 0.12f)
+              } else {
+                DynoSurfaceElevated
+              },
+              border = BorderStroke(
+                0.8.dp,
+                if (uiState.passengerCount > 0) DynoPowerCyan else DynoBorder
+              ),
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("btn_occupants_and_cargo")
+                .clickable(enabled = uiState.testState == DynoRunState.PARADO) {
+                  showOccupantsDialog = true
+                }
+            ) {
+              Column(
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+              ) {
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Text(
+                    text = "OCUPANTES E CARGA DESTA PASSAGEM",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontSize = 8.5.sp,
+                      fontWeight = FontWeight.Bold,
+                      letterSpacing = 0.3.sp
+                    ),
+                    color = DynoTextSecondary
+                  )
+                  Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = "Editar ocupantes",
+                    modifier = Modifier.size(12.dp),
+                    tint = DynoBlueLight
+                  )
+                }
+                val formattedTestWeight = String.format(Locale.US, "%,.0f kg", uiState.totalTestWeightKg).replace(",", ".")
+                Text(
+                  text = "PESO TOTAL DO TESTE: $formattedTestWeight",
+                  style = MaterialTheme.typography.bodySmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp
+                  ),
+                  color = if (uiState.passengerCount > 0) DynoPowerCyan else DynoTextPrimary
+                )
+                if (uiState.passengerCount > 0) {
+                  Text(
+                    text = "${uiState.passengerCount} passageiro(s): +${String.format(Locale.US, "%.0f", uiState.passengerWeightKg)} kg",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontSize = 8.5.sp,
+                      color = DynoPowerCyan
+                    )
+                  )
+                }
               }
             }
 
@@ -601,7 +681,7 @@ fun TestPreparationScreen(
                       .height(28.dp)
                       .testTag("btn_gear_select_${index + 1}")
                       .clickable(enabled = isSelectorEnabled) {
-                        viewModel.setSelectedGear(gearName, gearRatio)
+                        viewModel.setSelectedGear(gearName, gearRatio, index)
                       }
                   ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -1489,4 +1569,217 @@ private fun onNavigateHomeOrBack(onNavigateToHome: (Boolean) -> Unit, onNavigate
   } catch (e: Exception) {
     onNavigateBack()
   }
+}
+
+/**
+ * Diálogo: OCUPANTES E CARGA DESTA PASSAGEM (Requisito 10)
+ * Permite ajustar motorista, quantidade/peso de passageiros, carga e combustível adicional.
+ * Salva exclusivamente no snapshot da passagem atual.
+ */
+@Composable
+fun OccupantsAndCargoDialog(
+  curbWeightKg: Float,
+  currentDriverWeightKg: Float,
+  currentPassengerCount: Int,
+  currentPassengerWeightKg: Float,
+  currentCargoWeightKg: Float,
+  currentFuelAdjustmentKg: Float,
+  onDismiss: () -> Unit,
+  onConfirm: (driverKg: Float, passengerCount: Int, passengerKg: Float, cargoKg: Float, fuelKg: Float) -> Unit,
+  onReset: () -> Unit
+) {
+  var driverText by remember { mutableStateOf(String.format(Locale.US, "%.0f", currentDriverWeightKg)) }
+  var passengerCount by remember { mutableIntStateOf(currentPassengerCount) }
+  var passengerWeightText by remember { mutableStateOf(String.format(Locale.US, "%.0f", currentPassengerWeightKg)) }
+  var cargoText by remember { mutableStateOf(String.format(Locale.US, "%.0f", currentCargoWeightKg)) }
+  var fuelText by remember { mutableStateOf(String.format(Locale.US, "%.0f", currentFuelAdjustmentKg)) }
+
+  val driver = driverText.toFloatOrNull() ?: 0f
+  val passWeight = passengerWeightText.toFloatOrNull() ?: 0f
+  val cargo = cargoText.toFloatOrNull() ?: 0f
+  val fuel = fuelText.toFloatOrNull() ?: 0f
+
+  val totalMass = VehicleCalculations.calculateTotalWeight(
+    curbWeightKg = curbWeightKg,
+    driverWeightKg = driver,
+    passengerWeightKg = passWeight,
+    cargoWeightKg = cargo,
+    fuelAdjustmentKg = fuel
+  )
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    shape = RoundedCornerShape(16.dp),
+    containerColor = DynoSurfaceElevated,
+    title = {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+      ) {
+        Icon(Icons.Default.People, contentDescription = null, tint = DynoPowerCyan)
+        Text(
+          text = "OCUPANTES E CARGA DESTA PASSAGEM",
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+          color = DynoTextPrimary
+        )
+      }
+    },
+    text = {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+      ) {
+        Text(
+          text = "Ajuste os ocupantes e a carga presentes nesta passagem específica. Estes valores serão salvos no snapshot e não alterarão os dados mestre do veículo.",
+          style = MaterialTheme.typography.bodySmall,
+          color = DynoTextSecondary
+        )
+
+        // 1. Peso do Motorista
+        OutlinedTextField(
+          value = driverText,
+          onValueChange = { driverText = it },
+          label = { Text("Peso do motorista (kg)") },
+          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+          singleLine = true,
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("input_driver_weight")
+        )
+
+        // 2. Quantidade de Passageiros (0 a 4+)
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+          Text(
+            text = "Quantidade de passageiros",
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+            color = DynoTextSecondary
+          )
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            (0..4).forEach { count ->
+              val isSelected = passengerCount == count
+              Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = if (isSelected) DynoPowerCyan.copy(alpha = 0.25f) else DynoSurfaceContainer,
+                border = BorderStroke(1.dp, if (isSelected) DynoPowerCyan else DynoBorder),
+                modifier = Modifier
+                  .weight(1f)
+                  .height(34.dp)
+                  .testTag("btn_passengers_$count")
+                  .clickable {
+                    passengerCount = count
+                    if (count == 0) {
+                      passengerWeightText = "0"
+                    } else if ((passengerWeightText.toFloatOrNull() ?: 0f) == 0f) {
+                      passengerWeightText = "${count * 50}"
+                    }
+                  }
+              ) {
+                Box(contentAlignment = Alignment.Center) {
+                  Text(
+                    text = "$count",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                      fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                    ),
+                    color = if (isSelected) DynoPowerCyan else DynoTextSecondary
+                  )
+                }
+              }
+            }
+          }
+        }
+
+        // 3. Peso Total dos Passageiros
+        OutlinedTextField(
+          value = passengerWeightText,
+          onValueChange = { passengerWeightText = it },
+          label = { Text("Peso total dos passageiros (kg)") },
+          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+          singleLine = true,
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("input_passenger_weight")
+        )
+
+        // 4. Carga Adicional
+        OutlinedTextField(
+          value = cargoText,
+          onValueChange = { cargoText = it },
+          label = { Text("Carga adicional (kg)") },
+          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+          singleLine = true,
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("input_cargo_weight")
+        )
+
+        // 5. Combustível Adicional
+        OutlinedTextField(
+          value = fuelText,
+          onValueChange = { fuelText = it },
+          label = { Text("Combustível adicional (kg / litros)") },
+          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+          singleLine = true,
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("input_fuel_weight")
+        )
+
+        // Card Destaque: PESO TOTAL DO TESTE
+        Card(
+          shape = RoundedCornerShape(10.dp),
+          colors = CardDefaults.cardColors(containerColor = DynoSurfaceContainer),
+          border = BorderStroke(1.dp, DynoPowerCyan.copy(alpha = 0.6f)),
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp)
+        ) {
+          Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+          ) {
+            val formattedTotal = String.format(Locale.US, "%,.0f kg", totalMass).replace(",", ".")
+            Text(
+              text = "PESO TOTAL DO TESTE: $formattedTotal",
+              style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.Monospace
+              ),
+              color = DynoPowerCyan
+            )
+            val curbFormatted = String.format(Locale.US, "%,.0f kg", curbWeightKg).replace(",", ".")
+            Text(
+              text = "Vazio $curbFormatted + Motorista ${driver.toInt()} kg + Passageiros ${passWeight.toInt()} kg + Carga ${cargo.toInt()} kg + Combustível ${fuel.toInt()} kg",
+              style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+              color = DynoTextSecondary
+            )
+          }
+        }
+      }
+    },
+    confirmButton = {
+      Button(
+        onClick = {
+          onConfirm(driver, passengerCount, passWeight, cargo, fuel)
+        },
+        colors = ButtonDefaults.buttonColors(containerColor = DynoPowerCyan, contentColor = Color.Black),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.testTag("btn_confirm_occupants")
+      ) {
+        Text("CONFIRMAR PESO", fontWeight = FontWeight.Bold)
+      }
+    },
+    dismissButton = {
+      TextButton(
+        onClick = onReset,
+        modifier = Modifier.testTag("btn_reset_occupants")
+      ) {
+        Text("REDEFINIR PADRÃO", color = DynoTextSecondary)
+      }
+    }
+  )
 }

@@ -467,9 +467,21 @@ class RunResultRepository(context: Context) {
 
     // Parse snapshot if available
     var gearUsed = "2ª"
-    var gearRatio = 1.95f
-    var finalDrive = 4.10f
+    var gearIndex = 1
+    var gearRatio = 2.14f
+    var finalDrive = 4.19f
     var mass = 0f
+    var curbWeight = 0f
+    var driverWeight = 0f
+    var passengerCount = 0
+    var passengerWeight = 0f
+    var additionalWeight = 0f
+    var fuelAdjustment = 0f
+    var gpsDeltaV = 0f
+    var sensorDeltaV = 0f
+    var normFactor = 1.0f
+    var rawAvgG = 0f
+    var anchoredAvgG = 0f
     var drivetrainLoss = 12f
     var cd = 0.34f
     var frontalArea = 2.10f
@@ -503,9 +515,21 @@ class RunResultRepository(context: Context) {
       if (entity.configurationSnapshot.isNotBlank() && entity.configurationSnapshot != "{}") {
         val snapObj = JSONObject(entity.configurationSnapshot)
         gearUsed = snapObj.optString("gearUsed", "2ª")
-        gearRatio = snapObj.optDouble("gearRatio", 1.95).toFloat()
-        finalDrive = snapObj.optDouble("finalDrive", 4.10).toFloat()
+        gearIndex = snapObj.optInt("gearIndex", 1)
+        gearRatio = snapObj.optDouble("gearRatio", 2.14).toFloat()
+        finalDrive = snapObj.optDouble("finalDrive", 4.19).toFloat()
         mass = snapObj.optDouble("totalMassKg", 0.0).toFloat()
+        curbWeight = snapObj.optDouble("curbWeightKg", 0.0).toFloat()
+        driverWeight = snapObj.optDouble("driverWeightKg", 0.0).toFloat()
+        passengerCount = snapObj.optInt("passengerCount", 0)
+        passengerWeight = snapObj.optDouble("passengerWeightKg", 0.0).toFloat()
+        additionalWeight = snapObj.optDouble("additionalWeightKg", 0.0).toFloat()
+        fuelAdjustment = snapObj.optDouble("fuelAdjustmentKg", 0.0).toFloat()
+        gpsDeltaV = snapObj.optDouble("gpsDeltaVMps", 0.0).toFloat()
+        sensorDeltaV = snapObj.optDouble("sensorDeltaVMps", 0.0).toFloat()
+        normFactor = snapObj.optDouble("normalizationFactor", 1.0).toFloat()
+        rawAvgG = snapObj.optDouble("rawAverageLongitudinalG", 0.0).toFloat()
+        anchoredAvgG = snapObj.optDouble("anchoredAverageLongitudinalG", 0.0).toFloat()
         drivetrainLoss = snapObj.optDouble("drivetrainLossPercent", 12.0).toFloat()
         cd = snapObj.optDouble("cd", 0.34).toFloat()
         frontalArea = snapObj.optDouble("frontalAreaM2", 2.10).toFloat()
@@ -601,11 +625,23 @@ class RunResultRepository(context: Context) {
       peakPowerSpeedKmh = maxSpeed,
       peakTorqueSpeedKmh = startGps + (maxSpeed - startGps) * 0.45f,
       totalVehicleMassKg = mass,
+      curbWeightKg = curbWeight,
+      driverWeightKg = driverWeight,
+      passengerCount = passengerCount,
+      passengerWeightKg = passengerWeight,
+      additionalWeightKg = additionalWeight,
+      fuelAdjustmentKg = fuelAdjustment,
       drivetrainLossPercent = drivetrainLoss,
       estimatedMarginPercent = if (isPreliminary) 25f else 10f,
       gearUsed = gearUsed,
+      gearIndexUsed = gearIndex,
       gearRatioUsed = gearRatio,
       finalDriveUsed = finalDrive,
+      gpsDeltaVMps = gpsDeltaV,
+      sensorDeltaVMps = sensorDeltaV,
+      normalizationFactor = normFactor,
+      rawAverageLongitudinalG = rawAvgG,
+      anchoredAverageLongitudinalG = anchoredAvgG,
       isAerodynamicsEstimated = true,
       cdUsed = cd,
       frontalAreaUsed = frontalArea,
@@ -709,9 +745,21 @@ class RunResultRepository(context: Context) {
     return try {
       val obj = JSONObject()
       obj.put("totalMassKg", r.totalVehicleMassKg.safeFinite(0.0))
+      obj.put("curbWeightKg", r.curbWeightKg.safeFinite(0.0))
+      obj.put("driverWeightKg", r.driverWeightKg.safeFinite(0.0))
+      obj.put("passengerCount", r.passengerCount)
+      obj.put("passengerWeightKg", r.passengerWeightKg.safeFinite(0.0))
+      obj.put("additionalWeightKg", r.additionalWeightKg.safeFinite(0.0))
+      obj.put("fuelAdjustmentKg", r.fuelAdjustmentKg.safeFinite(0.0))
       obj.put("gearUsed", r.gearUsed)
-      obj.put("gearRatio", r.gearRatioUsed.safeFinite(1.95))
+      obj.put("gearIndex", r.gearIndexUsed)
+      obj.put("gearRatio", r.gearRatioUsed.safeFinite(2.14))
       obj.put("finalDrive", r.finalDriveUsed.safeFinite(4.19))
+      obj.put("gpsDeltaVMps", r.gpsDeltaVMps.safeFinite(0.0))
+      obj.put("sensorDeltaVMps", r.sensorDeltaVMps.safeFinite(0.0))
+      obj.put("normalizationFactor", r.normalizationFactor.safeFinite(1.0))
+      obj.put("rawAverageLongitudinalG", r.rawAverageLongitudinalG.safeFinite(0.0))
+      obj.put("anchoredAverageLongitudinalG", r.anchoredAverageLongitudinalG.safeFinite(0.0))
       obj.put("drivetrainLossPercent", r.drivetrainLossPercent.safeFinite(15.0))
       obj.put("cd", r.cdUsed.safeFinite(0.34))
       obj.put("frontalAreaM2", r.frontalAreaUsed.safeFinite(2.10))

@@ -1874,7 +1874,22 @@ private fun MeasurementDetailsCard(
             DetailRow("Força G média (longitudinal)", String.format(Locale.US, "%+.2f G", run.averageLongitudinalG))
           }
           if (run.totalVehicleMassKg > 0f) {
-            DetailRow("Peso total do veículo", String.format(Locale.US, "%.0f kg", run.totalVehicleMassKg))
+            val breakdown = buildString {
+              append(String.format(Locale.US, "%.0f kg", run.totalVehicleMassKg))
+              val parts = mutableListOf<String>()
+              if (run.curbWeightKg > 0f) parts.add("vazio: ${run.curbWeightKg.toInt()}kg")
+              if (run.driverWeightKg > 0f) parts.add("mot: ${run.driverWeightKg.toInt()}kg")
+              if (run.passengerWeightKg > 0f) {
+                val pStr = if (run.passengerCount > 0) "${run.passengerCount} pass (${run.passengerWeightKg.toInt()}kg)" else "pass: ${run.passengerWeightKg.toInt()}kg"
+                parts.add(pStr)
+              }
+              if (run.additionalWeightKg > 0f) parts.add("carga: ${run.additionalWeightKg.toInt()}kg")
+              if (run.fuelAdjustmentKg > 0f) parts.add("comb: ${run.fuelAdjustmentKg.toInt()}kg")
+              if (parts.isNotEmpty()) {
+                append(" (${parts.joinToString(" + ")})")
+              }
+            }
+            DetailRow("Peso total do teste", breakdown)
           }
           if (run.drivetrainLossPercent > 0f) {
             DetailRow("Perda de transmissão", String.format(Locale.US, "%.1f%%", run.drivetrainLossPercent))

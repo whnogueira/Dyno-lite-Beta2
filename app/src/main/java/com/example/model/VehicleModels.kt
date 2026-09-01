@@ -180,20 +180,21 @@ object VehicleCalculations {
   fun calculateTotalWeight(
     curbWeightKg: Float,
     driverWeightKg: Float,
-    passengerWeightKg: Float,
-    cargoWeightKg: Float,
-    audioWeightKg: Float,
-    gnvWeightKg: Float,
-    otherWeightKg: Float,
-    removedWeightKg: Float,
+    passengerWeightKg: Float = 0f,
+    cargoWeightKg: Float = 0f,
+    audioWeightKg: Float = 0f,
+    gnvWeightKg: Float = 0f,
+    otherWeightKg: Float = 0f,
+    removedWeightKg: Float = 0f,
     measuredTotalWeightKg: Float? = null,
-    useMeasuredWeight: Boolean = false
+    useMeasuredWeight: Boolean = false,
+    fuelAdjustmentKg: Float = 0f
   ): Float {
     if (useMeasuredWeight && measuredTotalWeightKg != null && measuredTotalWeightKg > 0f) {
       return measuredTotalWeightKg
     }
     val sum = curbWeightKg + driverWeightKg + passengerWeightKg + cargoWeightKg +
-      audioWeightKg + gnvWeightKg + otherWeightKg - removedWeightKg
+      audioWeightKg + gnvWeightKg + otherWeightKg + fuelAdjustmentKg - removedWeightKg
     return sum.coerceAtLeast(0f)
   }
 
@@ -393,7 +394,9 @@ object VehicleCalculations {
     isSpeedDecrease: Boolean = false,
     gpsFrozen: Boolean = false,
     maxIntegratedSpeedKmh: Float = maxSpeedKmh,
-    maxGpsSpeedKmh: Float = maxSpeedKmh
+    maxGpsSpeedKmh: Float = maxSpeedKmh,
+    sensorDeltaVMps: Float = 0f,
+    gpsDeltaVMps: Float = 0f
   ): RunQualityEvaluation {
     val effectiveGpsCount = if (validGpsCount != 10) validGpsCount else validGpsLocationsCount
     val effectiveElapsedSec = if (elapsedSeconds != 5.0f) elapsedSeconds else elapsedSec
@@ -403,7 +406,33 @@ object VehicleCalculations {
     val effectiveFinalSpeed = if (maxSpeedKmh != 50f) maxSpeedKmh else finalGpsSpeedKmh
     val effectiveStartSpeed = if (startSpeedKmh != 40f) startSpeedKmh else startGpsSpeedKmh
 
-    // 0. Detecção de GPS Congelado / Divergência Severa
+    // 0. Detecção de Divergência Acelerômetro vs GPS / GPS Congelado
+    val effectiveGpsDeltaV = if (gpsDeltaVMps > 0.1f) gpsDeltaVMps else ((maxGpsSpeedKmh - startSpeedKmh).coerceAtLeast(0f) / 3.6f)
+    if (sensorDeltaVMps > 0.5f && effectiveGpsDeltaV > 0.5f) {
+      val deltaVDivergence = kotlin.math.abs(sensorDeltaVMps - effectiveGpsDeltaV) / effectiveGpsDeltaV
+      if (deltaVDivergence > 0.40f) {
+        return RunQualityEvaluation(
+          quality = "GPS/SENSOR DIVERGENTE",
+          confidenceLevel = "BAIXA",
+          marginPercent = 20.0f,
+          marginDisplay = "±20%",
+          invalidationReason = "Divergência severa entre acelerômetro e GPS (${(deltaVDivergence * 100).toInt()}% > 15%). Aceleração normalizada pelo GPS.",
+          isPreliminary = true,
+          canCompare = false
+        )
+      } else if (deltaVDivergence > 0.15f) {
+        return RunQualityEvaluation(
+          quality = "REGULAR",
+          confidenceLevel = "MEDIA",
+          marginPercent = 15.0f,
+          marginDisplay = "±15%",
+          invalidationReason = "Divergência moderada entre acelerômetro e GPS (${(deltaVDivergence * 100).toInt()}% > 15%).",
+          isPreliminary = false,
+          canCompare = true
+        )
+      }
+    }
+
     val diffSpeed = kotlin.math.abs(maxGpsSpeedKmh - maxIntegratedSpeedKmh)
     if (gpsFrozen || (diffSpeed > 10.0f && gpsFrozen)) {
       return RunQualityEvaluation(
@@ -546,7 +575,7 @@ object VehicleCalculations {
     samples: List<RunSample>,
     isRpmValid: Boolean = true
   ): SustainedPeaks {
-    val validSamples = samples.filter { it.isValid && (it.finalAccelerationMps2 > 0.05f || it.longitudinalG > 0.01f || it.enginePowerCv > 1f) }
+    val validSamples = samples.filter { it.isValid && (it.finalAccelerationMps2 > 0.02f || it.longitudinalG > 0.005f || it.enginePowerCv > 1f) }
     if (validSamples.isEmpty()) {
       return SustainedPeaks(
         peakEnginePowerCv = 0f,
@@ -561,29 +590,42 @@ object VehicleCalculations {
       )
     }
 
+    // Validação de pico sustentado por pelo menos 3 amostras consecutivas (~150 ms) e GPS crescente
     val candidates = mutableListOf<RunSample>()
     for (i in validSamples.indices) {
       val sample = validSamples[i]
       val prev = validSamples.getOrNull(i - 1)
       val next = validSamples.getOrNull(i + 1)
 
+      val isSpeedGrowing = when {
+        prev != null && next != null -> {
+          sample.filteredSpeedKmh >= (prev.filteredSpeedKmh - 0.3f) &&
+            next.filteredSpeedKmh >= (sample.filteredSpeedKmh - 0.3f)
+        }
+        prev != null -> sample.filteredSpeedKmh >= (prev.filteredSpeedKmh - 0.3f)
+        next != null -> next.filteredSpeedKmh >= (sample.filteredSpeedKmh - 0.3f)
+        else -> true
+      }
+
       val isSustainedG = when {
         prev != null && next != null -> {
+          val maxNeighborG = kotlin.math.max(prev.longitudinalG, next.longitudinalG)
           val avgNeighborG = (prev.longitudinalG + next.longitudinalG) / 2f
-          sample.longitudinalG <= (avgNeighborG * 1.6f + 0.05f)
+          sample.longitudinalG <= (maxNeighborG * 1.35f + 0.03f) && sample.longitudinalG <= (avgNeighborG * 1.45f + 0.04f)
         }
         else -> true
       }
 
       val isSustainedPower = when {
         prev != null && next != null -> {
+          val maxNeighborP = kotlin.math.max(prev.enginePowerCv, next.enginePowerCv)
           val avgNeighborP = (prev.enginePowerCv + next.enginePowerCv) / 2f
-          sample.enginePowerCv <= (avgNeighborP * 1.6f + 5f)
+          sample.enginePowerCv <= (maxNeighborP * 1.35f + 3f) && sample.enginePowerCv <= (avgNeighborP * 1.45f + 4f)
         }
         else -> true
       }
 
-      if (isSustainedG && isSustainedPower) {
+      if (isSpeedGrowing && isSustainedG && isSustainedPower) {
         candidates.add(sample)
       }
     }
@@ -687,8 +729,43 @@ object VehicleCalculations {
     val slopeForce = calculateSlopeForce(correctedTotalMassKg, run.slopePercentUsed)
     val efficiency = (1.0f - (correctedLossPercent / 100f)).coerceIn(0.5f, 1.0f)
 
+    // Cálculo da janela válida de aceleração GPS para ancoramento
+    val startGps = if (run.officialStartSpeedKmh > 0f) run.officialStartSpeedKmh else run.startSpeedKmh
+    val maxGps = if (run.officialMaxSpeedKmh > 0f) run.officialMaxSpeedKmh else run.maximumGpsSpeedKmh
+    val gpsDeltaVMps = (maxGps - startGps).coerceAtLeast(0f) / 3.6f
+
+    val validAccelerationSamples = run.samples.filter {
+      it.isValid && it.filteredSpeedKmh >= (startGps - 2f) && it.filteredSpeedKmh <= (maxGps + 1f)
+    }
+    val samplePool = if (validAccelerationSamples.isNotEmpty()) validAccelerationSamples else run.samples.filter { it.isValid }
+
+    val rawSensorAccels = samplePool.map {
+      if (it.rawAccelerationMps2 > 0.001f) it.rawAccelerationMps2
+      else if (it.sensorAccelerationMps2 > 0.001f) it.sensorAccelerationMps2
+      else it.finalAccelerationMps2
+    }
+    val rawAvgG = if (rawSensorAccels.isNotEmpty()) {
+      rawSensorAccels.average().toFloat() / STANDARD_GRAVITY
+    } else if (run.rawAverageLongitudinalG > 0f) run.rawAverageLongitudinalG else 0.18f
+
+    val elapsedSec = if (run.elapsedSeconds > 0.1f) run.elapsedSeconds else 9.01f
+    val sensorDeltaVMps = if (run.sensorDeltaVMps > 0.1f) {
+      run.sensorDeltaVMps
+    } else {
+      rawAvgG * STANDARD_GRAVITY * elapsedSec
+    }
+
+    val normalizationFactor = if (sensorDeltaVMps > 0.1f && gpsDeltaVMps > 0.1f) {
+      (gpsDeltaVMps / sensorDeltaVMps).coerceIn(0.50f, 1.50f)
+    } else 1.0f
+
+    val anchoredAvgG = rawAvgG * normalizationFactor
+
     val updatedSamples = run.samples.map { sample ->
-      val aMps2 = sample.finalAccelerationMps2
+      val rawA = if (sample.rawAccelerationMps2 > 0.001f) sample.rawAccelerationMps2
+                 else if (sample.sensorAccelerationMps2 > 0.001f) sample.sensorAccelerationMps2
+                 else sample.finalAccelerationMps2
+      val aMps2 = rawA * normalizationFactor
       val g = aMps2 / STANDARD_GRAVITY
       val vMps = sample.filteredSpeedMs
       val fAero = calculateAerodynamicForce(vMps, correctedCd, correctedFrontalAreaM2, run.airDensityUsed)
@@ -707,6 +784,10 @@ object VehicleCalculations {
       } else 0f
 
       sample.copy(
+        rawAccelerationMps2 = rawA,
+        anchoredAccelerationMps2 = aMps2,
+        normalizationFactorApplied = normalizationFactor,
+        finalAccelerationMps2 = aMps2,
         longitudinalG = g,
         accelerationForceN = fAccel,
         aerodynamicForceN = fAero,
@@ -725,39 +806,32 @@ object VehicleCalculations {
       )
     }
 
-    val validSamples = updatedSamples.filter { it.isValid && it.finalAccelerationMps2 > 0.05f }
-    var newWheelPowerCv = 0f
-    var newEnginePowerCv = 0f
-    var newWheelTorqueKgfm = 0f
-    var newEngineTorqueKgfm = 0f
-    var peakPowerRpm: Int? = null
-    var peakTorqueRpm: Int? = null
-    var peakPowerSpeedKmh = run.maximumGpsSpeedKmh
-    var peakTorqueSpeedKmh = run.startSpeedKmh + (run.maximumGpsSpeedKmh - run.startSpeedKmh) * 0.45f
-    var peakG = run.peakLongitudinalG
-    var avgG = run.averageLongitudinalG
+    val sampleRpms = updatedSamples.mapNotNull { it.engineRpm }.filter { it > 500 }
+    val sampleRpmSpan = if (sampleRpms.isNotEmpty()) ((sampleRpms.maxOrNull() ?: 0) - (sampleRpms.minOrNull() ?: 0)) else null
+    val isRpmValid = (sampleRpms.size >= 6 && sampleRpmSpan != null && sampleRpmSpan >= 800)
 
-    if (validSamples.isNotEmpty()) {
-      peakG = kotlin.math.max(peakG, validSamples.map { it.longitudinalG }.maxOrNull() ?: 0f)
-      avgG = validSamples.map { it.longitudinalG }.average().toFloat()
+    val peaks = findSustainedPeaks(updatedSamples, isRpmValid = isRpmValid)
 
-      val maxP = validSamples.maxByOrNull { it.enginePowerCv }
-      if (maxP != null) {
-        newWheelPowerCv = maxP.wheelPowerCv
-        newEnginePowerCv = maxP.enginePowerCv
-        peakPowerRpm = maxP.engineRpm
-        peakPowerSpeedKmh = maxP.gpsSpeedKmh
-      }
-
-      val maxT = validSamples.filter { (it.engineRpm ?: 0) in 1000..7500 }.maxByOrNull { it.engineTorqueKgfm }
-        ?: validSamples.maxByOrNull { it.engineTorqueKgfm }
-      if (maxT != null) {
-        newWheelTorqueKgfm = maxT.wheelTorqueKgfm
-        newEngineTorqueKgfm = maxT.engineTorqueKgfm
-        peakTorqueRpm = maxT.engineRpm
-        peakTorqueSpeedKmh = maxT.gpsSpeedKmh
-      }
-    }
+    // Reavaliar qualidade com divergência de sensores
+    val qualityEval = classifyRunQuality(
+      speedGainKmh = (maxGps - startGps).coerceAtLeast(0f),
+      validGpsLocationsCount = run.validGpsLocationsCount,
+      elapsedSec = elapsedSec,
+      lastGpsAccuracyMeters = run.gpsAccuracyMeters,
+      avgSyncDiffKmh = run.averageSpeedDifferenceKmh,
+      rejectionRatio = if (run.totalSamples > 0) run.rejectedSamples.toFloat() / run.totalSamples else 0.05f,
+      finishReason = FinishReason.fromCode(run.finishReason),
+      isPhoneStable = true,
+      gearShiftDetected = false,
+      finalGpsSpeedKmh = maxGps,
+      startGpsSpeedKmh = startGps,
+      rpmSpan = sampleRpmSpan,
+      gpsFrozen = run.gpsFrozen,
+      maxIntegratedSpeedKmh = run.maxIntegratedSpeedKmh,
+      maxGpsSpeedKmh = maxGps,
+      sensorDeltaVMps = sensorDeltaVMps,
+      gpsDeltaVMps = gpsDeltaVMps
+    )
 
     return run.copy(
       totalVehicleMassKg = correctedTotalMassKg,
@@ -767,22 +841,32 @@ object VehicleCalculations {
       cdUsed = correctedCd,
       frontalAreaUsed = correctedFrontalAreaM2,
       crrUsed = correctedCrr,
-      wheelPowerCv = newWheelPowerCv,
-      enginePowerCv = newEnginePowerCv,
-      wheelPowerKw = newWheelPowerCv * 0.73549875f,
-      enginePowerKw = newEnginePowerCv * 0.73549875f,
-      estimatedPowerCv = newEnginePowerCv,
-      wheelTorqueKgfm = newWheelTorqueKgfm,
-      engineTorqueKgfm = newEngineTorqueKgfm,
-      wheelTorqueNm = newWheelTorqueKgfm * STANDARD_GRAVITY,
-      engineTorqueNm = newEngineTorqueKgfm * STANDARD_GRAVITY,
-      estimatedTorqueKgfm = newEngineTorqueKgfm,
-      peakPowerRpm = peakPowerRpm,
-      peakTorqueRpm = peakTorqueRpm,
-      peakPowerSpeedKmh = peakPowerSpeedKmh,
-      peakTorqueSpeedKmh = peakTorqueSpeedKmh,
-      peakLongitudinalG = peakG,
-      averageLongitudinalG = avgG,
+      gpsDeltaVMps = gpsDeltaVMps,
+      sensorDeltaVMps = sensorDeltaVMps,
+      normalizationFactor = normalizationFactor,
+      rawAverageLongitudinalG = rawAvgG,
+      anchoredAverageLongitudinalG = anchoredAvgG,
+      wheelPowerCv = peaks.peakWheelPowerCv,
+      enginePowerCv = peaks.peakEnginePowerCv,
+      wheelPowerKw = peaks.peakWheelPowerCv * 0.73549875f,
+      enginePowerKw = peaks.peakEnginePowerCv * 0.73549875f,
+      estimatedPowerCv = peaks.peakEnginePowerCv,
+      wheelTorqueKgfm = peaks.wheelTorqueKgfm,
+      engineTorqueKgfm = peaks.engineTorqueKgfm,
+      wheelTorqueNm = peaks.wheelTorqueKgfm * STANDARD_GRAVITY,
+      engineTorqueNm = peaks.engineTorqueKgfm * STANDARD_GRAVITY,
+      estimatedTorqueKgfm = peaks.engineTorqueKgfm,
+      peakPowerRpm = peaks.peakPowerRpm,
+      peakTorqueRpm = peaks.peakTorqueRpm,
+      peakPowerSpeedKmh = peaks.peakPowerSpeedKmh,
+      peakTorqueSpeedKmh = peaks.peakTorqueSpeedKmh,
+      peakLongitudinalG = peaks.peakLongitudinalG,
+      averageLongitudinalG = anchoredAvgG,
+      quality = qualityEval.quality,
+      confidenceLevel = qualityEval.confidenceLevel,
+      estimatedMarginPercent = qualityEval.marginPercent,
+      invalidationReason = qualityEval.invalidationReason,
+      isPreliminary = qualityEval.isPreliminary,
       samples = updatedSamples
     )
   }
