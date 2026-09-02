@@ -153,17 +153,30 @@ fun ResultsScreen(
 
   // Check valid tests for the current vehicle to evaluate comparison eligibility (BOA/REGULAR with gain >= 15 km/h)
   val currentVehicleName = currentDisplayedResult?.vehicleName ?: ""
-  val validRunsForVehicle = remember(results, currentVehicleName) {
-    if (currentVehicleName.isNotEmpty()) {
+  val isAccelCurrent = currentDisplayedResult?.testMode == "ACCELERATION"
+  val validRunsForVehicle = remember(results, currentVehicleName, isAccelCurrent, currentDisplayedResult?.accelRangeLabel) {
+    if (isAccelCurrent) {
+      val targetLabel = currentDisplayedResult?.accelRangeLabel ?: ""
       results.filter {
+        it.testMode == "ACCELERATION" &&
         it.vehicleName == currentVehicleName &&
         (it.quality == "BOA" || it.quality == "REGULAR") &&
-        it.speedGainKmh >= 15.0f
+        it.accelRangeLabel == targetLabel
       }
     } else {
-      results.filter {
-        (it.quality == "BOA" || it.quality == "REGULAR") &&
-        it.speedGainKmh >= 15.0f
+      if (currentVehicleName.isNotEmpty()) {
+        results.filter {
+          it.testMode != "ACCELERATION" &&
+          it.vehicleName == currentVehicleName &&
+          (it.quality == "BOA" || it.quality == "REGULAR") &&
+          it.speedGainKmh >= 15.0f
+        }
+      } else {
+        results.filter {
+          it.testMode != "ACCELERATION" &&
+          (it.quality == "BOA" || it.quality == "REGULAR") &&
+          it.speedGainKmh >= 15.0f
+        }
       }
     }
   }
@@ -228,7 +241,18 @@ fun ResultsScreen(
           val formattedDate = dateFormat.format(Date(run.timestamp))
           val isInvalid = run.quality == "INVÁLIDA" || run.quality == "INVALID"
 
-          if (isInvalid) {
+          if (run.testMode == "ACCELERATION") {
+            AccelerationRunResultContent(
+              run = run,
+              formattedDate = formattedDate,
+              isInvalid = isInvalid,
+              canCompare = canCompare,
+              runResultRepository = runResultRepository,
+              onStartNewTest = { onStartNewTest(run.vehicleId) },
+              onCompareClick = { showComparisonDialog = true },
+              onHistoryClick = { showHistoryDialog = true }
+            )
+          } else if (isInvalid) {
             // -------------------------------------------------------------
             // FLUXO DE PASSAGEM INVÁLIDA
             // 1. BANNER "PASSAGEM INVÁLIDA" NO TOPO
@@ -2167,6 +2191,49 @@ private fun HistoryResultsDialog(
           )
         }
 
+        // Filtro por tipo de teste (Requisito 10)
+        var historyFilter by remember { mutableStateOf("TODOS") }
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+            .padding(2.dp),
+          horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+          listOf("TODOS", "DINAMÔMETRO", "ACELERAÇÃO").forEach { filterName ->
+            val isFilterSelected = historyFilter == filterName
+            Surface(
+              shape = RoundedCornerShape(6.dp),
+              color = if (isFilterSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+              modifier = Modifier
+                .weight(1f)
+                .clickable { historyFilter = filterName }
+            ) {
+              Box(
+                modifier = Modifier.padding(vertical = 6.dp),
+                contentAlignment = Alignment.Center
+              ) {
+                Text(
+                  text = filterName,
+                  style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = if (isFilterSelected) FontWeight.Bold else FontWeight.Medium,
+                    fontSize = 9.5.sp
+                  ),
+                  color = if (isFilterSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+              }
+            }
+          }
+        }
+
+        val filteredResults = remember(results, historyFilter) {
+          when (historyFilter) {
+            "DINAMÔMETRO" -> results.filter { it.testMode != "ACCELERATION" }
+            "ACELERAÇÃO" -> results.filter { it.testMode == "ACCELERATION" }
+            else -> results
+          }
+        }
+
         // Seção: Testes Não Concluídos (se houver)
         if (incompleteTests.isNotEmpty()) {
           Text(
@@ -2215,7 +2282,7 @@ private fun HistoryResultsDialog(
         }
 
         // Seção: Testes Concluídos
-        if (results.isEmpty()) {
+        if (filteredResults.isEmpty()) {
           Box(
             modifier = Modifier
               .fillMaxWidth()
@@ -2223,17 +2290,17 @@ private fun HistoryResultsDialog(
             contentAlignment = Alignment.Center
           ) {
             Text(
-              text = "Nenhum teste gravado no histórico.",
+              text = if (results.isEmpty()) "Nenhum teste gravado no histórico." else "Nenhum teste correspondente ao filtro.",
               style = MaterialTheme.typography.bodyMedium,
               color = MaterialTheme.colorScheme.onSurfaceVariant
             )
           }
         } else {
           Text(
-            text = "Testes concluídos (${results.size}):",
+            text = "Testes concluídos (${filteredResults.size}):",
             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = DynoBlueLight)
           )
-          results.forEach { run ->
+          filteredResults.forEach { run ->
             val isSelected = run.id == currentSelectedId
             val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
             val formattedDate = dateFormat.format(Date(run.timestamp))
@@ -2289,15 +2356,32 @@ private fun HistoryResultsDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                   )
 
-                  Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                      text = String.format(Locale.US, "GPS: %.1f km/h", run.maximumGpsSpeedKmh),
-                      style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-                    )
-                    Text(
-                      text = String.format(Locale.US, "Dur: %.2fs", run.elapsedSeconds),
-                      style = MaterialTheme.typography.bodySmall
-                    )
+                  if (run.testMode == "ACCELERATION") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                      Text(
+                        text = run.accelRangeLabel,
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, color = DynoPowerCyan)
+                      )
+                      Text(
+                        text = String.format(Locale.US, "%.2fs", run.elapsedSeconds),
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                      )
+                      Text(
+                        text = String.format(Locale.US, "Máx: %.2fG", run.peakLongitudinalG),
+                        style = MaterialTheme.typography.bodySmall
+                      )
+                    }
+                  } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                      Text(
+                        text = String.format(Locale.US, "GPS: %.1f km/h", run.maximumGpsSpeedKmh),
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                      )
+                      Text(
+                        text = String.format(Locale.US, "Dur: %.2fs", run.elapsedSeconds),
+                        style = MaterialTheme.typography.bodySmall
+                      )
+                    }
                   }
                 }
 
@@ -2358,8 +2442,13 @@ private fun ComparisonResultsDialog(
             .verticalScroll(rememberScrollState()),
           verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+          val isAccelCompare = run1.testMode == "ACCELERATION"
           Text(
-            text = "Comparando os dois testes válidos mais recentes de ${run1.vehicleName.ifEmpty { "Veículo Principal" }}:",
+            text = if (isAccelCompare) {
+              "Comparando os dois testes de aceleração de ${run1.vehicleName.ifEmpty { "Veículo Principal" }} (${run1.accelRangeLabel}):"
+            } else {
+              "Comparando os dois testes válidos mais recentes de ${run1.vehicleName.ifEmpty { "Veículo Principal" }}:"
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
           )
@@ -2377,12 +2466,23 @@ private fun ComparisonResultsDialog(
             Text(dateFormat.format(Date(run2.timestamp)), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary), modifier = Modifier.weight(1f), textAlign = TextAlign.End)
           }
 
-          ComparisonRow("Máx GPS", String.format(Locale.US, "%.1f km/h", run1.maximumGpsSpeedKmh), String.format(Locale.US, "%.1f km/h", run2.maximumGpsSpeedKmh))
-          ComparisonRow("Máx Calc", String.format(Locale.US, "%.1f km/h", run1.maximumCalculatedSpeedKmh), String.format(Locale.US, "%.1f km/h", run2.maximumCalculatedSpeedKmh))
-          ComparisonRow("Duração", String.format(Locale.US, "%.2f s", run1.elapsedSeconds), String.format(Locale.US, "%.2f s", run2.elapsedSeconds))
-          ComparisonRow("Dif. média", String.format(Locale.US, "±%.1f km/h", run1.averageSpeedDifferenceKmh), String.format(Locale.US, "±%.1f km/h", run2.averageSpeedDifferenceKmh))
-          ComparisonRow("Qualidade", run1.quality, run2.quality)
-          ComparisonRow("Amostras", "${run1.totalSamples}", "${run2.totalSamples}")
+          if (isAccelCompare) {
+            ComparisonRow("Faixa", run1.accelRangeLabel, run2.accelRangeLabel)
+            ComparisonRow("Tempo", String.format(Locale.US, "%.2f s", run1.elapsedSeconds), String.format(Locale.US, "%.2f s", run2.elapsedSeconds))
+            ComparisonRow("Margem de erro", String.format(Locale.US, "±%.2f s", run1.estimatedMarginSeconds), String.format(Locale.US, "±%.2f s", run2.estimatedMarginSeconds))
+            ComparisonRow("Aceleração máx", String.format(Locale.US, "%.2f G", run1.peakLongitudinalG), String.format(Locale.US, "%.2f G", run2.peakLongitudinalG))
+            ComparisonRow("Distância", String.format(Locale.US, "%.1f m", run1.totalDistanceMeters), String.format(Locale.US, "%.1f m", run2.totalDistanceMeters))
+            ComparisonRow("Precisão GPS", String.format(Locale.US, "±%.1f m", run1.gpsAccuracyMeters), String.format(Locale.US, "±%.1f m", run2.gpsAccuracyMeters))
+            ComparisonRow("Trocas de marcha", "${run1.gearShiftCount}", "${run2.gearShiftCount}")
+            ComparisonRow("Qualidade", run1.quality, run2.quality)
+          } else {
+            ComparisonRow("Máx GPS", String.format(Locale.US, "%.1f km/h", run1.maximumGpsSpeedKmh), String.format(Locale.US, "%.1f km/h", run2.maximumGpsSpeedKmh))
+            ComparisonRow("Máx Calc", String.format(Locale.US, "%.1f km/h", run1.maximumCalculatedSpeedKmh), String.format(Locale.US, "%.1f km/h", run2.maximumCalculatedSpeedKmh))
+            ComparisonRow("Duração", String.format(Locale.US, "%.2f s", run1.elapsedSeconds), String.format(Locale.US, "%.2f s", run2.elapsedSeconds))
+            ComparisonRow("Dif. média", String.format(Locale.US, "±%.1f km/h", run1.averageSpeedDifferenceKmh), String.format(Locale.US, "±%.1f km/h", run2.averageSpeedDifferenceKmh))
+            ComparisonRow("Qualidade", run1.quality, run2.quality)
+            ComparisonRow("Amostras", "${run1.totalSamples}", "${run2.totalSamples}")
+          }
         }
       }
     },
@@ -2922,5 +3022,350 @@ private fun processSamplesForGraph(samples: List<RunSample>, useRpm: Boolean): L
   }
 
   return smoothed
+}
+
+/**
+ * Visualização Completa dos Resultados do Teste de Aceleração (Requisito 8)
+ */
+@Composable
+fun AccelerationRunResultContent(
+  run: RunResult,
+  formattedDate: String,
+  isInvalid: Boolean,
+  canCompare: Boolean,
+  runResultRepository: RunResultRepository,
+  onStartNewTest: () -> Unit,
+  onCompareClick: () -> Unit,
+  onHistoryClick: () -> Unit
+) {
+  // 1. HEADER DO MODO E STATUS
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(14.dp),
+    color = if (isInvalid) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f) else DynoSurfaceContainer,
+    border = BorderStroke(
+      1.dp,
+      if (isInvalid) MaterialTheme.colorScheme.error.copy(alpha = 0.6f) else DynoDivider
+    )
+  ) {
+    Row(
+      modifier = Modifier.padding(14.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+      ) {
+        Surface(
+          shape = CircleShape,
+          color = if (isInvalid) MaterialTheme.colorScheme.error else DynoPowerCyan.copy(alpha = 0.2f),
+          modifier = Modifier.size(36.dp)
+        ) {
+          Box(contentAlignment = Alignment.Center) {
+            Icon(
+              imageVector = if (isInvalid) Icons.Default.Close else Icons.Default.Speed,
+              contentDescription = null,
+              tint = if (isInvalid) MaterialTheme.colorScheme.onError else DynoPowerCyan,
+              modifier = Modifier.size(20.dp)
+            )
+          }
+        }
+
+        Column {
+          Text(
+            text = "TESTE DE ACELERAÇÃO",
+            style = MaterialTheme.typography.labelSmall.copy(
+              fontWeight = FontWeight.Bold,
+              letterSpacing = 0.5.sp
+            ),
+            color = if (isInvalid) MaterialTheme.colorScheme.onErrorContainer else DynoPowerCyan
+          )
+          Text(
+            text = run.accelRangeLabel.ifEmpty { "0–100 km/h" },
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
+            color = if (isInvalid) MaterialTheme.colorScheme.onErrorContainer else DynoTextPrimary
+          )
+        }
+      }
+
+      // Quality Badge
+      val (qualityColor, qualityBg) = when (run.quality) {
+        "BOA" -> Pair(DynoSuccessGreen, DynoSuccessGreen.copy(alpha = 0.2f))
+        "REGULAR" -> Pair(DynoWarningYellow, DynoWarningYellow.copy(alpha = 0.2f))
+        else -> Pair(DynoErrorRed, DynoErrorRed.copy(alpha = 0.2f))
+      }
+
+      Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = qualityBg,
+        border = BorderStroke(1.dp, qualityColor.copy(alpha = 0.5f))
+      ) {
+        Text(
+          text = run.quality,
+          modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+          style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Black),
+          color = qualityColor
+        )
+      }
+    }
+  }
+
+  // 2. MOTIVO DA INVALIDAÇÃO (se aplicável)
+  if (isInvalid) {
+    Card(
+      modifier = Modifier.fillMaxWidth(),
+      shape = RoundedCornerShape(12.dp),
+      colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+      border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f))
+    ) {
+      Row(
+        modifier = Modifier.padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+      ) {
+        Icon(
+          imageVector = Icons.Outlined.Info,
+          contentDescription = null,
+          tint = MaterialTheme.colorScheme.error,
+          modifier = Modifier.size(20.dp)
+        )
+        Column {
+          Text(
+            text = "MOTIVO DA INVALIDAÇÃO",
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.error
+          )
+          Text(
+            text = run.getEffectiveInvalidationReason(),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface
+          )
+        }
+      }
+    }
+  }
+
+  // 3. CARD DE DESTAQUE: TEMPO PRINCIPAL
+  Card(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(16.dp),
+    colors = CardDefaults.cardColors(containerColor = DynoSurfaceContainer),
+    border = BorderStroke(1.dp, DynoDivider)
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(20.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+      Text(
+        text = "TEMPO NA FAIXA ${run.accelRangeLabel.uppercase()}",
+        style = MaterialTheme.typography.labelSmall.copy(
+          fontWeight = FontWeight.Bold,
+          letterSpacing = 0.8.sp
+        ),
+        color = DynoTextSecondary
+      )
+
+      Row(
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.Center
+      ) {
+        Text(
+          text = String.format(Locale.US, "%.2f", run.elapsedSeconds),
+          style = MaterialTheme.typography.displayLarge.copy(
+            fontWeight = FontWeight.Black,
+            fontSize = 54.sp,
+            fontFamily = FontFamily.Monospace
+          ),
+          color = if (isInvalid) DynoTextSecondary else DynoPowerCyan
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+          text = "s",
+          style = MaterialTheme.typography.titleLarge.copy(
+            fontWeight = FontWeight.Bold,
+            fontSize = 26.sp
+          ),
+          color = DynoTextSecondary,
+          modifier = Modifier.padding(bottom = 8.dp)
+        )
+      }
+
+      Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = DynoSurfaceElevated
+      ) {
+        Text(
+          text = "Margem estimada de erro: ±${String.format(Locale.US, "%.2f", run.estimatedMarginSeconds)} s",
+          style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+          color = DynoTextSecondary,
+          modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+        )
+      }
+    }
+  }
+
+  // 4. PARCIAIS ATINGIDAS (se houver)
+  val splits = run.accelerationSplits
+  if (splits.isNotEmpty()) {
+    Card(
+      modifier = Modifier.fillMaxWidth(),
+      shape = RoundedCornerShape(14.dp),
+      colors = CardDefaults.cardColors(containerColor = DynoSurfaceContainer),
+      border = BorderStroke(1.dp, DynoDivider)
+    ) {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+      ) {
+        Text(
+          text = "PARCIAIS ATINGIDAS",
+          style = MaterialTheme.typography.labelSmall.copy(
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.5.sp
+          ),
+          color = DynoPowerCyan
+        )
+
+        splits.forEachIndexed { index, split ->
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .background(
+                if (index % 2 == 0) DynoSurfaceElevated.copy(alpha = 0.5f) else Color.Transparent,
+                RoundedCornerShape(6.dp)
+              )
+              .padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Text(
+              text = split.label,
+              style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+              color = DynoTextPrimary
+            )
+            Text(
+              text = String.format(Locale.US, "%.2f s", split.timeSeconds),
+              style = MaterialTheme.typography.bodyMedium.copy(
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+              ),
+              color = DynoPowerCyan
+            )
+          }
+        }
+      }
+    }
+  }
+
+  // 5. CARD DE DADOS TÉCNICOS DA MEDIÇÃO
+  Card(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(14.dp),
+    colors = CardDefaults.cardColors(containerColor = DynoSurfaceContainer),
+    border = BorderStroke(1.dp, DynoDivider)
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(14.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+      Text(
+        text = "DADOS DA MEDIÇÃO",
+        style = MaterialTheme.typography.labelSmall.copy(
+          fontWeight = FontWeight.Bold,
+          letterSpacing = 0.5.sp
+        ),
+        color = DynoTextSecondary
+      )
+
+      DetailRow(
+        label = "Veículo utilizado",
+        value = run.vehicleName.ifBlank { "Veículo Principal" }
+      )
+      DetailRow(
+        label = "Data e Hora",
+        value = formattedDate
+      )
+      DetailRow(
+        label = "Precisão do GPS",
+        value = String.format(Locale.US, "±%.1f m", run.gpsAccuracyMeters)
+      )
+      DetailRow(
+        label = "Distância percorrida",
+        value = String.format(Locale.US, "%.1f m", run.totalDistanceMeters)
+      )
+      DetailRow(
+        label = "Aceleração máxima",
+        value = String.format(Locale.US, "%.2f G", run.peakLongitudinalG)
+      )
+      DetailRow(
+        label = "Trocas de marcha estimadas",
+        value = "${run.gearShiftCount}"
+      )
+      DetailRow(
+        label = "Taxa média de amostragem GPS",
+        value = String.format(Locale.US, "%.1f Hz", run.averageGpsFrequencyHz)
+      )
+    }
+  }
+
+  // 6. BOTÃO DE SALVAR TESTE
+  SaveTestButtonRow(
+    run = run,
+    runResultRepository = runResultRepository,
+    modifier = Modifier.fillMaxWidth()
+  )
+
+  // 7. BOTÕES DE NAVEGAÇÃO E AÇÕES
+  Column(
+    modifier = Modifier.fillMaxWidth(),
+    verticalArrangement = Arrangement.spacedBy(8.dp)
+  ) {
+    Button(
+      onClick = onStartNewTest,
+      modifier = Modifier
+        .fillMaxWidth()
+        .height(48.dp),
+      colors = ButtonDefaults.buttonColors(containerColor = DynoBluePrimary),
+      shape = RoundedCornerShape(10.dp)
+    ) {
+      Icon(Icons.Default.Refresh, contentDescription = null)
+      Spacer(modifier = Modifier.width(8.dp))
+      Text("NOVO TESTE", fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+    }
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+      OutlinedButton(
+        onClick = onCompareClick,
+        enabled = canCompare,
+        modifier = Modifier.weight(1f).height(44.dp),
+        shape = RoundedCornerShape(10.dp)
+      ) {
+        Icon(Icons.Default.CompareArrows, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text("COMPARAR", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+      }
+
+      OutlinedButton(
+        onClick = onHistoryClick,
+        modifier = Modifier.weight(1f).height(44.dp),
+        shape = RoundedCornerShape(10.dp)
+      ) {
+        Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text("HISTÓRICO", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+      }
+    }
+  }
 }
 

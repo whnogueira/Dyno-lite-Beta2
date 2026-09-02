@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.VehicleRepository
+import com.example.model.TestMode
 import com.example.model.VehicleProfile
 import com.example.ui.components.DynoBottomNavigation
 import com.example.ui.components.DynoTab
@@ -98,6 +99,7 @@ fun DynoLiteApp() {
   var selectedTab by remember { mutableStateOf(DynoTab.HOME) }
   var vehicleToEdit by remember { mutableStateOf<VehicleProfile?>(null) }
   var activeTestVehicle by remember { mutableStateOf<VehicleProfile?>(null) }
+  var activeTestMode by remember { mutableStateOf(TestMode.DYNO) }
   var homeFeedbackMessage by remember { mutableStateOf<String?>(null) }
   var simulatorInitialRunId by remember { mutableStateOf<String?>(null) }
 
@@ -185,7 +187,19 @@ fun DynoLiteApp() {
                 currentDestination = AppDestination.VEHICLE_WIZARD
               },
               onNavigateToGarage = { selectedTab = DynoTab.GARAGE },
+              onNavigateToMode = { mode ->
+                activeTestMode = mode
+                homeFeedbackMessage = null
+                if (primaryVehicle != null) {
+                  activeTestVehicle = primaryVehicle
+                  currentDestination = AppDestination.TEST_PREPARATION
+                } else {
+                  vehicleToEdit = null
+                  currentDestination = AppDestination.VEHICLE_WIZARD
+                }
+              },
               onNavigateToTestPrep = {
+                activeTestMode = TestMode.DYNO
                 homeFeedbackMessage = null
                 if (primaryVehicle != null) {
                   activeTestVehicle = primaryVehicle
@@ -291,6 +305,7 @@ fun DynoLiteApp() {
       if (veh != null) {
         TestPreparationScreen(
           vehicle = veh,
+          initialTestMode = activeTestMode,
           onNavigateToHome = { saved ->
             activeTestVehicle = null
             currentDestination = AppDestination.MAIN_TABS

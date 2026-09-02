@@ -53,7 +53,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.VehicleDatabase
+import androidx.compose.material.icons.outlined.Timer
 import com.example.model.RunResult
+import com.example.model.TestMode
 import com.example.model.VehicleCalculations
 import com.example.model.VehicleProfile
 import com.example.ui.components.DynoBadgeStatus
@@ -90,7 +92,8 @@ fun HomeScreen(
   onDismissFeedback: () -> Unit = {},
   onNavigateToWizard: () -> Unit,
   onNavigateToGarage: () -> Unit,
-  onNavigateToTestPrep: () -> Unit,
+  onNavigateToTestPrep: () -> Unit = {},
+  onNavigateToMode: (TestMode) -> Unit = { _ -> onNavigateToTestPrep() },
   onNavigateToSettings: () -> Unit,
   onNavigateToGuide: () -> Unit = {},
   modifier: Modifier = Modifier
@@ -515,19 +518,137 @@ fun HomeScreen(
           }
         }
 
-        // Botões de Ação Principais
+        // Botões de Ação Principais - Separação dos Modos (Requisito 1)
         Column(
           modifier = Modifier.fillMaxWidth(),
           verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-          // Botão Principal Azul "INICIAR TESTE"
-          DynoPrimaryButton(
-            text = "INICIAR TESTE",
-            onClick = onNavigateToTestPrep,
-            icon = Icons.Default.PlayArrow,
-            modifier = Modifier.fillMaxWidth(),
-            testTag = "btn_discover_power"
+          Text(
+            text = "MODOS DE TESTE",
+            style = MaterialTheme.typography.labelSmall.copy(
+              fontWeight = FontWeight.Bold,
+              letterSpacing = 1.sp,
+              fontSize = 11.sp
+            ),
+            color = DynoTextSecondary,
+            modifier = Modifier.padding(start = 2.dp, bottom = 2.dp)
           )
+
+          // Modo 1: DINAMÔMETRO
+          Card(
+            onClick = { onNavigateToMode(TestMode.DYNO) },
+            modifier = Modifier
+              .fillMaxWidth()
+              .testTag("btn_mode_dyno"),
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(
+              containerColor = DynoBluePrimary
+            ),
+            border = BorderStroke(1.dp, DynoBlueLight.copy(alpha = 0.5f))
+          ) {
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+              Surface(
+                shape = CircleShape,
+                color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.18f),
+                modifier = Modifier.size(42.dp)
+              ) {
+                Box(contentAlignment = Alignment.Center) {
+                  Icon(
+                    imageVector = Icons.Outlined.Speed,
+                    contentDescription = null,
+                    tint = androidx.compose.ui.graphics.Color.White,
+                    modifier = Modifier.size(24.dp)
+                  )
+                }
+              }
+              Column(modifier = Modifier.weight(1f)) {
+                Text(
+                  text = "DINAMÔMETRO",
+                  style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp,
+                    fontSize = 15.sp
+                  ),
+                  color = androidx.compose.ui.graphics.Color.White
+                )
+                Text(
+                  text = "Estima potência, torque e curva.",
+                  style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                  color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.85f)
+                )
+              }
+              Icon(
+                imageVector = Icons.Default.PlayArrow,
+                contentDescription = null,
+                tint = androidx.compose.ui.graphics.Color.White,
+                modifier = Modifier.size(22.dp)
+              )
+            }
+          }
+
+          // Modo 2: ACELERAÇÃO
+          Card(
+            onClick = { onNavigateToMode(TestMode.ACCELERATION) },
+            modifier = Modifier
+              .fillMaxWidth()
+              .testTag("btn_mode_acceleration"),
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(
+              containerColor = DynoSurfaceElevated
+            ),
+            border = BorderStroke(1.dp, DynoTorqueOrange.copy(alpha = 0.65f))
+          ) {
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+              Surface(
+                shape = CircleShape,
+                color = DynoTorqueOrange.copy(alpha = 0.2f),
+                modifier = Modifier.size(42.dp)
+              ) {
+                Box(contentAlignment = Alignment.Center) {
+                  Icon(
+                    imageVector = Icons.Outlined.Timer,
+                    contentDescription = null,
+                    tint = DynoTorqueOrange,
+                    modifier = Modifier.size(24.dp)
+                  )
+                }
+              }
+              Column(modifier = Modifier.weight(1f)) {
+                Text(
+                  text = "ACELERAÇÃO",
+                  style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp,
+                    fontSize = 15.sp
+                  ),
+                  color = DynoTextPrimary
+                )
+                Text(
+                  text = "Mede o tempo entre duas velocidades.",
+                  style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                  color = DynoTextSecondary
+                )
+              }
+              Icon(
+                imageVector = Icons.Default.PlayArrow,
+                contentDescription = null,
+                tint = DynoTorqueOrange,
+                modifier = Modifier.size(22.dp)
+              )
+            }
+          }
 
           // Botões Secundários
           Row(

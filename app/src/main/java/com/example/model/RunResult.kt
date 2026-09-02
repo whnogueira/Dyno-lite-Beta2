@@ -118,6 +118,14 @@ data class RunResult(
   val maximumSpeedDifferenceKmh: Float = 0f,
   val invalidationReason: String? = null,
   val appVersion: String = "0.20.0",
+  val testMode: String = "DYNO", // "DYNO" ou "ACCELERATION"
+  val targetStartSpeedKmh: Float = 0f,
+  val targetEndSpeedKmh: Float = 0f,
+  val accelRangeLabel: String = "",
+  val gearShiftCount: Int = 0,
+  val speedUnit: String = "km/h",
+  val estimatedMarginSeconds: Float = 0.08f,
+  val accelerationSplits: List<AccelerationSplit> = emptyList(),
   // Tempos de aceleração (splits de velocidade)
   val time0to60Kmh: Float? = null,
   val time0to100Kmh: Float? = null,

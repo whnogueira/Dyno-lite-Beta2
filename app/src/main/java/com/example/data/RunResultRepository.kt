@@ -8,6 +8,7 @@ import com.example.data.db.TestSampleEntity
 import com.example.data.db.currentIsoUtc
 import com.example.data.db.isoToTimestampMs
 import com.example.data.db.toIsoUtc
+import com.example.model.AccelerationSplit
 import com.example.model.RunResult
 import com.example.model.RunSample
 import com.example.model.UniqueGpsFix
@@ -509,11 +510,42 @@ class RunResultRepository(context: Context) {
     var gpsFrozen = false
     var isPreliminary = false
     var avgGpsFreq = 1.0f
+    var testMode = "DYNO"
+    var targetStartSpeed = 0f
+    var targetEndSpeed = 0f
+    var accelRangeLabel = ""
+    var gearShiftCount = 0
+    var speedUnit = "km/h"
+    var estimatedMarginSeconds = 0.08f
+    val accelerationSplitsList = mutableListOf<AccelerationSplit>()
     val uniqueGpsFixesList = mutableListOf<UniqueGpsFix>()
 
     try {
       if (entity.configurationSnapshot.isNotBlank() && entity.configurationSnapshot != "{}") {
         val snapObj = JSONObject(entity.configurationSnapshot)
+        testMode = snapObj.optString("testMode", "DYNO")
+        targetStartSpeed = snapObj.optDouble("targetStartSpeedKmh", 0.0).toFloat()
+        targetEndSpeed = snapObj.optDouble("targetEndSpeedKmh", 0.0).toFloat()
+        accelRangeLabel = snapObj.optString("accelRangeLabel", "")
+        gearShiftCount = snapObj.optInt("gearShiftCount", 0)
+        speedUnit = snapObj.optString("speedUnit", "km/h")
+        estimatedMarginSeconds = snapObj.optDouble("estimatedMarginSeconds", 0.08).toFloat()
+
+        val splitsArr = snapObj.optJSONArray("accelerationSplits")
+        if (splitsArr != null) {
+          for (i in 0 until splitsArr.length()) {
+            val sObj = splitsArr.getJSONObject(i)
+            accelerationSplitsList.add(
+              AccelerationSplit(
+                label = sObj.optString("label", ""),
+                startSpeedKmh = sObj.optDouble("startSpeedKmh", 0.0).toFloat(),
+                endSpeedKmh = sObj.optDouble("endSpeedKmh", 0.0).toFloat(),
+                timeSeconds = sObj.optDouble("timeSeconds", 0.0).toFloat()
+              )
+            )
+          }
+        }
+
         gearUsed = snapObj.optString("gearUsed", "2ª")
         gearIndex = snapObj.optInt("gearIndex", 1)
         gearRatio = snapObj.optDouble("gearRatio", 2.14).toFloat()
@@ -673,6 +705,14 @@ class RunResultRepository(context: Context) {
       maximumSpeedDifferenceKmh = entity.maximumSpeedDifferenceKmh,
       invalidationReason = entity.invalidationReason,
       appVersion = entity.appVersion,
+      testMode = testMode,
+      targetStartSpeedKmh = targetStartSpeed,
+      targetEndSpeedKmh = targetEndSpeed,
+      accelRangeLabel = accelRangeLabel,
+      gearShiftCount = gearShiftCount,
+      speedUnit = speedUnit,
+      estimatedMarginSeconds = estimatedMarginSeconds,
+      accelerationSplits = accelerationSplitsList,
       time0to60Kmh = entity.time0to60Kmh,
       time0to100Kmh = entity.time0to100Kmh,
       time60to100Kmh = entity.time60to100Kmh,
@@ -767,6 +807,27 @@ class RunResultRepository(context: Context) {
       obj.put("airDensityKgM3", r.airDensityUsed.safeFinite(1.225))
       obj.put("slopeMode", r.slopeModeUsed)
       obj.put("slopePercent", r.slopePercentUsed.safeFinite(0.0))
+      obj.put("testMode", r.testMode)
+      obj.put("targetStartSpeedKmh", r.targetStartSpeedKmh.safeFinite(0.0))
+      obj.put("targetEndSpeedKmh", r.targetEndSpeedKmh.safeFinite(0.0))
+      obj.put("accelRangeLabel", r.accelRangeLabel)
+      obj.put("gearShiftCount", r.gearShiftCount)
+      obj.put("speedUnit", r.speedUnit)
+      obj.put("estimatedMarginSeconds", r.estimatedMarginSeconds.safeFinite(0.08))
+
+      if (r.accelerationSplits.isNotEmpty()) {
+        val splitsArr = JSONArray()
+        for (split in r.accelerationSplits) {
+          val sObj = JSONObject()
+          sObj.put("label", split.label)
+          sObj.put("startSpeedKmh", split.startSpeedKmh.safeFinite(0.0))
+          sObj.put("endSpeedKmh", split.endSpeedKmh.safeFinite(0.0))
+          sObj.put("timeSeconds", split.timeSeconds.safeFinite(0.0))
+          splitsArr.put(sObj)
+        }
+        obj.put("accelerationSplits", splitsArr)
+      }
+
       obj.put("startSpeedKmh", r.startSpeedKmh.safeFinite(40.0))
       obj.put("endSpeedKmh", r.finalSpeedKmh.safeFinite(0.0))
       obj.put("officialStartSpeedKmh", r.officialStartSpeedKmh.safeFinite(0.0))

@@ -15,9 +15,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.DynoRunState
 import com.example.data.RunResultRepository
+import com.example.model.AccelerationInterpolation
+import com.example.model.AccelerationRange
+import com.example.model.AccelerationSplit
 import com.example.model.FinishReason
 import com.example.model.RunResult
 import com.example.model.RunSample
+import com.example.model.TestMode
 import com.example.model.UniqueGpsFix
 import com.example.model.VehicleCalculations
 import com.example.model.VehicleProfile
@@ -154,7 +158,19 @@ data class DynoUiState(
   val passengerWeightKg: Float = 0.0f,
   val cargoWeightKg: Float = 0.0f,
   val fuelAdjustmentKg: Float = 0.0f,
-  val totalTestWeightKg: Float = 1344.0f
+  val totalTestWeightKg: Float = 1344.0f,
+  val testMode: TestMode = TestMode.DYNO,
+  val selectedAccelerationRange: AccelerationRange = AccelerationRange.PRESETS[1],
+  val customStartSpeedKmh: Float = 0f,
+  val customEndSpeedKmh: Float = 100f,
+  val customRangeError: String? = null,
+  val accelStatusMessage: String = "",
+  val gearShiftCount: Int = 0,
+  val speedUnit: String = "km/h",
+  val safetyConfirmed: Boolean = false,
+  val showSafetyDialog: Boolean = false,
+  val accelElapsedTimeSeconds: Float = 0f,
+  val accelCrossedSplits: List<AccelerationSplit> = emptyList()
 )
 
 class TestPreparationViewModel(application: Application) : AndroidViewModel(application) {
@@ -183,7 +199,9 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
       selectedFinalDrive = prefs.getFloat("selected_final_drive", 4.19f),
       slopeMode = prefs.getString("slope_mode", "IGNORE") ?: "IGNORE",
       manualSlopePercent = prefs.getFloat("manual_slope_percent", 0.0f),
-      calibrationStatusText = if (prefs.getBoolean("is_calibrated", false)) "Calibração concluída" else "Não calibrado"
+      calibrationStatusText = if (prefs.getBoolean("is_calibrated", false)) "Calibração concluída" else "Não calibrado",
+      speedUnit = prefs.getString("unit_speed", "km/h") ?: "km/h",
+      safetyConfirmed = prefs.getBoolean("safety_confirmed", false)
     )
   )
   val uiState: StateFlow<DynoUiState> = _uiState.asStateFlow()
@@ -240,6 +258,27 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
   @Volatile private var gpsSpeedChangeCount: Int = 0
   @Volatile private var sensorSampleCount: Int = 0
   @Volatile private var lastUniqueGpsSpeedKmh: Float = -1f
+
+  // VARIÁVEIS DE CONTROLE DO MODO ACELERAÇÃO (Requisitos 1 a 13)
+  private var accelStartCrossingNs: Long? = null
+  private var accelEndCrossingNs: Long? = null
+  private var accelStartInterpolated: Boolean = false
+  private var accelEndInterpolated: Boolean = false
+  private var accelPreviousFixSpeedKmh: Float = -1f
+  private var accelPreviousFixElapsedNs: Long = 0L
+  private val accelSpeedCrossings = mutableMapOf<Int, Long>()
+  private var accelGearShiftCount: Int = 0
+  private var accelPeakG: Float = 0f
+  private var accelMaxSpeedReachedKmh: Float = 0f
+  private var accelTotalDistanceM: Float = 0f
+  private var accelLastDistanceFixNs: Long = 0L
+  private var accelLastDistanceSpeedMs: Float = 0f
+  private var accelPeakSpeedDuringRunKmh: Float = 0f
+  private var accelZeroStartArmedReady: Boolean = false
+  private var accelDecelStartTimeNs: Long = 0L
+  private var accelSensorLaunchOnsetNs: Long = 0L
+  private var accelGearShiftDipStartTimeNs: Long = 0L
+  private var accelInGearShiftDip: Boolean = false
   @Volatile private var lastUniqueGpsElapsedRealtimeNs: Long = 0L
   @Volatile private var maxGpsIntervalMs: Long = 0L
   @Volatile private var maxGpsAgeMs: Long = 0L
@@ -719,7 +758,11 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
             blockingReason = blockingReason,
             isReadyToArm = isReadyToArm,
             hasPhoneMovedAfterCalib = hasPhoneMovedAfterCalib,
-            runElapsedSeconds = if (runStartTimeNs > 0L && (currentState == DynoRunState.MEDINDO_PROTEGIDO || currentState == DynoRunState.MEDINDO || currentState == DynoRunState.SUSPEITA_DESACELERACAO)) {
+            runElapsedSeconds = if (_uiState.value.testMode == TestMode.ACCELERATION) {
+              if (accelStartCrossingNs != null && currentState == DynoRunState.MEDINDO) {
+                ((nowNs - accelStartCrossingNs!!) / 1_000_000L) / 1000f
+              } else current.accelElapsedTimeSeconds
+            } else if (runStartTimeNs > 0L && (currentState == DynoRunState.MEDINDO_PROTEGIDO || currentState == DynoRunState.MEDINDO || currentState == DynoRunState.SUSPEITA_DESACELERACAO)) {
               ((System.nanoTime() - runStartTimeNs) / 1_000_000L) / 1000f
             } else current.runElapsedSeconds
           )
@@ -884,6 +927,19 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     lastGpsAnchorSpeedMps = rawSpeedMps
     lastGpsAnchorNanoTime = nowNano
     integralSpeedSinceLastGpsMps = 0f
+
+    if (_uiState.value.testMode == TestMode.ACCELERATION) {
+      processAccelerationGpsLocation(
+        speedKmh = speedKmh,
+        rawSpeedMps = rawSpeedMps,
+        horizontalAccuracy = horizontalAccuracy,
+        speedAccuracyMps = speedAccuracyMps,
+        locationTime = locationTime,
+        elapsedRealtimeNs = elapsedRealtimeNs,
+        isNewFix = true
+      )
+      return
+    }
 
     // 15. LÓGICA DE INÍCIO DA PASSADA (Requisito 5)
     if (currentState == DynoRunState.AGUARDANDO_INICIO) {
@@ -1118,6 +1174,34 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
             liveLongitudinalG = currentG
             if (currentG > peakLongitudinalG && (_uiState.value.testState == DynoRunState.MEDINDO_PROTEGIDO || _uiState.value.testState == DynoRunState.MEDINDO)) {
               peakLongitudinalG = currentG
+            }
+
+            if (_uiState.value.testMode == TestMode.ACCELERATION) {
+              if (currentG > accelPeakG) accelPeakG = currentG
+              val curState = _uiState.value.testState
+              if (curState == DynoRunState.AGUARDANDO_INICIO && accelZeroStartArmedReady) {
+                if (zFiltradoRun > 0.25f) {
+                  if (accelSensorLaunchOnsetNs == 0L) {
+                    accelSensorLaunchOnsetNs = SystemClock.elapsedRealtimeNanos()
+                  }
+                } else {
+                  accelSensorLaunchOnsetNs = 0L
+                }
+              } else if (curState == DynoRunState.MEDINDO) {
+                if (accelPeakG > 0.20f && currentG < (accelPeakG * 0.40f)) {
+                  if (!accelInGearShiftDip) {
+                    accelInGearShiftDip = true
+                    accelGearShiftDipStartTimeNs = SystemClock.elapsedRealtimeNanos()
+                  }
+                } else if (accelInGearShiftDip && currentG >= 0.20f) {
+                  val dipDurationMs = (SystemClock.elapsedRealtimeNanos() - accelGearShiftDipStartTimeNs) / 1_000_000L
+                  if (dipDurationMs in 100L..950L) {
+                    accelGearShiftCount++
+                    _uiState.update { it.copy(gearShiftCount = accelGearShiftCount) }
+                  }
+                  accelInGearShiftDip = false
+                }
+              }
             }
 
             val nowNs = System.nanoTime()
@@ -1553,8 +1637,43 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
   }
 
   fun armTest() {
+    if (_uiState.value.testMode == TestMode.ACCELERATION && !_uiState.value.safetyConfirmed) {
+      _uiState.update { it.copy(showSafetyDialog = true) }
+      return
+    }
+
     if (_uiState.value.isCalibrated && _uiState.value.testState == DynoRunState.PARADO) {
       resetRunData()
+      val targetStart = _uiState.value.selectedAccelerationRange.startSpeedKmh
+      accelStartCrossingNs = null
+      accelEndCrossingNs = null
+      accelStartInterpolated = false
+      accelEndInterpolated = false
+      accelPreviousFixSpeedKmh = -1f
+      accelPreviousFixElapsedNs = 0L
+      accelSpeedCrossings.clear()
+      accelGearShiftCount = 0
+      accelPeakG = 0f
+      accelMaxSpeedReachedKmh = 0f
+      accelTotalDistanceM = 0f
+      accelLastDistanceFixNs = 0L
+      accelLastDistanceSpeedMs = 0f
+      accelPeakSpeedDuringRunKmh = 0f
+      accelDecelStartTimeNs = 0L
+      accelSensorLaunchOnsetNs = 0L
+      accelGearShiftDipStartTimeNs = 0L
+      accelInGearShiftDip = false
+
+      if (_uiState.value.testMode == TestMode.ACCELERATION && targetStart == 0f) {
+        val isReadyZeroStart = gpsSpeedKmh < 2.0f &&
+          _uiState.value.isStoppedForTwoSeconds &&
+          _uiState.value.isGpsReady &&
+          _uiState.value.isCalibrated
+        accelZeroStartArmedReady = isReadyZeroStart
+      } else {
+        accelZeroStartArmedReady = false
+      }
+
       _uiState.update { it.copy(testState = DynoRunState.AGUARDANDO_INICIO) }
       armedEstimatedSpeedMs = 0f
       armedLastNanoTime = System.nanoTime()
@@ -2059,6 +2178,299 @@ class TestPreparationViewModel(application: Application) : AndroidViewModel(appl
     syncDiffSum = 0.0
     syncDiffCount = 0
     maxSyncDiff = 0f
+
+    accelStartCrossingNs = null
+    accelEndCrossingNs = null
+    accelStartInterpolated = false
+    accelEndInterpolated = false
+    accelPreviousFixSpeedKmh = -1f
+    accelPreviousFixElapsedNs = 0L
+    accelSpeedCrossings.clear()
+    accelGearShiftCount = 0
+    accelPeakG = 0f
+    accelMaxSpeedReachedKmh = 0f
+    accelTotalDistanceM = 0f
+    accelLastDistanceFixNs = 0L
+    accelLastDistanceSpeedMs = 0f
+    accelPeakSpeedDuringRunKmh = 0f
+    accelZeroStartArmedReady = false
+    accelDecelStartTimeNs = 0L
+    accelSensorLaunchOnsetNs = 0L
+    accelGearShiftDipStartTimeNs = 0L
+    accelInGearShiftDip = false
+  }
+
+  fun setTestMode(mode: TestMode) {
+    if (_uiState.value.testState == DynoRunState.PARADO) {
+      _uiState.update { it.copy(testMode = mode) }
+    }
+  }
+
+  fun setSpeedUnit(unit: String) {
+    if (_uiState.value.testState == DynoRunState.PARADO) {
+      _uiState.update { it.copy(speedUnit = unit) }
+    }
+  }
+
+  fun selectAccelerationRange(range: AccelerationRange) {
+    if (_uiState.value.testState == DynoRunState.PARADO) {
+      _uiState.update {
+        it.copy(
+          selectedAccelerationRange = range,
+          customRangeError = null
+        )
+      }
+    }
+  }
+
+  fun setCustomRange(startKmh: Float, endKmh: Float): Pair<Boolean, String?> {
+    val (valid, errorMsg) = AccelerationRange.validateCustomRange(startKmh, endKmh)
+    if (valid) {
+      val customRange = AccelerationRange(
+        startSpeedKmh = startKmh,
+        endSpeedKmh = endKmh,
+        label = "${startKmh.toInt()}–${endKmh.toInt()} ${_uiState.value.speedUnit}",
+        isCustom = true
+      )
+      _uiState.update {
+        it.copy(
+          selectedAccelerationRange = customRange,
+          customStartSpeedKmh = startKmh,
+          customEndSpeedKmh = endKmh,
+          customRangeError = null
+        )
+      }
+    } else {
+      _uiState.update { it.copy(customRangeError = errorMsg) }
+    }
+    return Pair(valid, errorMsg)
+  }
+
+  fun confirmSafety() {
+    prefs.edit().putBoolean("safety_confirmed", true).apply()
+    _uiState.update { it.copy(safetyConfirmed = true, showSafetyDialog = false) }
+    armTest()
+  }
+
+  fun requestShowSafetyDialog(show: Boolean) {
+    _uiState.update { it.copy(showSafetyDialog = show) }
+  }
+
+  private fun processAccelerationGpsLocation(
+    speedKmh: Float,
+    rawSpeedMps: Float,
+    horizontalAccuracy: Float,
+    speedAccuracyMps: Float,
+    locationTime: Long,
+    elapsedRealtimeNs: Long,
+    isNewFix: Boolean
+  ) {
+    if (!isNewFix) return
+    if (horizontalAccuracy > 25.0f) return
+
+    val currentState = _uiState.value.testState
+    val targetStart = _uiState.value.selectedAccelerationRange.startSpeedKmh
+    val targetEnd = _uiState.value.selectedAccelerationRange.endSpeedKmh
+
+    if (currentState == DynoRunState.AGUARDANDO_INICIO) {
+      if (targetStart == 0f) {
+        val isStoppedReady = gpsSpeedKmh < 2.0f && _uiState.value.isStoppedForTwoSeconds && _uiState.value.isCalibrated
+        if (!accelZeroStartArmedReady && isStoppedReady) {
+          accelZeroStartArmedReady = true
+        }
+
+        val hasGpsSpeedJump = speedKmh >= 2.0f && (accelPreviousFixSpeedKmh >= 0f && (speedKmh - accelPreviousFixSpeedKmh) >= 0.5f)
+        val hasSustainedAccel = zFiltradoRun > 0.20f && accelSensorLaunchOnsetNs > 0L
+
+        if (accelZeroStartArmedReady && (hasGpsSpeedJump || (speedKmh >= 3.0f && hasSustainedAccel))) {
+          val startNs = if (accelSensorLaunchOnsetNs > 0L && accelPreviousFixElapsedNs > 0L) {
+            accelSensorLaunchOnsetNs.coerceIn(accelPreviousFixElapsedNs, elapsedRealtimeNs)
+          } else {
+            elapsedRealtimeNs
+          }
+          accelStartCrossingNs = startNs
+          accelStartInterpolated = true
+          accelSpeedCrossings[0] = startNs
+          accelMaxSpeedReachedKmh = speedKmh
+          accelPeakSpeedDuringRunKmh = speedKmh
+          accelLastDistanceFixNs = elapsedRealtimeNs
+          accelLastDistanceSpeedMs = rawSpeedMps
+          _uiState.update { it.copy(testState = DynoRunState.MEDINDO) }
+        }
+      } else {
+        val isAccelerating = accelPreviousFixSpeedKmh >= 0f && speedKmh > accelPreviousFixSpeedKmh
+        val crossedStart = accelPreviousFixSpeedKmh >= 0f &&
+          accelPreviousFixSpeedKmh < targetStart &&
+          speedKmh >= targetStart
+
+        if (isAccelerating && crossedStart && accelPreviousFixElapsedNs > 0L) {
+          val fraction = ((targetStart - accelPreviousFixSpeedKmh) / (speedKmh - accelPreviousFixSpeedKmh)).coerceIn(0f, 1f)
+          val crossingNs = accelPreviousFixElapsedNs + (fraction * (elapsedRealtimeNs - accelPreviousFixElapsedNs)).toLong()
+          accelStartCrossingNs = crossingNs
+          accelStartInterpolated = true
+          accelSpeedCrossings[targetStart.toInt()] = crossingNs
+          accelMaxSpeedReachedKmh = speedKmh
+          accelPeakSpeedDuringRunKmh = speedKmh
+          accelLastDistanceFixNs = elapsedRealtimeNs
+          accelLastDistanceSpeedMs = rawSpeedMps
+          _uiState.update { it.copy(testState = DynoRunState.MEDINDO) }
+        }
+      }
+    } else if (currentState == DynoRunState.MEDINDO) {
+      if (accelLastDistanceFixNs > 0L) {
+        val dtSec = (elapsedRealtimeNs - accelLastDistanceFixNs) / 1_000_000_000.0f
+        if (dtSec in 0.01f..2.0f) {
+          val avgSpeedMs = (rawSpeedMps + accelLastDistanceSpeedMs) / 2.0f
+          accelTotalDistanceM += avgSpeedMs * dtSec
+        }
+      }
+      accelLastDistanceFixNs = elapsedRealtimeNs
+      accelLastDistanceSpeedMs = rawSpeedMps
+
+      if (speedKmh > accelMaxSpeedReachedKmh) {
+        accelMaxSpeedReachedKmh = speedKmh
+      }
+      if (speedKmh > accelPeakSpeedDuringRunKmh) {
+        accelPeakSpeedDuringRunKmh = speedKmh
+        accelDecelStartTimeNs = 0L
+      }
+
+      val intermediateCandidateSpeeds = listOf(60, 100, 120, 150, 160, 200)
+      for (cand in intermediateCandidateSpeeds) {
+        val candF = cand.toFloat()
+        if (candF > targetStart && candF < targetEnd) {
+          if (accelPreviousFixSpeedKmh >= 0f && accelPreviousFixSpeedKmh < candF && speedKmh >= candF && accelPreviousFixElapsedNs > 0L) {
+            val frac = ((candF - accelPreviousFixSpeedKmh) / (speedKmh - accelPreviousFixSpeedKmh)).coerceIn(0f, 1f)
+            val crossNs = accelPreviousFixElapsedNs + (frac * (elapsedRealtimeNs - accelPreviousFixElapsedNs)).toLong()
+            accelSpeedCrossings[cand] = crossNs
+          }
+        }
+      }
+
+      if (accelPreviousFixSpeedKmh >= 0f && accelPreviousFixSpeedKmh < targetEnd && speedKmh >= targetEnd && accelPreviousFixElapsedNs > 0L) {
+        val frac = ((targetEnd - accelPreviousFixSpeedKmh) / (speedKmh - accelPreviousFixSpeedKmh)).coerceIn(0f, 1f)
+        val endCrossingNs = accelPreviousFixElapsedNs + (frac * (elapsedRealtimeNs - accelPreviousFixElapsedNs)).toLong()
+        accelEndCrossingNs = endCrossingNs
+        accelEndInterpolated = true
+        accelSpeedCrossings[targetEnd.toInt()] = endCrossingNs
+        finalizeAccelerationRun(isSuccess = true, invalidReason = null)
+        return
+      }
+
+      val speedDropKmh = accelPeakSpeedDuringRunKmh - speedKmh
+      if (speedDropKmh > 5.0f && !accelInGearShiftDip) {
+        finalizeAccelerationRun(isSuccess = false, invalidReason = "Desaceleração detectada antes da velocidade final.")
+        return
+      }
+
+      val runDurationSec = if (accelStartCrossingNs != null) {
+        (elapsedRealtimeNs - accelStartCrossingNs!!) / 1_000_000_000.0f
+      } else 0f
+      if (runDurationSec > 35.0f) {
+        finalizeAccelerationRun(isSuccess = false, invalidReason = "Tempo limite atingido (> 35s) sem alcançar a velocidade final.")
+        return
+      }
+    }
+
+    accelPreviousFixSpeedKmh = speedKmh
+    accelPreviousFixElapsedNs = elapsedRealtimeNs
+  }
+
+  private fun finalizeAccelerationRun(isSuccess: Boolean, invalidReason: String?) {
+    if (resultSaved) return
+    resultSaved = true
+    _uiState.update { it.copy(testState = DynoRunState.FINALIZADO) }
+
+    val targetStart = _uiState.value.selectedAccelerationRange.startSpeedKmh
+    val targetEnd = _uiState.value.selectedAccelerationRange.endSpeedKmh
+    val rangeLabel = _uiState.value.selectedAccelerationRange.label
+
+    val elapsedSec = if (accelStartCrossingNs != null && accelEndCrossingNs != null) {
+      AccelerationInterpolation.calculateElapsedTimeSeconds(accelStartCrossingNs!!, accelEndCrossingNs!!)
+    } else {
+      0f
+    }
+
+    val crossedSplits = if (accelStartCrossingNs != null) {
+      AccelerationInterpolation.calculateCrossedPartials(targetStart, targetEnd, accelSpeedCrossings)
+    } else {
+      emptyList()
+    }
+
+    val uniqueCount = uniqueGpsFixCount.coerceAtLeast(uniqueGpsFixes.size)
+    val avgAccuracy = if (uniqueGpsFixes.isNotEmpty()) {
+      uniqueGpsFixes.map { it.accuracyMeters }.average().toFloat()
+    } else lastGpsAccuracyMeters
+
+    val totalElapsedForFreq = if (uniqueGpsFixes.size > 1) {
+      (uniqueGpsFixes.last().elapsedRealtimeNanos - uniqueGpsFixes.first().elapsedRealtimeNanos) / 1_000_000_000.0f
+    } else elapsedSec
+
+    val gpsFreqHz = if (uniqueGpsFixes.size > 1 && totalElapsedForFreq > 0.05f) {
+      (uniqueGpsFixes.size - 1) / totalElapsedForFreq
+    } else 1.0f
+
+    val (qualityRating, qualityReason) = AccelerationInterpolation.evaluateQuality(
+      isCompleted = isSuccess && accelEndCrossingNs != null,
+      interpolatedStart = accelStartInterpolated,
+      interpolatedEnd = accelEndInterpolated,
+      uniqueFixCount = uniqueCount,
+      averageGpsAccuracyM = avgAccuracy,
+      averageGpsFrequencyHz = gpsFreqHz,
+      isGpsFrozen = isGpsFrozenDetected,
+      isPhoneStable = _uiState.value.isPhoneStable
+    )
+
+    val finalQuality = if (isSuccess) qualityRating else "INVÁLIDA"
+    val finalReason = invalidReason ?: qualityReason
+
+    val marginEstimated = if (gpsFreqHz > 0f) {
+      (0.5f / gpsFreqHz).coerceIn(0.04f, 0.25f)
+    } else 0.08f
+
+    val vehName = activeVehicleProfile?.let {
+      "${it.manufacturer} ${it.model} ${it.engine}".trim()
+    } ?: "Veículo"
+
+    val runResult = RunResult(
+      id = currentTestId ?: java.util.UUID.randomUUID().toString(),
+      vehicleId = activeVehicleProfile?.id ?: "",
+      vehicleName = vehName,
+      timestamp = System.currentTimeMillis(),
+      testMode = "ACCELERATION",
+      targetStartSpeedKmh = targetStart,
+      targetEndSpeedKmh = targetEnd,
+      accelRangeLabel = rangeLabel,
+      gearShiftCount = accelGearShiftCount,
+      speedUnit = _uiState.value.speedUnit,
+      accelerationSplits = crossedSplits,
+      elapsedSeconds = elapsedSec,
+      maximumGpsSpeedKmh = accelMaxSpeedReachedKmh,
+      startSpeedKmh = targetStart,
+      finalSpeedKmh = accelMaxSpeedReachedKmh,
+      peakLongitudinalG = accelPeakG,
+      totalDistanceMeters = accelTotalDistanceM,
+      gpsAccuracyMeters = avgAccuracy,
+      uniqueGpsFixCount = uniqueCount,
+      averageGpsFrequencyHz = gpsFreqHz,
+      estimatedMarginSeconds = marginEstimated,
+      quality = finalQuality,
+      invalidationReason = finalReason
+    )
+
+    viewModelScope.launch(Dispatchers.IO) {
+      runResultRepository.saveResultSuspending(runResult, status = if (finalQuality != "INVÁLIDA") "completed" else "invalid")
+      withContext(Dispatchers.Main) {
+        _uiState.update {
+          it.copy(
+            accelElapsedTimeSeconds = elapsedSec,
+            accelCrossedSplits = crossedSplits,
+            gearShiftCount = accelGearShiftCount
+          )
+        }
+        onRunCompletedCallback?.invoke(true)
+      }
+    }
   }
 
   override fun onCleared() {

@@ -41,8 +41,11 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Sensors
+import com.example.model.AccelerationRange
+import com.example.model.TestMode
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -156,6 +159,7 @@ fun LockScreenOrientation(orientation: Int) {
 @Composable
 fun TestPreparationScreen(
   vehicle: VehicleProfile,
+  initialTestMode: TestMode = TestMode.DYNO,
   onNavigateToHome: (saved: Boolean) -> Unit,
   onSwitchVehicle: () -> Unit,
   onEditVehicle: () -> Unit,
@@ -210,6 +214,10 @@ fun TestPreparationScreen(
     viewModel.setActiveVehicle(vehicle)
   }
 
+  LaunchedEffect(initialTestMode) {
+    viewModel.setTestMode(initialTestMode)
+  }
+
   LaunchedEffect(Unit) {
     if (!hasLocationPermission) {
       permissionLauncher.launch(
@@ -241,6 +249,7 @@ fun TestPreparationScreen(
   var showRecalibrateConfirmDialog by remember { mutableStateOf(false) }
   var showAdvancedDiagnosticDialog by remember { mutableStateOf(false) }
   var showOccupantsDialog by remember { mutableStateOf(false) }
+  var showCustomRangeDialog by remember { mutableStateOf(false) }
 
   val isVehicleMoving = uiState.vehicleMotionState == VehicleMotionState.MOVING || uiState.gpsSpeedKmh > 5.0f
   val isReadyToArm = uiState.isReadyToArm
@@ -266,9 +275,18 @@ fun TestPreparationScreen(
 
   // Título e cor de estado no topo do velocímetro
   val (stateTitle, stateColor) = when {
-    uiState.testState == DynoRunState.MEDINDO_PROTEGIDO || uiState.testState == DynoRunState.MEDINDO -> Pair("MEDINDO", DynoSuccessGreen)
+    uiState.testState == DynoRunState.MEDINDO_PROTEGIDO || uiState.testState == DynoRunState.MEDINDO -> {
+      if (uiState.testMode == TestMode.ACCELERATION) Pair("MEDINDO ACELERAÇÃO", DynoSuccessGreen)
+      else Pair("MEDINDO", DynoSuccessGreen)
+    }
     uiState.testState == DynoRunState.SUSPEITA_DESACELERACAO -> Pair("MEDINDO (FINALIZANDO)", DynoTorqueOrange)
-    uiState.testState == DynoRunState.AGUARDANDO_INICIO -> Pair("TESTE ARMADO", DynoBlueLight)
+    uiState.testState == DynoRunState.AGUARDANDO_INICIO -> {
+      if (uiState.testMode == TestMode.ACCELERATION && uiState.selectedAccelerationRange.startSpeedKmh == 0f && uiState.gpsSpeedKmh < 2f && uiState.isStoppedForTwoSeconds && uiState.isGpsReady) {
+        Pair("PRONTO — PODE ACELERAR", DynoSuccessGreen)
+      } else {
+        Pair("TESTE ARMADO", DynoBlueLight)
+      }
+    }
     uiState.isCalibrating -> Pair("CALIBRANDO", DynoPowerCyan)
     isReadyToArm -> Pair("PRONTO PARA INICIAR", DynoSuccessGreen)
     uiState.testState == DynoRunState.FINALIZADO -> Pair("FINALIZADO", DynoBlueLight)
@@ -286,6 +304,21 @@ fun TestPreparationScreen(
     uiState.testState == DynoRunState.PARADO && !uiState.isStoppedForTwoSeconds -> "Aguardando 2 segundos parado..."
     uiState.testState == DynoRunState.PARADO && !uiState.isGpsReady -> "Aguardando sinal GPS..."
     uiState.testState == DynoRunState.PARADO && !uiState.isPhoneStable -> "Estabilize o celular no suporte."
+    uiState.testMode == TestMode.ACCELERATION && uiState.testState == DynoRunState.AGUARDANDO_INICIO -> {
+      val startKmh = uiState.selectedAccelerationRange.startSpeedKmh
+      if (startKmh == 0f) {
+        if (uiState.gpsSpeedKmh < 2.0f && uiState.isStoppedForTwoSeconds && uiState.isGpsReady) {
+          "PRONTO — PODE ACELERAR!"
+        } else {
+          "Pare completamente o veículo por 2s."
+        }
+      } else {
+        "Aproxime-se e cruze ${startKmh.toInt()} ${uiState.speedUnit} acelerando."
+      }
+    }
+    uiState.testMode == TestMode.ACCELERATION && (uiState.testState == DynoRunState.MEDINDO || uiState.testState == DynoRunState.MEDINDO_PROTEGIDO) -> {
+      "ACELERANDO ATÉ ${uiState.selectedAccelerationRange.endSpeedKmh.toInt()} ${uiState.speedUnit}!"
+    }
     uiState.testState == DynoRunState.AGUARDANDO_INICIO -> {
       if (uiState.gpsSpeedKmh >= uiState.startSpeedTriggerKmh - 8f) "Prepare-se."
       else "Acelere na marcha selecionada até ${uiState.startSpeedTriggerKmh.toInt()} km/h."
@@ -444,6 +477,72 @@ fun TestPreparationScreen(
     )
   }
 
+  // 14. DIÁLOGO DE SEGURANÇA (Requisito 12)
+  if (uiState.showSafetyDialog) {
+    AlertDialog(
+      onDismissRequest = { viewModel.requestShowSafetyDialog(false) },
+      title = {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          Icon(
+            imageVector = Icons.Default.Warning,
+            contentDescription = null,
+            tint = DynoWarningYellow,
+            modifier = Modifier.size(24.dp)
+          )
+          Text(
+            text = "Aviso de Segurança",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = DynoTextPrimary
+          )
+        }
+      },
+      text = {
+        Text(
+          text = "Realize o teste somente em local fechado e seguro. Não manuseie o celular dirigindo.",
+          style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 20.sp),
+          color = DynoTextSecondary
+        )
+      },
+      confirmButton = {
+        Button(
+          onClick = { viewModel.confirmSafety() },
+          colors = ButtonDefaults.buttonColors(containerColor = DynoBluePrimary),
+          shape = RoundedCornerShape(10.dp)
+        ) {
+          Text("ENTENDI E CONCORDO", fontWeight = FontWeight.Bold, color = Color.White)
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { viewModel.requestShowSafetyDialog(false) }) {
+          Text("CANCELAR", color = DynoTextSecondary)
+        }
+      },
+      containerColor = DynoSurfaceContainer,
+      shape = RoundedCornerShape(16.dp)
+    )
+  }
+
+  // 15. DIÁLOGO DE FAIXA PERSONALIZADA
+  if (showCustomRangeDialog) {
+    CustomRangeDialog(
+      initialStart = uiState.selectedAccelerationRange.startSpeedKmh,
+      initialEnd = uiState.selectedAccelerationRange.endSpeedKmh,
+      unit = uiState.speedUnit,
+      errorMessage = uiState.customRangeError,
+      onDismiss = { showCustomRangeDialog = false },
+      onConfirm = { start, end ->
+        val result = viewModel.setCustomRange(start, end)
+        if (result.first) {
+          showCustomRangeDialog = false
+        }
+        result.first
+      }
+    )
+  }
+
   // ESTRUTURA PRINCIPAL DO PAINEL HORIZONTAL
   Box(
     modifier = modifier
@@ -458,6 +557,104 @@ fun TestPreparationScreen(
         .padding(horizontal = 14.dp, vertical = 6.dp),
       verticalArrangement = Arrangement.SpaceBetween
     ) {
+      // TOP HEADER: SELETOR DE MODO [ DINAMÔMETRO | ACELERAÇÃO ] & VOLTAR
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(bottom = 3.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(
+          modifier = Modifier
+            .background(DynoSurfaceElevated, RoundedCornerShape(8.dp))
+            .padding(2.dp),
+          horizontalArrangement = Arrangement.spacedBy(4.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = if (uiState.testMode == TestMode.DYNO) DynoBluePrimary else Color.Transparent,
+            modifier = Modifier
+              .testTag("btn_mode_dyno")
+              .clickable(enabled = uiState.testState == DynoRunState.PARADO) {
+                viewModel.setTestMode(TestMode.DYNO)
+              }
+          ) {
+            Text(
+              text = "DINAMÔMETRO",
+              style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = if (uiState.testMode == TestMode.DYNO) FontWeight.Bold else FontWeight.Medium,
+                fontSize = 10.sp
+              ),
+              color = if (uiState.testMode == TestMode.DYNO) Color.White else DynoTextSecondary,
+              modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+            )
+          }
+
+          Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = if (uiState.testMode == TestMode.ACCELERATION) DynoBluePrimary else Color.Transparent,
+            modifier = Modifier
+              .testTag("btn_mode_acceleration")
+              .clickable(enabled = uiState.testState == DynoRunState.PARADO) {
+                viewModel.setTestMode(TestMode.ACCELERATION)
+              }
+          ) {
+            Text(
+              text = "ACELERAÇÃO",
+              style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = if (uiState.testMode == TestMode.ACCELERATION) FontWeight.Bold else FontWeight.Medium,
+                fontSize = 10.sp
+              ),
+              color = if (uiState.testMode == TestMode.ACCELERATION) Color.White else DynoTextSecondary,
+              modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+            )
+          }
+        }
+
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          if (uiState.testMode == TestMode.ACCELERATION) {
+            Surface(
+              shape = RoundedCornerShape(6.dp),
+              color = DynoSurfaceElevated,
+              modifier = Modifier.clickable(enabled = uiState.testState == DynoRunState.PARADO) {
+                viewModel.setSpeedUnit(if (uiState.speedUnit == "km/h") "mph" else "km/h")
+              }
+            ) {
+              Text(
+                text = "Unidade: ${uiState.speedUnit}",
+                style = MaterialTheme.typography.labelSmall.copy(
+                  fontSize = 9.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = DynoPowerCyan
+                ),
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+              )
+            }
+          }
+
+          Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = DynoSurfaceElevated,
+            modifier = Modifier.clickable { onNavigateBack() }
+          ) {
+            Text(
+              text = "VOLTAR",
+              style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                color = DynoTextSecondary
+              ),
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+          }
+        }
+      }
+
       // LINHA SUPERIOR: 3 ÁREAS PRINCIPAIS (25% ESQUERDA, 50% CENTRO, 25% DIREITA)
       Row(
         modifier = Modifier
@@ -647,117 +844,211 @@ fun TestPreparationScreen(
 
             HorizontalDivider(thickness = 0.5.dp, color = DynoDivider)
 
-            // Seletor de Marcha [ 1ª ] [ 2ª ] [ 3ª ] [ 4ª ] [ 5ª ]
-            val availableGears = remember(vehicle) { viewModel.getAvailableGears(vehicle) }
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-              Text(
-                text = "SELEÇÃO DE MARCHA",
-                style = MaterialTheme.typography.labelSmall.copy(
-                  fontSize = 9.sp,
-                  fontWeight = FontWeight.Bold,
-                  letterSpacing = 0.4.sp
-                ),
-                color = DynoTextSecondary
-              )
-
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                availableGears.forEachIndexed { index, (gearName, gearRatio) ->
-                  val isGearSelected = uiState.selectedGear == gearName
-                  val isSelectorEnabled = uiState.testState == DynoRunState.PARADO
-
-                  Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = if (isGearSelected) DynoPowerCyan.copy(alpha = 0.25f) else DynoSurfaceElevated,
-                    border = BorderStroke(
-                      1.dp,
-                      if (isGearSelected) DynoPowerCyan else DynoBorder
+            if (uiState.testMode == TestMode.ACCELERATION) {
+              // Seção de Faixas de Aceleração
+              val presets = AccelerationRange.PRESETS.filter { !it.isCustom }
+              Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Text(
+                    text = "FAIXA DE ACELERAÇÃO",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontSize = 8.5.sp,
+                      fontWeight = FontWeight.Bold,
+                      letterSpacing = 0.3.sp
                     ),
-                    modifier = Modifier
-                      .weight(1f)
-                      .height(28.dp)
-                      .testTag("btn_gear_select_${index + 1}")
-                      .clickable(enabled = isSelectorEnabled) {
-                        viewModel.setSelectedGear(gearName, gearRatio, index)
-                      }
+                    color = DynoTextSecondary
+                  )
+                  Text(
+                    text = uiState.selectedAccelerationRange.label,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontWeight = FontWeight.Bold,
+                      color = DynoPowerCyan,
+                      fontSize = 9.sp
+                    )
+                  )
+                }
+
+                // Grid 4x2 de faixas predefinidas
+                val chunked = presets.chunked(2)
+                chunked.forEach { rowPresets ->
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                   ) {
-                    Box(contentAlignment = Alignment.Center) {
-                      Text(
-                        text = gearName,
-                        style = MaterialTheme.typography.labelMedium.copy(
-                          fontWeight = if (isGearSelected) FontWeight.Bold else FontWeight.Medium,
-                          fontSize = 11.sp
-                        ),
-                        color = if (isGearSelected) DynoPowerCyan else DynoTextSecondary
-                      )
+                    rowPresets.forEach { range ->
+                      val isSelected = !uiState.selectedAccelerationRange.isCustom &&
+                        uiState.selectedAccelerationRange.startSpeedKmh == range.startSpeedKmh &&
+                        uiState.selectedAccelerationRange.endSpeedKmh == range.endSpeedKmh
+                      val isSelectorEnabled = uiState.testState == DynoRunState.PARADO
+
+                      Surface(
+                        shape = RoundedCornerShape(5.dp),
+                        color = if (isSelected) DynoPowerCyan.copy(alpha = 0.25f) else DynoSurfaceElevated,
+                        border = BorderStroke(1.dp, if (isSelected) DynoPowerCyan else DynoBorder),
+                        modifier = Modifier
+                          .weight(1f)
+                          .height(24.dp)
+                          .clickable(enabled = isSelectorEnabled) {
+                            viewModel.selectAccelerationRange(range)
+                          }
+                      ) {
+                        Box(contentAlignment = Alignment.Center) {
+                          Text(
+                            text = range.label,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                              fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                              fontSize = 9.5.sp
+                            ),
+                            color = if (isSelected) DynoPowerCyan else DynoTextSecondary
+                          )
+                        }
+                      }
+                    }
+                  }
+                }
+
+                // Botão de Faixa Personalizada
+                val isCustomSelected = uiState.selectedAccelerationRange.isCustom
+                Surface(
+                  shape = RoundedCornerShape(5.dp),
+                  color = if (isCustomSelected) DynoBluePrimary.copy(alpha = 0.35f) else DynoSurfaceElevated,
+                  border = BorderStroke(1.dp, if (isCustomSelected) DynoBlueLight else DynoBorder),
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .height(24.dp)
+                    .clickable(enabled = uiState.testState == DynoRunState.PARADO) {
+                      showCustomRangeDialog = true
+                    }
+                ) {
+                  Box(contentAlignment = Alignment.Center) {
+                    Text(
+                      text = if (isCustomSelected) "Personalizado: ${uiState.selectedAccelerationRange.label}" else "Personalizado...",
+                      style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = if (isCustomSelected) FontWeight.Bold else FontWeight.Medium,
+                        fontSize = 9.5.sp
+                      ),
+                      color = if (isCustomSelected) DynoBlueLight else DynoTextSecondary
+                    )
+                  }
+                }
+              }
+            } else {
+              // Seletor de Marcha [ 1ª ] [ 2ª ] [ 3ª ] [ 4ª ] [ 5ª ]
+              val availableGears = remember(vehicle) { viewModel.getAvailableGears(vehicle) }
+              Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                  text = "SELEÇÃO DE MARCHA",
+                  style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.4.sp
+                  ),
+                  color = DynoTextSecondary
+                )
+
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.spacedBy(4.dp),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  availableGears.forEachIndexed { index, (gearName, gearRatio) ->
+                    val isGearSelected = uiState.selectedGear == gearName
+                    val isSelectorEnabled = uiState.testState == DynoRunState.PARADO
+
+                    Surface(
+                      shape = RoundedCornerShape(6.dp),
+                      color = if (isGearSelected) DynoPowerCyan.copy(alpha = 0.25f) else DynoSurfaceElevated,
+                      border = BorderStroke(
+                        1.dp,
+                        if (isGearSelected) DynoPowerCyan else DynoBorder
+                      ),
+                      modifier = Modifier
+                        .weight(1f)
+                        .height(28.dp)
+                        .testTag("btn_gear_select_${index + 1}")
+                        .clickable(enabled = isSelectorEnabled) {
+                          viewModel.setSelectedGear(gearName, gearRatio, index)
+                        }
+                    ) {
+                      Box(contentAlignment = Alignment.Center) {
+                        Text(
+                          text = gearName,
+                          style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = if (isGearSelected) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 11.sp
+                          ),
+                          color = if (isGearSelected) DynoPowerCyan else DynoTextSecondary
+                        )
+                      }
                     }
                   }
                 }
               }
-            }
 
-            HorizontalDivider(thickness = 0.5.dp, color = DynoDivider)
+              HorizontalDivider(thickness = 0.5.dp, color = DynoDivider)
 
-            // Seletor de Velocidade de Início Automático [ 40 ] [ 50 ] [ 60 ]
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-              Text(
-                text = "INÍCIO AUTOMÁTICO",
-                style = MaterialTheme.typography.labelSmall.copy(
-                  fontSize = 9.sp,
-                  fontWeight = FontWeight.Bold,
-                  letterSpacing = 0.4.sp
-                ),
-                color = DynoTextSecondary
-              )
-
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                listOf(40f, 50f, 60f).forEach { speed ->
-                  val isSelected = uiState.startSpeedTriggerKmh == speed
-                  val isSelectorEnabled = uiState.testState == DynoRunState.PARADO
-
-                  Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = if (isSelected) DynoBluePrimary else DynoSurfaceElevated,
-                    border = BorderStroke(
-                      1.dp,
-                      if (isSelected) DynoBlueLight else DynoBorder
-                    ),
-                    modifier = Modifier
-                      .weight(1f)
-                      .height(30.dp)
-                      .testTag("btn_speed_trigger_${speed.toInt()}")
-                      .clickable(enabled = isSelectorEnabled) {
-                        viewModel.setStartSpeedTrigger(speed)
-                      }
-                  ) {
-                    Box(contentAlignment = Alignment.Center) {
-                      Text(
-                        text = "${speed.toInt()}",
-                        style = MaterialTheme.typography.labelMedium.copy(
-                          fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                          fontSize = 12.sp
-                        ),
-                        color = if (isSelected) Color.White else DynoTextSecondary
-                      )
-                    }
-                  }
-                }
-
+              // Seletor de Velocidade de Início Automático [ 40 ] [ 50 ] [ 60 ]
+              Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
-                  text = "km/h",
+                  text = "INÍCIO AUTOMÁTICO",
                   style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 10.sp
+                    letterSpacing = 0.4.sp
                   ),
                   color = DynoTextSecondary
                 )
+
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.spacedBy(4.dp),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  listOf(40f, 50f, 60f).forEach { speed ->
+                    val isSelected = uiState.startSpeedTriggerKmh == speed
+                    val isSelectorEnabled = uiState.testState == DynoRunState.PARADO
+
+                    Surface(
+                      shape = RoundedCornerShape(6.dp),
+                      color = if (isSelected) DynoBluePrimary else DynoSurfaceElevated,
+                      border = BorderStroke(
+                        1.dp,
+                        if (isSelected) DynoBlueLight else DynoBorder
+                      ),
+                      modifier = Modifier
+                        .weight(1f)
+                        .height(30.dp)
+                        .testTag("btn_speed_trigger_${speed.toInt()}")
+                        .clickable(enabled = isSelectorEnabled) {
+                          viewModel.setStartSpeedTrigger(speed)
+                        }
+                    ) {
+                      Box(contentAlignment = Alignment.Center) {
+                        Text(
+                          text = "${speed.toInt()}",
+                          style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 12.sp
+                          ),
+                          color = if (isSelected) Color.White else DynoTextSecondary
+                        )
+                      }
+                    }
+                  }
+
+                  Text(
+                    text = "km/h",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontWeight = FontWeight.Bold,
+                      fontSize = 10.sp
+                    ),
+                    color = DynoTextSecondary
+                  )
+                }
               }
             }
           }
@@ -1149,8 +1440,18 @@ fun TestPreparationScreen(
         val isStartClickable = isReadyToArm && uiState.testState == DynoRunState.PARADO
 
         val startBtnText = when {
-          isStartButtonMeasuring -> "MEDINDO"
-          isStartButtonArmed -> "ARMADO — ${uiState.startSpeedTriggerKmh.toInt()} KM/H"
+          isStartButtonMeasuring -> if (uiState.testMode == TestMode.ACCELERATION) "MEDINDO ACELERAÇÃO" else "MEDINDO"
+          isStartButtonArmed -> {
+            if (uiState.testMode == TestMode.ACCELERATION) {
+              if (uiState.selectedAccelerationRange.startSpeedKmh == 0f && uiState.gpsSpeedKmh < 2f && uiState.isStoppedForTwoSeconds && uiState.isGpsReady) {
+                "PODE ACELERAR!"
+              } else {
+                "ARMADO — ${uiState.selectedAccelerationRange.label}"
+              }
+            } else {
+              "ARMADO — ${uiState.startSpeedTriggerKmh.toInt()} KM/H"
+            }
+          }
           isStartClickable -> "INICIAR"
           !uiState.isCalibrated -> "CALIBRE PRIMEIRO"
           uiState.locationUpdateCount == 0 || uiState.gpsAgeMillis > 5000L -> "AGUARDANDO GPS"
@@ -1783,3 +2084,107 @@ fun OccupantsAndCargoDialog(
     }
   )
 }
+
+/**
+ * Diálogo de Configuração de Faixa de Aceleração Personalizada
+ */
+@Composable
+fun CustomRangeDialog(
+  initialStart: Float,
+  initialEnd: Float,
+  unit: String,
+  errorMessage: String?,
+  onDismiss: () -> Unit,
+  onConfirm: (Float, Float) -> Boolean
+) {
+  var startText by remember { mutableStateOf(initialStart.toInt().toString()) }
+  var endText by remember { mutableStateOf(initialEnd.toInt().toString()) }
+  var localError by remember { mutableStateOf(errorMessage) }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = {
+      Text(
+        text = "Faixa Personalizada ($unit)",
+        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+        color = DynoTextPrimary
+      )
+    },
+    text = {
+      Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+          text = "Defina os limites de velocidade inicial e final para a medição:",
+          style = MaterialTheme.typography.bodySmall,
+          color = DynoTextSecondary
+        )
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          OutlinedTextField(
+            value = startText,
+            onValueChange = {
+              startText = it
+              localError = null
+            },
+            label = { Text("Inicial ($unit)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            modifier = Modifier.weight(1f).testTag("input_custom_start_speed")
+          )
+          OutlinedTextField(
+            value = endText,
+            onValueChange = {
+              endText = it
+              localError = null
+            },
+            label = { Text("Final ($unit)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            modifier = Modifier.weight(1f).testTag("input_custom_end_speed")
+          )
+        }
+
+        if (!localError.isNullOrBlank()) {
+          Text(
+            text = localError!!,
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+            color = DynoErrorRed
+          )
+        } else {
+          Text(
+            text = "Regras: Inicial 0–250, Final 10–300, Final > Inicial e diferença mínima de 10 $unit.",
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+            color = DynoTextMuted
+          )
+        }
+      }
+    },
+    confirmButton = {
+      Button(
+        onClick = {
+          val s = startText.toFloatOrNull() ?: -1f
+          val e = endText.toFloatOrNull() ?: -1f
+          val success = onConfirm(s, e)
+          if (!success) {
+            localError = "Valores inválidos. Verifique os limites."
+          }
+        },
+        colors = ButtonDefaults.buttonColors(containerColor = DynoBluePrimary),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.testTag("btn_confirm_custom_range")
+      ) {
+        Text("APLICAR", fontWeight = FontWeight.Bold)
+      }
+    },
+    dismissButton = {
+      TextButton(onClick = onDismiss) {
+        Text("CANCELAR", color = DynoTextSecondary)
+      }
+    },
+    containerColor = DynoSurfaceContainer,
+    shape = RoundedCornerShape(16.dp)
+  )
+}
+
