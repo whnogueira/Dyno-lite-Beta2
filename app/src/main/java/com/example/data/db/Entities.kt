@@ -100,6 +100,30 @@ data class TestSampleEntity(
 )
 
 /**
+ * Entidade da tabela "testRevisions" para auditoria e histórico de recálculo (Requisito 8).
+ */
+@Entity(
+  tableName = "testRevisions",
+  indices = [
+    Index(value = ["testResultId"]),
+    Index(value = ["createdAt"])
+  ]
+)
+data class TestRevisionEntity(
+  @PrimaryKey
+  val revisionId: String,
+  val testResultId: String,
+  val revisionNumber: Int,
+  val createdAt: String = currentIsoUtc(),
+  val reason: String = "Dados da passagem corrigidos pelo usuário",
+  val note: String? = null,
+  val previousConfigurationJson: String = "{}",
+  val correctedConfigurationJson: String = "{}",
+  val previousCalculatedResultJson: String = "{}",
+  val correctedCalculatedResultJson: String = "{}"
+)
+
+/**
  * Entidade da tabela "vehicles".
  */
 @Entity(tableName = "vehicles")

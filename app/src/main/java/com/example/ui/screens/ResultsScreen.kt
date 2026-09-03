@@ -89,10 +89,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.RunResultRepository
 import com.example.model.CurveDisplayType
+import com.example.model.DynoCorrectionConfig
+import com.example.model.DynoRecalculationEngine
+import com.example.model.DynoRecalculationResult
 import com.example.model.FinishReason
 import com.example.model.RunResult
 import com.example.model.RunSample
+import com.example.model.TestResultRevision
 import com.example.model.VehicleCalculations
+import org.json.JSONObject
 import com.example.ui.components.DynoBadgeStatus
 import com.example.ui.components.DynoCard
 import com.example.ui.components.DynoDangerButton
@@ -148,6 +153,7 @@ fun ResultsScreen(
   var showComparisonDialog by remember { mutableStateOf(false) }
   var showClearAllConfirmDialog by remember { mutableStateOf(false) }
   var showCorrectRunDialog by remember { mutableStateOf(false) }
+  var showOriginalConfigDialog by remember { mutableStateOf(false) }
   var selfTestResultMessage by remember { mutableStateOf<String?>(null) }
   var isRunningSelfTest by remember { mutableStateOf(false) }
 
@@ -658,6 +664,14 @@ fun ResultsScreen(
                   }
                 }
               }
+            }
+
+            if (run.isRecalculated) {
+              RecalculatedRunBadgeCard(
+                run = run,
+                onViewOriginalConfig = { showOriginalConfigDialog = true },
+                modifier = Modifier.fillMaxWidth()
+              )
             }
 
             // 1. VEÍCULO E DATA
@@ -1229,17 +1243,71 @@ fun ResultsScreen(
     )
   }
 
+  var saveErrorMessage by remember { mutableStateOf<String?>(null) }
+
   // DIÁLOGO DE CORREÇÃO DE DADOS DA PASSAGEM (Seção 37)
   if (showCorrectRunDialog && currentDisplayedResult != null) {
+    val run = currentDisplayedResult!!
+    val samples = remember(run.id) { runResultRepository.getOrderedRunSamples(run.id) }
     CorrectRunDataDialog(
-      run = currentDisplayedResult!!,
+      run = run,
+      samples = samples,
       onDismiss = { showCorrectRunDialog = false },
-      onSaveCorrected = { correctedRun ->
-        runResultRepository.saveResult(correctedRun)
-        results = runResultRepository.getResults()
-        currentDisplayedResult = correctedRun
-        showCorrectRunDialog = false
+      onSaveThisRun = { correctedRun, note ->
+        coroutineScope.launch {
+          val res = runResultRepository.saveCorrectionSuspending(run.id, correctedRun, note)
+          if (res.isSuccess) {
+            val updated = res.getOrThrow()
+            results = runResultRepository.getResults()
+            currentDisplayedResult = updated
+            showCorrectRunDialog = false
+          } else {
+            saveErrorMessage = "Não foi possível salvar a correção."
+          }
+        }
+      },
+      onSaveNewVersion = { correctedRun, note ->
+        coroutineScope.launch {
+          val res = runResultRepository.saveAsNewVersionSuspending(run, correctedRun, note)
+          if (res.isSuccess) {
+            val newRun = res.getOrThrow()
+            results = runResultRepository.getResults()
+            currentDisplayedResult = newRun
+            showCorrectRunDialog = false
+          } else {
+            saveErrorMessage = "Não foi possível salvar a correção."
+          }
+        }
       }
+    )
+  }
+
+  // DIÁLOGO DE ERRO AO SALVAR CORREÇÃO
+  if (saveErrorMessage != null) {
+    AlertDialog(
+      onDismissRequest = { saveErrorMessage = null },
+      title = {
+        Text("Erro ao salvar", fontWeight = FontWeight.Bold)
+      },
+      text = {
+        Text(saveErrorMessage ?: "Não foi possível salvar a correção.")
+      },
+      confirmButton = {
+        Button(
+          onClick = { saveErrorMessage = null },
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+        ) {
+          Text("OK")
+        }
+      }
+    )
+  }
+
+  // DIÁLOGO PARA VISUALIZAR CONFIGURAÇÃO ORIGINAL DA PASSAGEM
+  if (showOriginalConfigDialog && currentDisplayedResult != null) {
+    OriginalConfigDialog(
+      run = currentDisplayedResult!!,
+      onDismiss = { showOriginalConfigDialog = false }
     )
   }
 }
@@ -2348,6 +2416,20 @@ private fun HistoryResultsDialog(
                         )
                       }
                     }
+                    if (run.isRecalculated) {
+                      Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = DynoTorqueOrange.copy(alpha = 0.2f),
+                        border = BorderStroke(0.5.dp, DynoTorqueOrange)
+                      ) {
+                        Text(
+                          text = if (run.revisionNumber > 1) "RECÁLCULO v${run.revisionNumber}" else "RECÁLCULO",
+                          style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp, fontWeight = FontWeight.Bold),
+                          color = DynoTorqueOrange,
+                          modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                      }
+                    }
                   }
 
                   Text(
@@ -2580,26 +2662,175 @@ private fun SampleTableRow(sample: RunSample) {
 }
 
 /**
- * Diálogo de Correção de Dados da Passagem (Seção 37)
- * Permite ao usuário editar parâmetros de veículo/teste e recalcular potência/torque reais
- * utilizando os dados de velocidade e tempo brutos gravados na passagem original.
+ * Badge visual de passagem com dados recalculados/corrigidos (Requisito 6)
  */
 @Composable
-fun CorrectRunDataDialog(
+private fun RecalculatedRunBadgeCard(
   run: RunResult,
-  onDismiss: () -> Unit,
-  onSaveCorrected: (RunResult) -> Unit
+  onViewOriginalConfig: () -> Unit,
+  modifier: Modifier = Modifier
 ) {
-  var weightText by remember { mutableStateOf(if (run.totalVehicleMassKg > 0f) String.format(Locale.US, "%.0f", run.totalVehicleMassKg) else "1250") }
-  var gearRatioText by remember { mutableStateOf(String.format(Locale.US, "%.2f", run.gearRatioUsed)) }
-  var finalDriveText by remember { mutableStateOf(String.format(Locale.US, "%.2f", run.finalDriveUsed)) }
-  var tireWidthText by remember { mutableStateOf("195") }
-  var tireAspectText by remember { mutableStateOf("55") }
-  var rimInchesText by remember { mutableStateOf("15") }
-  var lossPercentText by remember { mutableStateOf(String.format(Locale.US, "%.1f", run.drivetrainLossPercent)) }
-  var cdText by remember { mutableStateOf(String.format(Locale.US, "%.2f", run.cdUsed)) }
-  var frontalAreaText by remember { mutableStateOf(String.format(Locale.US, "%.2f", run.frontalAreaUsed)) }
-  var errorMessage by remember { mutableStateOf<String?>(null) }
+  Card(
+    modifier = modifier
+      .fillMaxWidth()
+      .testTag("card_recalculated_badge"),
+    shape = RoundedCornerShape(12.dp),
+    colors = CardDefaults.cardColors(containerColor = DynoTorqueOrange.copy(alpha = 0.12f)),
+    border = BorderStroke(1.dp, DynoTorqueOrange.copy(alpha = 0.45f))
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(12.dp),
+      verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = DynoTorqueOrange,
+            modifier = Modifier.padding(vertical = 2.dp)
+          ) {
+            Text(
+              text = "RECALCULADO APÓS CORREÇÃO",
+              style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Black,
+                fontSize = 10.sp,
+                letterSpacing = 0.5.sp
+              ),
+              color = Color.Black,
+              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+          }
+          if (run.revisionNumber > 1) {
+            Text(
+              text = "Revisão ${run.revisionNumber}",
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+              color = DynoTorqueOrange
+            )
+          }
+        }
+
+        TextButton(
+          onClick = onViewOriginalConfig,
+          contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+          modifier = Modifier.testTag("btn_view_original_config")
+        ) {
+          Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(14.dp), tint = DynoBlueLight)
+          Spacer(modifier = Modifier.width(4.dp))
+          Text(
+            text = "VER CONFIGURAÇÃO ORIGINAL",
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+            color = DynoBlueLight
+          )
+        }
+      }
+
+      if (!run.recalculationNote.isNullOrBlank()) {
+        Text(
+          text = "Observação: ${run.recalculationNote}",
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+      } else if (!run.recalculationReason.isNullOrBlank()) {
+        Text(
+          text = run.recalculationReason!!,
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun ComparisonRow(
+  label: String,
+  original: String,
+  newVal: String,
+  diff: String? = null,
+  isHighlight: Boolean = false
+) {
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(vertical = 2.dp),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    Text(
+      text = label,
+      style = MaterialTheme.typography.bodySmall.copy(fontWeight = if (isHighlight) FontWeight.Bold else FontWeight.Normal),
+      color = if (isHighlight) DynoPowerCyan else MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Row(
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Text(
+        text = original,
+        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+      )
+      Icon(
+        imageVector = Icons.Default.CompareArrows,
+        contentDescription = null,
+        modifier = Modifier.size(12.dp),
+        tint = MaterialTheme.colorScheme.outline
+      )
+      Text(
+        text = newVal,
+        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace),
+        color = if (isHighlight) DynoPowerCyan else MaterialTheme.colorScheme.onSurface
+      )
+      if (diff != null) {
+        Text(
+          text = diff,
+          style = MaterialTheme.typography.labelSmall.copy(
+            fontWeight = FontWeight.Bold,
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace
+          ),
+          color = if (diff.startsWith("+")) DynoSuccessGreen else if (diff.startsWith("-")) DynoErrorRed else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+      }
+    }
+  }
+}
+
+/**
+ * Diálogo para visualizar a configuração original e comparar com os dados atuais (Requisito 6)
+ */
+@Composable
+fun OriginalConfigDialog(
+  run: RunResult,
+  onDismiss: () -> Unit
+) {
+  val originalConfig = remember(run.previousConfigurationJson) {
+    if (!run.previousConfigurationJson.isNullOrBlank()) {
+      try {
+        JSONObject(run.previousConfigurationJson)
+      } catch (e: Exception) {
+        null
+      }
+    } else null
+  }
+  val originalCalc = remember(run.previousCalculatedResultJson) {
+    if (!run.previousCalculatedResultJson.isNullOrBlank()) {
+      try {
+        JSONObject(run.previousCalculatedResultJson)
+      } catch (e: Exception) {
+        null
+      }
+    } else null
+  }
 
   AlertDialog(
     onDismissRequest = onDismiss,
@@ -2608,10 +2839,10 @@ fun CorrectRunDataDialog(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
       ) {
-        Icon(Icons.Default.Edit, contentDescription = null, tint = DynoBluePrimary)
+        Icon(Icons.Default.History, contentDescription = null, tint = DynoBlueLight)
         Text(
-          text = "Corrigir dados da passagem",
-          style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+          text = "Configuração Original da Passagem",
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
         )
       }
     },
@@ -2623,197 +2854,811 @@ fun CorrectRunDataDialog(
         verticalArrangement = Arrangement.spacedBy(12.dp)
       ) {
         Text(
-          text = "Ajuste os parâmetros físicos. A potência e torque reais serão recalculados preservando as leituras de velocidade GPS da passagem original.",
+          text = "Valores registrados no momento em que a puxada foi feita versus o resultado recalculado atual.",
           style = MaterialTheme.typography.bodySmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        if (errorMessage != null) {
+        // Comparativo de Resultados
+        Card(
+          shape = RoundedCornerShape(10.dp),
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+        ) {
+          Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+              text = "COMPARATIVO DE RESULTADOS",
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = DynoPowerCyan)
+            )
+            HorizontalDivider(thickness = 0.5.dp, color = DynoDivider)
+
+            val origEnginePower = originalCalc?.optDouble("enginePowerCv", 0.0)?.toFloat() ?: 0f
+            val origWheelPower = originalCalc?.optDouble("wheelPowerCv", 0.0)?.toFloat() ?: 0f
+            val origTorque = originalCalc?.optDouble("engineTorqueKgfm", 0.0)?.toFloat() ?: 0f
+            val origMass = originalCalc?.optDouble("totalMassKg", 0.0)?.toFloat() ?: originalConfig?.optDouble("totalMassKg", 0.0)?.toFloat() ?: 0f
+
+            ComparisonRow("Massa Total", "${origMass.toInt()} kg", "${run.totalVehicleMassKg.toInt()} kg", isHighlight = false)
+            ComparisonRow("Potência Motor", String.format(Locale.US, "%.1f cv", origEnginePower), String.format(Locale.US, "%.1f cv", run.enginePowerCv), isHighlight = true)
+            ComparisonRow("Potência Rodas", String.format(Locale.US, "%.1f cv", origWheelPower), String.format(Locale.US, "%.1f cv", run.wheelPowerCv))
+            ComparisonRow("Torque Motor", String.format(Locale.US, "%.1f kgfm", origTorque), String.format(Locale.US, "%.1f kgfm", run.engineTorqueKgfm))
+          }
+        }
+
+        // Parâmetros Originais de Entrada
+        if (originalConfig != null) {
+          Card(
+            shape = RoundedCornerShape(10.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+          ) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+              Text(
+                text = "PARÂMETROS REGISTRADOS NA PASSAGEM",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = DynoTextSecondary)
+              )
+              HorizontalDivider(thickness = 0.5.dp, color = DynoDivider)
+
+              DetailRow("Peso vazio veículo", "${originalConfig.optDouble("curbWeightKg", 0.0).toInt()} kg")
+              DetailRow("Peso motorista", "${originalConfig.optDouble("driverWeightKg", 0.0).toInt()} kg")
+              val passCount = originalConfig.optInt("passengerCount", 0)
+              val passWeight = originalConfig.optDouble("passengerWeightKg", 0.0).toInt()
+              DetailRow("Passageiros", "$passCount (${passWeight} kg)")
+              DetailRow("Carga adicional", "${originalConfig.optDouble("additionalWeightKg", 0.0).toInt()} kg")
+              DetailRow("Som automotivo", "${originalConfig.optDouble("soundSystemWeightKg", 0.0).toInt()} kg")
+              DetailRow("Kit GNV", "${originalConfig.optDouble("cngWeightKg", 0.0).toInt()} kg")
+              val tW = originalConfig.optInt("tireWidthMm", 195)
+              val tA = originalConfig.optInt("tireAspectRatio", 55)
+              val rI = originalConfig.optInt("rimInches", 15)
+              DetailRow("Pneus", "$tW/${tA}R$rI")
+              DetailRow("Marcha puxada", originalConfig.optString("gearUsed", "2ª"))
+              DetailRow("Relação marcha", String.format(Locale.US, "%.2f", originalConfig.optDouble("gearRatio", 0.0)))
+              DetailRow("Diferencial", String.format(Locale.US, "%.2f", originalConfig.optDouble("finalDrive", 0.0)))
+              DetailRow("Perda transmissão", String.format(Locale.US, "%.1f%%", originalConfig.optDouble("drivetrainLossPercent", 0.0)))
+            }
+          }
+        }
+      }
+    },
+    confirmButton = {
+      Button(onClick = onDismiss, shape = RoundedCornerShape(10.dp)) {
+        Text("FECHAR")
+      }
+    }
+  )
+}
+
+/**
+ * Diálogo de Correção de Dados da Passagem (Seção 37)
+ * Permite ao usuário editar parâmetros de veículo/carga e recalcular potência/torque reais
+ * utilizando os dados de velocidade e tempo brutos gravados na passagem original.
+ */
+@Composable
+fun CorrectRunDataDialog(
+  run: RunResult,
+  samples: List<RunSample>,
+  onDismiss: () -> Unit,
+  onSaveThisRun: (RunResult, String?) -> Unit,
+  onSaveNewVersion: (RunResult, String?) -> Unit
+) {
+  val initialConfig = remember(run) { DynoRecalculationEngine.extractConfigFromRun(run) }
+
+  // 1. Peso
+  var curbWeightText by remember { mutableStateOf(String.format(Locale.US, "%.0f", initialConfig.curbWeightKg)) }
+  var fuelLitersText by remember { mutableStateOf(if (initialConfig.fuelWeightKg > 0f) String.format(Locale.US, "%.0f", initialConfig.fuelWeightKg / 0.74f) else "25") }
+  var selectedFuelType by remember { mutableStateOf("Gasolina") }
+
+  // 2. Ocupantes
+  var driverWeightText by remember { mutableStateOf(String.format(Locale.US, "%.0f", initialConfig.driverWeightKg)) }
+  var passengerWeightMode by remember { mutableStateOf(initialConfig.passengerWeightMode) }
+  var passengerCountText by remember { mutableStateOf(initialConfig.passengerCount.toString()) }
+  var passengerIndividualWeightText by remember { mutableStateOf(if (initialConfig.passengerIndividualWeightKg > 0f) String.format(Locale.US, "%.0f", initialConfig.passengerIndividualWeightKg) else "70") }
+  var passengerTotalWeightText by remember { mutableStateOf(if (initialConfig.passengerTotalWeightKg > 0f) String.format(Locale.US, "%.0f", initialConfig.passengerTotalWeightKg) else "") }
+  var cargoWeightText by remember { mutableStateOf(String.format(Locale.US, "%.0f", initialConfig.cargoWeightKg)) }
+  var soundSystemWeightText by remember { mutableStateOf(String.format(Locale.US, "%.0f", initialConfig.soundSystemWeightKg)) }
+  var cngWeightText by remember { mutableStateOf(String.format(Locale.US, "%.0f", initialConfig.cngWeightKg)) }
+
+  // 3. Transmissão
+  var gearUsedText by remember { mutableStateOf(initialConfig.gearUsed) }
+  var gearRatioText by remember { mutableStateOf(String.format(Locale.US, "%.2f", initialConfig.gearRatio)) }
+  var finalDriveText by remember { mutableStateOf(String.format(Locale.US, "%.2f", initialConfig.finalDriveRatio)) }
+  var lossPercentText by remember { mutableStateOf(String.format(Locale.US, "%.1f", initialConfig.drivetrainLossPercent)) }
+
+  // 4. Pneus
+  var tireWidthText by remember { mutableStateOf(initialConfig.tireWidthMm.toString()) }
+  var tireAspectText by remember { mutableStateOf(initialConfig.tireAspectRatio.toString()) }
+  var rimInchesText by remember { mutableStateOf(initialConfig.rimInches.toString()) }
+
+  // 5. Parâmetros Avançados
+  var crrText by remember { mutableStateOf(String.format(Locale.US, "%.3f", if (initialConfig.crr > 0f) initialConfig.crr else 0.015f)) }
+  var cdText by remember { mutableStateOf(String.format(Locale.US, "%.2f", initialConfig.cd)) }
+  var frontalAreaText by remember { mutableStateOf(String.format(Locale.US, "%.2f", initialConfig.frontalAreaM2)) }
+
+  // Motivo/Observação curta
+  var noteText by remember { mutableStateOf("") }
+
+  // Construção reativa da configuração corrigida
+  val parsedConfig = remember(
+    curbWeightText, driverWeightText, passengerWeightMode, passengerCountText,
+    passengerIndividualWeightText, passengerTotalWeightText,
+    cargoWeightText, soundSystemWeightText, cngWeightText, fuelLitersText, selectedFuelType,
+    gearUsedText, gearRatioText, finalDriveText, lossPercentText,
+    tireWidthText, tireAspectText, rimInchesText, crrText, cdText, frontalAreaText
+  ) {
+    val curb = curbWeightText.replace(',', '.').toFloatOrNull() ?: 0f
+    val driver = driverWeightText.replace(',', '.').toFloatOrNull() ?: 0f
+    val passCount = passengerCountText.toIntOrNull() ?: 0
+    val passIndiv = passengerIndividualWeightText.replace(',', '.').toFloatOrNull() ?: 70f
+    val passDirectTotal = passengerTotalWeightText.replace(',', '.').toFloatOrNull() ?: 0f
+
+    val passTotal = when (passengerWeightMode) {
+      DynoCorrectionConfig.PassengerWeightMode.INDIVIDUAL -> (passCount * passIndiv).coerceAtLeast(0f)
+      DynoCorrectionConfig.PassengerWeightMode.TOTAL -> passDirectTotal.coerceAtLeast(0f)
+    }
+
+    val cargo = cargoWeightText.replace(',', '.').toFloatOrNull() ?: 0f
+    val sound = soundSystemWeightText.replace(',', '.').toFloatOrNull() ?: 0f
+    val cng = cngWeightText.replace(',', '.').toFloatOrNull() ?: 0f
+    val fuelLiters = fuelLitersText.replace(',', '.').toFloatOrNull() ?: 0f
+    val fuelDensityKgL = when (selectedFuelType.lowercase()) {
+      "etanol" -> 0.79f
+      "diesel" -> 0.84f
+      else -> 0.74f // gasolina
+    }
+    val fuelWeight = fuelLiters * fuelDensityKgL
+
+    val tWidth = tireWidthText.toIntOrNull() ?: 195
+    val tAspect = tireAspectText.toIntOrNull() ?: 55
+    val rim = rimInchesText.toIntOrNull() ?: 15
+    val gRatio = gearRatioText.replace(',', '.').toFloatOrNull() ?: 2.14f
+    val fd = finalDriveText.replace(',', '.').toFloatOrNull() ?: 4.19f
+    val loss = lossPercentText.replace(',', '.').toFloatOrNull() ?: 12f
+    val crrVal = crrText.replace(',', '.').toFloatOrNull() ?: 0.015f
+    val cdVal = cdText.replace(',', '.').toFloatOrNull() ?: 0.34f
+    val area = frontalAreaText.replace(',', '.').toFloatOrNull() ?: 2.10f
+
+    DynoCorrectionConfig(
+      curbWeightKg = curb,
+      driverWeightKg = driver,
+      passengerCount = passCount,
+      passengerWeightMode = passengerWeightMode,
+      passengerIndividualWeightKg = passIndiv,
+      passengerTotalWeightKg = passTotal,
+      cargoWeightKg = cargo,
+      soundSystemWeightKg = sound,
+      cngWeightKg = cng,
+      fuelWeightKg = fuelWeight,
+      gearUsed = gearUsedText.ifBlank { "2ª" },
+      gearRatio = gRatio,
+      finalDriveRatio = fd,
+      tireWidthMm = tWidth,
+      tireAspectRatio = tAspect,
+      rimInches = rim,
+      drivetrainLossPercent = loss,
+      crr = crrVal,
+      cd = cdVal,
+      frontalAreaM2 = area
+    )
+  }
+
+  // Validação dos dados em tempo real
+  val validationError = remember(parsedConfig) {
+    val total = parsedConfig.totalMassKg
+    when {
+      parsedConfig.curbWeightKg <= 0f -> "Peso do veículo vazio deve ser maior que zero."
+      parsedConfig.driverWeightKg < 0f -> "Peso do motorista não pode ser negativo."
+      parsedConfig.cargoWeightKg < 0f -> "Carga adicional não pode ser negativa."
+      parsedConfig.soundSystemWeightKg < 0f -> "Peso do som não pode ser negativo."
+      parsedConfig.cngWeightKg < 0f -> "Peso do kit GNV não pode ser negativo."
+      parsedConfig.fuelWeightKg < 0f -> "Peso do combustível não pode ser negativo."
+      total < 300f -> "Massa total (${total.toInt()} kg) é inferior ao mínimo permitido (300 kg)."
+      total > 5000f -> "Massa total (${total.toInt()} kg) excede o limite máximo permitido (5000 kg)."
+      parsedConfig.gearUsed.isBlank() -> "Marcha utilizada deve ser informada."
+      parsedConfig.gearRatio <= 0f || parsedConfig.gearRatio !in 0.2f..8.0f -> "Relação de marcha deve ser maior que zero (0.2 a 8.0)."
+      parsedConfig.finalDriveRatio <= 0f || parsedConfig.finalDriveRatio !in 0.5f..10.0f -> "Diferencial deve ser maior que zero (0.5 a 10.0)."
+      parsedConfig.tireWidthMm !in 125..385 -> "Largura do pneu inválida (125 a 385 mm)."
+      parsedConfig.tireAspectRatio !in 20..90 -> "Perfil do pneu inválido (20 a 90%)."
+      parsedConfig.rimInches !in 10..26 -> "Aro inválido (10 a 26 polegadas)."
+      parsedConfig.drivetrainLossPercent !in 0f..40f -> "Perda da transmissão deve estar entre 0% e 40%."
+      parsedConfig.crr !in 0.005f..0.050f -> "Crr deve estar entre 0.005 e 0.050."
+      parsedConfig.cd !in 0.15f..1.0f -> "Coeficiente Cd deve ser entre 0.15 e 1.0."
+      parsedConfig.frontalAreaM2 !in 1.0f..5.0f -> "Área frontal deve ser entre 1.0 e 5.0 m²."
+      else -> null
+    }
+  }
+
+  // Recálculo dinâmico da passagem
+  val recalculationResult = remember(parsedConfig, validationError, samples, run) {
+    if (validationError != null) null
+    else {
+      try {
+        DynoRecalculationEngine.recalculate(samples, parsedConfig, run)
+      } catch (e: Exception) {
+        null
+      }
+    }
+  }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+      ) {
+        Icon(Icons.Default.Edit, contentDescription = null, tint = DynoBluePrimary)
+        Text(
+          text = "CORRIGIR DADOS DA PASSAGEM",
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+        )
+      }
+    },
+    text = {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+      ) {
+        // Aviso Obrigatório (Requisito 12)
+        Surface(
+          shape = RoundedCornerShape(8.dp),
+          color = DynoBluePrimary.copy(alpha = 0.12f),
+          border = BorderStroke(1.dp, DynoBluePrimary.copy(alpha = 0.4f)),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Row(
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            Icon(Icons.Outlined.Info, contentDescription = null, tint = DynoBluePrimary, modifier = Modifier.size(20.dp))
+            Text(
+              text = "Os dados medidos pelo GPS e pelos sensores não serão alterados. Somente potência, torque e RPM serão recalculados.",
+              style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+              color = MaterialTheme.colorScheme.onSurface
+            )
+          }
+        }
+
+        // Banner de erro de validação
+        if (validationError != null) {
           Surface(
             color = DynoErrorRed.copy(alpha = 0.15f),
             shape = RoundedCornerShape(8.dp),
             modifier = Modifier.fillMaxWidth()
           ) {
+            Row(
+              modifier = Modifier.padding(10.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              Icon(Icons.Default.Close, contentDescription = null, tint = DynoErrorRed, modifier = Modifier.size(18.dp))
+              Text(
+                text = validationError,
+                color = DynoErrorRed,
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium)
+              )
+            }
+          }
+        }
+
+        // -------------------------------------------------------------
+        // SEÇÃO 1: PESO
+        // -------------------------------------------------------------
+        Card(
+          shape = RoundedCornerShape(12.dp),
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+        ) {
+          Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
-              text = errorMessage!!,
-              color = DynoErrorRed,
-              style = MaterialTheme.typography.bodySmall,
-              modifier = Modifier.padding(8.dp)
+              text = "1. PESO",
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = DynoPowerCyan)
+            )
+            HorizontalDivider(thickness = 0.5.dp, color = DynoDivider)
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              OutlinedTextField(
+                value = curbWeightText,
+                onValueChange = { curbWeightText = it },
+                label = { Text("Veículo vazio (kg)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.weight(1f).testTag("input_curb_weight")
+              )
+              OutlinedTextField(
+                value = fuelLitersText,
+                onValueChange = { fuelLitersText = it },
+                label = { Text("Combustível (L)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.weight(1f).testTag("input_fuel_liters")
+              )
+            }
+
+            // Seleção de Tipo de Combustível
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Text("Tipo:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+              listOf("Gasolina", "Etanol", "Diesel").forEach { fType ->
+                val isSel = selectedFuelType.equals(fType, ignoreCase = true)
+                Surface(
+                  shape = RoundedCornerShape(6.dp),
+                  color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                  modifier = Modifier.clickable { selectedFuelType = fType }
+                ) {
+                  Text(
+                    text = fType,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal),
+                    color = if (isSel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                  )
+                }
+              }
+            }
+          }
+        }
+
+        // -------------------------------------------------------------
+        // SEÇÃO 2: OCUPANTES E CARGA
+        // -------------------------------------------------------------
+        Card(
+          shape = RoundedCornerShape(12.dp),
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+        ) {
+          Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+              text = "2. OCUPANTES",
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = DynoPowerCyan)
+            )
+            HorizontalDivider(thickness = 0.5.dp, color = DynoDivider)
+
+            OutlinedTextField(
+              value = driverWeightText,
+              onValueChange = { driverWeightText = it },
+              label = { Text("Motorista (kg)") },
+              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+              singleLine = true,
+              modifier = Modifier.fillMaxWidth().testTag("input_driver_weight")
+            )
+
+            // Modo de Passageiros: Individual vs Total
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Text("Cálculo passageiros:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+              Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = if (passengerWeightMode == DynoCorrectionConfig.PassengerWeightMode.INDIVIDUAL) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.clickable { passengerWeightMode = DynoCorrectionConfig.PassengerWeightMode.INDIVIDUAL }
+              ) {
+                Text(
+                  text = "Individual",
+                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                  color = if (passengerWeightMode == DynoCorrectionConfig.PassengerWeightMode.INDIVIDUAL) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+              }
+              Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = if (passengerWeightMode == DynoCorrectionConfig.PassengerWeightMode.TOTAL) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.clickable { passengerWeightMode = DynoCorrectionConfig.PassengerWeightMode.TOTAL }
+              ) {
+                Text(
+                  text = "Total direto",
+                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                  color = if (passengerWeightMode == DynoCorrectionConfig.PassengerWeightMode.TOTAL) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+              }
+            }
+
+            if (passengerWeightMode == DynoCorrectionConfig.PassengerWeightMode.INDIVIDUAL) {
+              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                  value = passengerCountText,
+                  onValueChange = { passengerCountText = it },
+                  label = { Text("Qtd Passageiros") },
+                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                  singleLine = true,
+                  modifier = Modifier.weight(1f).testTag("input_passenger_count")
+                )
+                OutlinedTextField(
+                  value = passengerIndividualWeightText,
+                  onValueChange = { passengerIndividualWeightText = it },
+                  label = { Text("Peso Médio (kg/cada)") },
+                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                  singleLine = true,
+                  modifier = Modifier.weight(1f).testTag("input_passenger_indiv_weight")
+                )
+              }
+            } else {
+              OutlinedTextField(
+                value = passengerTotalWeightText,
+                onValueChange = { passengerTotalWeightText = it },
+                label = { Text("Peso Total dos Passageiros (kg)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().testTag("input_passenger_total_weight")
+              )
+            }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              OutlinedTextField(
+                value = cargoWeightText,
+                onValueChange = { cargoWeightText = it },
+                label = { Text("Carga extra (kg)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.weight(1f).testTag("input_cargo_weight")
+              )
+              OutlinedTextField(
+                value = soundSystemWeightText,
+                onValueChange = { soundSystemWeightText = it },
+                label = { Text("Som (kg)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.weight(1f).testTag("input_sound_weight")
+              )
+              OutlinedTextField(
+                value = cngWeightText,
+                onValueChange = { cngWeightText = it },
+                label = { Text("GNV (kg)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.weight(1f).testTag("input_cng_weight")
+              )
+            }
+
+            // Resumo de Massa em tempo real (Requisito 2)
+            val curb = parsedConfig.curbWeightKg
+            val driver = parsedConfig.driverWeightKg
+            val pass = parsedConfig.effectivePassengerWeightKg
+            val cargo = parsedConfig.cargoWeightKg + parsedConfig.soundSystemWeightKg + parsedConfig.cngWeightKg
+            val total = parsedConfig.totalMassKg
+
+            Surface(
+              shape = RoundedCornerShape(8.dp),
+              color = DynoTorqueOrange.copy(alpha = 0.12f),
+              border = BorderStroke(1.dp, DynoTorqueOrange.copy(alpha = 0.35f)),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                  text = "RESUMO DE MASSA EM TEMPO REAL",
+                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = DynoTorqueOrange)
+                )
+                Text("Veículo vazio: ${curb.toInt()} kg", style = MaterialTheme.typography.bodySmall)
+                Text("Motorista: ${driver.toInt()} kg", style = MaterialTheme.typography.bodySmall)
+                Text("Passageiros: ${pass.toInt()} kg", style = MaterialTheme.typography.bodySmall)
+                Text("Carga adicional: ${cargo.toInt()} kg", style = MaterialTheme.typography.bodySmall)
+                HorizontalDivider(thickness = 0.5.dp, color = DynoTorqueOrange.copy(alpha = 0.3f), modifier = Modifier.padding(vertical = 2.dp))
+                Text(
+                  text = "Massa total corrigida: ${total.toInt()} kg",
+                  style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = DynoTorqueOrange)
+                )
+              }
+            }
+          }
+        }
+
+        // -------------------------------------------------------------
+        // SEÇÃO 3: TRANSMISSÃO
+        // -------------------------------------------------------------
+        Card(
+          shape = RoundedCornerShape(12.dp),
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+        ) {
+          Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+              text = "3. TRANSMISSÃO",
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = DynoPowerCyan)
+            )
+            HorizontalDivider(thickness = 0.5.dp, color = DynoDivider)
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              OutlinedTextField(
+                value = gearUsedText,
+                onValueChange = { gearUsedText = it },
+                label = { Text("Marcha puxada") },
+                singleLine = true,
+                modifier = Modifier.weight(0.8f).testTag("input_gear_used")
+              )
+              OutlinedTextField(
+                value = gearRatioText,
+                onValueChange = { gearRatioText = it },
+                label = { Text("Relação marcha") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                modifier = Modifier.weight(1f).testTag("input_gear_ratio")
+              )
+              OutlinedTextField(
+                value = finalDriveText,
+                onValueChange = { finalDriveText = it },
+                label = { Text("Diferencial") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                modifier = Modifier.weight(1f).testTag("input_final_drive")
+              )
+            }
+
+            OutlinedTextField(
+              value = lossPercentText,
+              onValueChange = { lossPercentText = it },
+              label = { Text("Perda de Transmissão (%)") },
+              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+              singleLine = true,
+              modifier = Modifier.fillMaxWidth().testTag("input_loss_percent")
             )
           }
         }
 
-        // 1. Peso Total
-        OutlinedTextField(
-          value = weightText,
-          onValueChange = { weightText = it },
-          label = { Text("Massa Total (Carro + Motorista) [kg]") },
-          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-          singleLine = true,
-          modifier = Modifier.fillMaxWidth()
-        )
-
-        // 2. Relações de Câmbio
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        // -------------------------------------------------------------
+        // SEÇÃO 4: PNEUS
+        // -------------------------------------------------------------
+        Card(
+          shape = RoundedCornerShape(12.dp),
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
         ) {
-          OutlinedTextField(
-            value = gearRatioText,
-            onValueChange = { gearRatioText = it },
-            label = { Text("Relação da Marcha") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            singleLine = true,
-            modifier = Modifier.weight(1f)
-          )
-          OutlinedTextField(
-            value = finalDriveText,
-            onValueChange = { finalDriveText = it },
-            label = { Text("Diferencial") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            singleLine = true,
-            modifier = Modifier.weight(1f)
-          )
+          Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+              text = "4. PNEUS",
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = DynoPowerCyan)
+            )
+            HorizontalDivider(thickness = 0.5.dp, color = DynoDivider)
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+              OutlinedTextField(
+                value = tireWidthText,
+                onValueChange = { tireWidthText = it },
+                label = { Text("Largura (mm)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.weight(1f).testTag("input_tire_width")
+              )
+              OutlinedTextField(
+                value = tireAspectText,
+                onValueChange = { tireAspectText = it },
+                label = { Text("Perfil (%)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.weight(1f).testTag("input_tire_aspect")
+              )
+              OutlinedTextField(
+                value = rimInchesText,
+                onValueChange = { rimInchesText = it },
+                label = { Text("Aro (pol)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.weight(1f).testTag("input_rim_inches")
+              )
+            }
+          }
         }
 
-        // 3. Dimensões do Pneu
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        // -------------------------------------------------------------
+        // SEÇÃO 5: PARÂMETROS AVANÇADOS
+        // -------------------------------------------------------------
+        Card(
+          shape = RoundedCornerShape(12.dp),
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
         ) {
-          OutlinedTextField(
-            value = tireWidthText,
-            onValueChange = { tireWidthText = it },
-            label = { Text("Largura (mm)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            singleLine = true,
-            modifier = Modifier.weight(1f)
-          )
-          OutlinedTextField(
-            value = tireAspectText,
-            onValueChange = { tireAspectText = it },
-            label = { Text("Perfil (%)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            singleLine = true,
-            modifier = Modifier.weight(1f)
-          )
-          OutlinedTextField(
-            value = rimInchesText,
-            onValueChange = { rimInchesText = it },
-            label = { Text("Aro (pol)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            singleLine = true,
-            modifier = Modifier.weight(1f)
-          )
+          Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+              text = "5. PARÂMETROS AVANÇADOS",
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = DynoPowerCyan)
+            )
+            HorizontalDivider(thickness = 0.5.dp, color = DynoDivider)
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              OutlinedTextField(
+                value = crrText,
+                onValueChange = { crrText = it },
+                label = { Text("Rolamento (Crr)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                modifier = Modifier.weight(1f).testTag("input_crr")
+              )
+              OutlinedTextField(
+                value = cdText,
+                onValueChange = { cdText = it },
+                label = { Text("Arrasto (Cd)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                modifier = Modifier.weight(1f).testTag("input_cd")
+              )
+              OutlinedTextField(
+                value = frontalAreaText,
+                onValueChange = { frontalAreaText = it },
+                label = { Text("Área (m²)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                modifier = Modifier.weight(1f).testTag("input_frontal_area")
+              )
+            }
+          }
         }
 
-        // 4. Perda e Aerodinâmica
+        // MOTIVO OU JUSTIFICATIVA DA CORREÇÃO
         OutlinedTextField(
-          value = lossPercentText,
-          onValueChange = { lossPercentText = it },
-          label = { Text("Perda de Transmissão (%)") },
-          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+          value = noteText,
+          onValueChange = { noteText = it },
+          label = { Text("Observação da correção (opcional)") },
+          placeholder = { Text("ex: Passageiro de 70 kg não informado no teste.") },
           singleLine = true,
-          modifier = Modifier.fillMaxWidth()
+          modifier = Modifier.fillMaxWidth().testTag("input_correction_note")
         )
 
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        // -------------------------------------------------------------
+        // SEÇÃO 6: COMPARAÇÃO ANTES / DEPOIS (Requisito 6)
+        // -------------------------------------------------------------
+        Card(
+          shape = RoundedCornerShape(12.dp),
+          colors = CardDefaults.cardColors(containerColor = DynoSurfaceContainer),
+          border = BorderStroke(1.dp, DynoPowerCyan.copy(alpha = 0.5f)),
+          modifier = Modifier.testTag("card_preview_recalculation")
         ) {
-          OutlinedTextField(
-            value = cdText,
-            onValueChange = { cdText = it },
-            label = { Text("Arrasto (Cd)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            singleLine = true,
-            modifier = Modifier.weight(1f)
-          )
-          OutlinedTextField(
-            value = frontalAreaText,
-            onValueChange = { frontalAreaText = it },
-            label = { Text("Área Frontal (m²)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            singleLine = true,
-            modifier = Modifier.weight(1f)
-          )
+          Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Text(
+                text = "6. COMPARAÇÃO ANTES / DEPOIS",
+                style = MaterialTheme.typography.labelSmall.copy(
+                  fontWeight = FontWeight.Black,
+                  letterSpacing = 0.5.sp,
+                  color = DynoPowerCyan
+                )
+              )
+              Text(
+                text = "PRÉVIA TEMPO REAL",
+                style = MaterialTheme.typography.labelSmall.copy(
+                  fontSize = 9.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = DynoSuccessGreen
+                )
+              )
+            }
+
+            HorizontalDivider(thickness = 0.5.dp, color = DynoDivider)
+
+            if (recalculationResult != null) {
+              val newEnginePower = recalculationResult.peakEnginePowerCv
+              val newWheelPower = recalculationResult.peakWheelPowerCv
+              val newEngineTorque = recalculationResult.peakEngineTorqueKgfm
+              val newWheelTorque = recalculationResult.peakWheelTorqueKgfm
+              val newRpm = recalculationResult.peakPowerRpm
+
+              val origEnginePower = run.enginePowerCv
+              val origWheelPower = run.wheelPowerCv
+              val origEngineTorque = run.engineTorqueKgfm
+              val origWheelTorque = run.wheelTorqueKgfm
+              val origRpm = run.peakPowerRpm
+
+              val pwrDiff = newEnginePower - origEnginePower
+              val pwrDiffPct = if (origEnginePower > 0f) (pwrDiff / origEnginePower) * 100f else 0f
+              val pwrSign = if (pwrDiff > 0f) "+" else ""
+
+              val wheelPwrDiff = newWheelPower - origWheelPower
+              val wheelPwrDiffPct = if (origWheelPower > 0f) (wheelPwrDiff / origWheelPower) * 100f else 0f
+              val wheelPwrSign = if (wheelPwrDiff > 0f) "+" else ""
+
+              val trqDiff = newEngineTorque - origEngineTorque
+              val trqSign = if (trqDiff > 0f) "+" else ""
+
+              val wheelTrqDiff = newWheelTorque - origWheelTorque
+              val wheelTrqSign = if (wheelTrqDiff > 0f) "+" else ""
+
+              val massDiff = parsedConfig.totalVehicleMassKg - run.totalVehicleMassKg
+              val massSign = if (massDiff > 0f) "+" else ""
+
+              ComparisonRow(
+                label = "Potência Motor",
+                original = String.format(Locale.US, "%.1f cv", origEnginePower),
+                newVal = String.format(Locale.US, "%.1f cv", newEnginePower),
+                diff = "$pwrSign${String.format(Locale.US, "%.1f", pwrDiff)} cv ($pwrSign${String.format(Locale.US, "%.1f", pwrDiffPct)}%)",
+                isHighlight = true
+              )
+
+              ComparisonRow(
+                label = "Potência Rodas",
+                original = String.format(Locale.US, "%.1f cv", origWheelPower),
+                newVal = String.format(Locale.US, "%.1f cv", newWheelPower),
+                diff = "$wheelPwrSign${String.format(Locale.US, "%.1f", wheelPwrDiff)} cv ($wheelPwrSign${String.format(Locale.US, "%.1f", wheelPwrDiffPct)}%)"
+              )
+
+              ComparisonRow(
+                label = "Torque Motor",
+                original = String.format(Locale.US, "%.1f kgfm", origEngineTorque),
+                newVal = String.format(Locale.US, "%.1f kgfm", newEngineTorque),
+                diff = "$trqSign${String.format(Locale.US, "%.1f", trqDiff)} kgfm"
+              )
+
+              ComparisonRow(
+                label = "Torque Rodas",
+                original = String.format(Locale.US, "%.1f kgfm", origWheelTorque),
+                newVal = String.format(Locale.US, "%.1f kgfm", newWheelTorque),
+                diff = "$wheelTrqSign${String.format(Locale.US, "%.1f", wheelTrqDiff)} kgfm"
+              )
+
+              ComparisonRow(
+                label = "RPM de Pico",
+                original = "$origRpm rpm",
+                newVal = "$newRpm rpm"
+              )
+
+              ComparisonRow(
+                label = "Massa Total",
+                original = "${run.totalVehicleMassKg.toInt()} kg",
+                newVal = "${parsedConfig.totalVehicleMassKg.toInt()} kg",
+                diff = "$massSign${massDiff.toInt()} kg"
+              )
+            } else {
+              Text(
+                text = "Não foi possível recalcular a passagem. Verifique os dados informados.",
+                color = DynoErrorRed,
+                style = MaterialTheme.typography.bodySmall
+              )
+            }
+          }
         }
       }
     },
     confirmButton = {
-      Button(
-        onClick = {
-          val weight = weightText.toFloatOrNull()
-          val gear = gearRatioText.toFloatOrNull()
-          val fd = finalDriveText.toFloatOrNull()
-          val tWidth = tireWidthText.toIntOrNull()
-          val tAspect = tireAspectText.toIntOrNull()
-          val rim = rimInchesText.toIntOrNull()
-          val loss = lossPercentText.toFloatOrNull()
-          val cd = cdText.toFloatOrNull()
-          val area = frontalAreaText.toFloatOrNull()
-
-          if (weight == null || weight < 300f || weight > 5000f) {
-            errorMessage = "Informe um peso válido entre 300 e 5000 kg"
-            return@Button
-          }
-          if (gear == null || gear <= 0.2f || gear > 8f) {
-            errorMessage = "Relação de marcha inválida"
-            return@Button
-          }
-          if (fd == null || fd <= 0.5f || fd > 10f) {
-            errorMessage = "Relação de diferencial inválida"
-            return@Button
-          }
-          if (tWidth == null || tWidth < 125 || tWidth > 385) {
-            errorMessage = "Largura de pneu inválida"
-            return@Button
-          }
-          if (tAspect == null || tAspect < 20 || tAspect > 90) {
-            errorMessage = "Perfil de pneu inválido"
-            return@Button
-          }
-          if (rim == null || rim < 10 || rim > 26) {
-            errorMessage = "Aro inválido"
-            return@Button
-          }
-          if (loss == null || loss < 0f || loss > 40f) {
-            errorMessage = "Perda de transmissão deve ser entre 0% e 40%"
-            return@Button
-          }
-          if (cd == null || cd < 0.15f || cd > 1.0f) {
-            errorMessage = "Coeficiente Cd inválido"
-            return@Button
-          }
-          if (area == null || area < 1.0f || area > 5.0f) {
-            errorMessage = "Área frontal inválida"
-            return@Button
-          }
-
-          val recalculated = VehicleCalculations.recalculateRunResult(
-            run = run,
-            correctedTotalMassKg = weight,
-            correctedGearRatio = gear,
-            correctedFinalDrive = fd,
-            correctedTireWidthMm = tWidth,
-            correctedTireAspectRatio = tAspect,
-            correctedRimInches = rim,
-            correctedLossPercent = loss,
-            correctedCd = cd,
-            correctedFrontalAreaM2 = area,
-            correctedCrr = run.crrUsed
-          )
-          onSaveCorrected(recalculated)
-        },
-        colors = ButtonDefaults.buttonColors(containerColor = DynoBluePrimary),
-        shape = RoundedCornerShape(10.dp)
+      val canSave = validationError == null && recalculationResult != null
+      Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
       ) {
-        Text("RECALCULAR E SALVAR")
+        // Opção 1: Salvar Correção
+        Button(
+          onClick = {
+            if (canSave && recalculationResult != null) {
+              onSaveThisRun(recalculationResult.recalculatedRun, noteText.ifBlank { null })
+            }
+          },
+          enabled = canSave,
+          modifier = Modifier.fillMaxWidth().testTag("btn_save_this_run"),
+          colors = ButtonDefaults.buttonColors(containerColor = DynoBluePrimary),
+          shape = RoundedCornerShape(10.dp)
+        ) {
+          Text("SALVAR CORREÇÃO", fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+        }
+
+        // Opção 2: Salvar como nova versão
+        OutlinedButton(
+          onClick = {
+            if (canSave && recalculationResult != null) {
+              onSaveNewVersion(recalculationResult.recalculatedRun, noteText.ifBlank { null })
+            }
+          },
+          enabled = canSave,
+          modifier = Modifier.fillMaxWidth().testTag("btn_save_new_version"),
+          shape = RoundedCornerShape(10.dp),
+          border = BorderStroke(1.dp, DynoPowerCyan)
+        ) {
+          Text("SALVAR COMO NOVA VERSÃO", fontWeight = FontWeight.Bold, color = DynoPowerCyan, letterSpacing = 0.5.sp)
+        }
       }
     },
     dismissButton = {
-      OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(10.dp)) {
-        Text("CANCELAR")
+      OutlinedButton(
+        onClick = onDismiss,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.testTag("btn_cancel_correction")
+      ) {
+        Text("CANCELAR", fontWeight = FontWeight.Bold)
       }
     }
   )

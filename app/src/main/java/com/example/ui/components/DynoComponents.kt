@@ -778,15 +778,17 @@ fun DynoTopBar(
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-          DynoLogoSymbol(size = 28.dp)
-          Text(
-            text = title,
-            style = MaterialTheme.typography.titleLarge.copy(
-              fontWeight = FontWeight.Bold,
-              fontSize = 18.sp
-            ),
-            color = DynoTextPrimary
-          )
+          DynoHorizontalLogo(height = 24.dp)
+          if (title.isNotBlank() && !title.equals("DYNO LITE", ignoreCase = true)) {
+            Text(
+              text = title,
+              style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp
+              ),
+              color = DynoTextPrimary
+            )
+          }
         }
       } else {
         Text(

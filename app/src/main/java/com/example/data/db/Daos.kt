@@ -86,6 +86,33 @@ interface TestSampleDao {
 }
 
 @Dao
+interface TestRevisionDao {
+  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  suspend fun insertRevision(revision: TestRevisionEntity): Long
+
+  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  suspend fun insertRevisions(revisions: List<TestRevisionEntity>): List<Long>
+
+  @Query("SELECT * FROM testRevisions WHERE testResultId = :testResultId ORDER BY revisionNumber DESC")
+  suspend fun getRevisionsForTest(testResultId: String): List<TestRevisionEntity>
+
+  @Query("SELECT * FROM testRevisions WHERE testResultId = :testResultId ORDER BY revisionNumber DESC")
+  fun getRevisionsForTestFlow(testResultId: String): Flow<List<TestRevisionEntity>>
+
+  @Query("SELECT * FROM testRevisions WHERE testResultId = :testResultId ORDER BY revisionNumber ASC LIMIT 1")
+  suspend fun getFirstRevisionForTest(testResultId: String): TestRevisionEntity?
+
+  @Query("SELECT COUNT(*) FROM testRevisions WHERE testResultId = :testResultId")
+  suspend fun getRevisionCount(testResultId: String): Int
+
+  @Query("DELETE FROM testRevisions WHERE testResultId = :testResultId")
+  suspend fun deleteRevisionsForTest(testResultId: String): Int
+
+  @Query("DELETE FROM testRevisions")
+  suspend fun deleteAllRevisions(): Int
+}
+
+@Dao
 interface VehicleDao {
   @Insert(onConflict = OnConflictStrategy.REPLACE)
   suspend fun insertVehicle(vehicle: VehicleEntity): Long

@@ -2,8 +2,10 @@ package com.example.data
 
 import android.content.Context
 import android.util.Log
+import androidx.room.withTransaction
 import com.example.data.db.DynoMobileDatabase
 import com.example.data.db.TestEntity
+import com.example.data.db.TestRevisionEntity
 import com.example.data.db.TestSampleEntity
 import com.example.data.db.currentIsoUtc
 import com.example.data.db.isoToTimestampMs
@@ -11,6 +13,7 @@ import com.example.data.db.toIsoUtc
 import com.example.model.AccelerationSplit
 import com.example.model.RunResult
 import com.example.model.RunSample
+import com.example.model.TestResultRevision
 import com.example.model.UniqueGpsFix
 import com.example.model.VehicleProfile
 import kotlinx.coroutines.CoroutineScope
@@ -31,6 +34,7 @@ class RunResultRepository(context: Context) {
   private val database = DynoMobileDatabase.getDatabase(context)
   private val testDao = database.testDao()
   private val testSampleDao = database.testSampleDao()
+  private val testRevisionDao = database.testRevisionDao()
   private val legacyPrefs = context.getSharedPreferences("dyno_lite_runs_store", Context.MODE_PRIVATE)
 
   init {
@@ -312,6 +316,196 @@ class RunResultRepository(context: Context) {
   }
 
   /**
+   * Salva a correção de uma passagem existente mantendo o mesmo ID e guardando revisão anterior (Requisito 7 e 8).
+   * Executa em transação segura no banco: se houver erro, mantém os dados originais intactos.
+   */
+  suspend fun saveCorrectionSuspending(
+    originalRunId: String,
+    correctedRun: RunResult,
+    note: String? = null
+  ): Result<RunResult> = withContext(Dispatchers.IO) {
+    try {
+      val originalEntity = testDao.getTestById(originalRunId)
+        ?: return@withContext Result.failure(IllegalStateException("Não foi possível salvar a correção: passagem não encontrada"))
+      val existingRevisions = testRevisionDao.getRevisionsForTest(originalRunId)
+      val nextRevNumber = (existingRevisions.maxOfOrNull { it.revisionNumber } ?: 1) + 1
+
+      val previousConfigJson = originalEntity.configurationSnapshot
+      val previousCalcJson = JSONObject().apply {
+        put("wheelPowerCv", originalEntity.maxWheelPowerCv)
+        put("enginePowerCv", originalEntity.estimatedEnginePowerCv)
+        put("engineTorqueKgfm", originalEntity.maxTorqueKgfm)
+        put("peakRpm", originalEntity.maxRpm)
+        put("totalMassKg", JSONObject(previousConfigJson.ifBlank { "{}" }).optDouble("totalMassKg", 0.0))
+      }.toString()
+
+      val updatedRun = correctedRun.copy(
+        id = originalRunId,
+        isRecalculated = true,
+        revisionNumber = nextRevNumber,
+        recalculationReason = "Dados da passagem corrigidos pelo usuário",
+        recalculationNote = note?.ifBlank { null },
+        previousConfigurationJson = previousConfigJson,
+        previousCalculatedResultJson = previousCalcJson
+      )
+
+      val correctedConfigJson = createConfigurationSnapshot(updatedRun)
+      val correctedCalcJson = JSONObject().apply {
+        put("wheelPowerCv", updatedRun.wheelPowerCv)
+        put("enginePowerCv", updatedRun.enginePowerCv)
+        put("engineTorqueKgfm", updatedRun.engineTorqueKgfm)
+        put("peakRpm", updatedRun.peakPowerRpm)
+        put("totalMassKg", updatedRun.totalVehicleMassKg)
+      }.toString()
+
+      val revisionEntity = TestRevisionEntity(
+        revisionId = UUID.randomUUID().toString(),
+        testResultId = originalRunId,
+        revisionNumber = nextRevNumber,
+        createdAt = currentIsoUtc(),
+        reason = "Dados da passagem corrigidos pelo usuário",
+        note = note?.ifBlank { null },
+        previousConfigurationJson = previousConfigJson,
+        correctedConfigurationJson = correctedConfigJson,
+        previousCalculatedResultJson = previousCalcJson,
+        correctedCalculatedResultJson = correctedCalcJson
+      )
+
+      val updatedTestEntity = mapRunResultToTestEntity(updatedRun, status = originalEntity.status)
+
+      database.withTransaction {
+        testRevisionDao.insertRevision(revisionEntity)
+        testDao.updateTest(updatedTestEntity)
+        if (updatedRun.samples.isNotEmpty()) {
+          val sampleEntities = updatedRun.samples.mapIndexed { idx, s ->
+            mapRunSampleToEntity(s, originalRunId, idx)
+          }
+          testSampleDao.replaceSamplesForTest(originalRunId, sampleEntities)
+        }
+      }
+
+      Log.i(TAG, "[DynoStorage] Correção salva com sucesso na passagem $originalRunId (Revisão $nextRevNumber)")
+      Result.success(updatedRun)
+    } catch (e: Exception) {
+      Log.e(TAG, "[DynoStorage] Não foi possível salvar a correção: ${e.message}", e)
+      Result.failure(Exception("Não foi possível salvar a correção.", e))
+    }
+  }
+
+  fun saveCorrection(originalRunId: String, correctedRun: RunResult, note: String? = null): Boolean {
+    return runBlocking(Dispatchers.IO) {
+      saveCorrectionSuspending(originalRunId, correctedRun, note).isSuccess
+    }
+  }
+
+  /**
+   * Salva a passagem corrigida como uma NOVA versão, criando novo ID e mantendo referência à original (Requisito 7 e 8).
+   * Executa em transação segura no banco.
+   */
+  suspend fun saveAsNewVersionSuspending(
+    originalRun: RunResult,
+    correctedRun: RunResult,
+    note: String? = null
+  ): Result<RunResult> = withContext(Dispatchers.IO) {
+    try {
+      val newId = UUID.randomUUID().toString()
+      val previousConfigJson = createConfigurationSnapshot(originalRun)
+      val previousCalcJson = JSONObject().apply {
+        put("wheelPowerCv", originalRun.wheelPowerCv)
+        put("enginePowerCv", originalRun.enginePowerCv)
+        put("engineTorqueKgfm", originalRun.engineTorqueKgfm)
+        put("peakRpm", originalRun.peakPowerRpm)
+        put("totalMassKg", originalRun.totalVehicleMassKg)
+      }.toString()
+
+      val newRun = correctedRun.copy(
+        id = newId,
+        vehicleName = "${originalRun.vehicleName} (v2)",
+        parentRunId = originalRun.id,
+        isRecalculated = true,
+        revisionNumber = 2,
+        recalculationReason = "Dados da passagem corrigidos pelo usuário (nova versão)",
+        recalculationNote = note?.ifBlank { null },
+        previousConfigurationJson = previousConfigJson,
+        previousCalculatedResultJson = previousCalcJson,
+        timestamp = System.currentTimeMillis()
+      )
+
+      val correctedConfigJson = createConfigurationSnapshot(newRun)
+      val correctedCalcJson = JSONObject().apply {
+        put("wheelPowerCv", newRun.wheelPowerCv)
+        put("enginePowerCv", newRun.enginePowerCv)
+        put("engineTorqueKgfm", newRun.engineTorqueKgfm)
+        put("peakRpm", newRun.peakPowerRpm)
+        put("totalMassKg", newRun.totalVehicleMassKg)
+      }.toString()
+
+      val revisionEntity = TestRevisionEntity(
+        revisionId = UUID.randomUUID().toString(),
+        testResultId = newId,
+        revisionNumber = 2,
+        createdAt = currentIsoUtc(),
+        reason = "Nova versão derivada da passagem ${originalRun.id}",
+        note = note?.ifBlank { null },
+        previousConfigurationJson = previousConfigJson,
+        correctedConfigurationJson = correctedConfigJson,
+        previousCalculatedResultJson = previousCalcJson,
+        correctedCalculatedResultJson = correctedCalcJson
+      )
+
+      val newTestEntity = mapRunResultToTestEntity(newRun, status = "completed")
+
+      database.withTransaction {
+        testDao.insertTest(newTestEntity)
+        testRevisionDao.insertRevision(revisionEntity)
+        if (newRun.samples.isNotEmpty()) {
+          val sampleEntities = newRun.samples.mapIndexed { idx, s ->
+            mapRunSampleToEntity(s, newId, idx)
+          }
+          testSampleDao.insertSamples(sampleEntities)
+        }
+      }
+
+      Log.i(TAG, "[DynoStorage] Nova versão salva com sucesso: $newId (original: ${originalRun.id})")
+      Result.success(newRun)
+    } catch (e: Exception) {
+      Log.e(TAG, "[DynoStorage] Não foi possível salvar a nova versão: ${e.message}", e)
+      Result.failure(Exception("Não foi possível salvar a correção.", e))
+    }
+  }
+
+  fun saveAsNewVersion(originalRun: RunResult, correctedRun: RunResult, note: String? = null): Boolean {
+    return runBlocking(Dispatchers.IO) {
+      saveAsNewVersionSuspending(originalRun, correctedRun, note).isSuccess
+    }
+  }
+
+  /**
+   * Busca as revisões salvas de uma passagem para exibir no histórico ou "VER CONFIGURAÇÃO ORIGINAL".
+   */
+  suspend fun getRevisionsForTest(testResultId: String): List<TestResultRevision> = withContext(Dispatchers.IO) {
+    try {
+      testRevisionDao.getRevisionsForTest(testResultId).map { entity ->
+        TestResultRevision(
+          revisionId = entity.revisionId,
+          testResultId = entity.testResultId,
+          revisionNumber = entity.revisionNumber,
+          createdAt = entity.createdAt,
+          reason = entity.reason,
+          note = entity.note,
+          previousConfigurationJson = entity.previousConfigurationJson,
+          correctedConfigurationJson = entity.correctedConfigurationJson,
+          previousCalculatedResultJson = entity.previousCalculatedResultJson,
+          correctedCalculatedResultJson = entity.correctedCalculatedResultJson
+        )
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "[DynoStorage] Erro ao buscar revisões para $testResultId: ${e.message}", e)
+      emptyList()
+    }
+  }
+
+  /**
    * Teste de armazenamento obrigatório para diagnóstico (Modo Dev).
    * 1. Cria um teste de teste
    * 2. Salva 10 amostras
@@ -477,7 +671,19 @@ class RunResultRepository(context: Context) {
     var passengerCount = 0
     var passengerWeight = 0f
     var additionalWeight = 0f
+    var soundSystemWeight = 0f
+    var cngWeight = 0f
     var fuelAdjustment = 0f
+    var tireWidth = 195
+    var tireAspect = 55
+    var rimInches = 15
+    var isRecalculated = false
+    var revisionNumber = 1
+    var parentRunId: String? = null
+    var recalculationReason: String? = null
+    var recalculationNote: String? = null
+    var previousConfigJson: String? = null
+    var previousCalcJson: String? = null
     var gpsDeltaV = 0f
     var sensorDeltaV = 0f
     var normFactor = 1.0f
@@ -556,7 +762,19 @@ class RunResultRepository(context: Context) {
         passengerCount = snapObj.optInt("passengerCount", 0)
         passengerWeight = snapObj.optDouble("passengerWeightKg", 0.0).toFloat()
         additionalWeight = snapObj.optDouble("additionalWeightKg", 0.0).toFloat()
+        soundSystemWeight = snapObj.optDouble("soundSystemWeightKg", 0.0).toFloat()
+        cngWeight = snapObj.optDouble("cngWeightKg", 0.0).toFloat()
         fuelAdjustment = snapObj.optDouble("fuelAdjustmentKg", 0.0).toFloat()
+        tireWidth = snapObj.optInt("tireWidthMm", 195)
+        tireAspect = snapObj.optInt("tireAspectRatio", 55)
+        rimInches = snapObj.optInt("rimInches", snapObj.optInt("wheelDiameterInches", 15))
+        isRecalculated = snapObj.optBoolean("isRecalculated", false)
+        revisionNumber = snapObj.optInt("revisionNumber", 1)
+        parentRunId = snapObj.optString("parentRunId", "").ifBlank { null }
+        recalculationReason = snapObj.optString("recalculationReason", "").ifBlank { null }
+        recalculationNote = snapObj.optString("recalculationNote", "").ifBlank { null }
+        previousConfigJson = snapObj.optString("previousConfigurationJson", "").ifBlank { null }
+        previousCalcJson = snapObj.optString("previousCalculatedResultJson", "").ifBlank { null }
         gpsDeltaV = snapObj.optDouble("gpsDeltaVMps", 0.0).toFloat()
         sensorDeltaV = snapObj.optDouble("sensorDeltaVMps", 0.0).toFloat()
         normFactor = snapObj.optDouble("normalizationFactor", 1.0).toFloat()
@@ -662,7 +880,19 @@ class RunResultRepository(context: Context) {
       passengerCount = passengerCount,
       passengerWeightKg = passengerWeight,
       additionalWeightKg = additionalWeight,
+      soundSystemWeightKg = soundSystemWeight,
+      cngWeightKg = cngWeight,
       fuelAdjustmentKg = fuelAdjustment,
+      tireWidthMm = tireWidth,
+      tireAspectRatio = tireAspect,
+      rimInches = rimInches,
+      isRecalculated = isRecalculated,
+      revisionNumber = revisionNumber,
+      parentRunId = parentRunId,
+      recalculationReason = recalculationReason,
+      recalculationNote = recalculationNote,
+      previousConfigurationJson = previousConfigJson,
+      previousCalculatedResultJson = previousCalcJson,
       drivetrainLossPercent = drivetrainLoss,
       estimatedMarginPercent = if (isPreliminary) 25f else 10f,
       gearUsed = gearUsed,
@@ -790,7 +1020,19 @@ class RunResultRepository(context: Context) {
       obj.put("passengerCount", r.passengerCount)
       obj.put("passengerWeightKg", r.passengerWeightKg.safeFinite(0.0))
       obj.put("additionalWeightKg", r.additionalWeightKg.safeFinite(0.0))
+      obj.put("soundSystemWeightKg", r.soundSystemWeightKg.safeFinite(0.0))
+      obj.put("cngWeightKg", r.cngWeightKg.safeFinite(0.0))
       obj.put("fuelAdjustmentKg", r.fuelAdjustmentKg.safeFinite(0.0))
+      obj.put("tireWidthMm", r.tireWidthMm)
+      obj.put("tireAspectRatio", r.tireAspectRatio)
+      obj.put("rimInches", r.rimInches)
+      obj.put("isRecalculated", r.isRecalculated)
+      obj.put("revisionNumber", r.revisionNumber)
+      r.parentRunId?.let { obj.put("parentRunId", it) }
+      r.recalculationReason?.let { obj.put("recalculationReason", it) }
+      r.recalculationNote?.let { obj.put("recalculationNote", it) }
+      r.previousConfigurationJson?.let { obj.put("previousConfigurationJson", it) }
+      r.previousCalculatedResultJson?.let { obj.put("previousCalculatedResultJson", it) }
       obj.put("gearUsed", r.gearUsed)
       obj.put("gearIndex", r.gearIndexUsed)
       obj.put("gearRatio", r.gearRatioUsed.safeFinite(2.14))

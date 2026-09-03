@@ -704,7 +704,7 @@ object VehicleCalculations {
 
   /**
    * Recalcula os resultados de uma medição a partir de correções em seus parâmetros de cadastro
-   * (Seção 37: "Corrigir dados da passagem")
+   * (Seção 37: "Corrigir dados da passagem", centralizado via DynoRecalculationEngine).
    */
   fun recalculateRunResult(
     run: RunResult,
@@ -719,155 +719,24 @@ object VehicleCalculations {
     correctedFrontalAreaM2: Float,
     correctedCrr: Float
   ): RunResult {
-    val tireCalc = calculateTireDimensions(
-      widthMm = correctedTireWidthMm,
-      aspectRatio = correctedTireAspectRatio,
-      rimInches = correctedRimInches
-    )
+    val baseConfig = DynoRecalculationEngine.extractConfigFromRun(run)
+    val accessoriesWeight = (baseConfig.driverWeightKg + baseConfig.effectivePassengerWeightKg +
+      baseConfig.cargoWeightKg + baseConfig.soundSystemWeightKg + baseConfig.cngWeightKg + baseConfig.fuelWeightKg)
+    val curbWeight = (correctedTotalMassKg - accessoriesWeight).coerceAtLeast(100f)
 
-    val rollForce = calculateRollingResistanceForce(correctedTotalMassKg, correctedCrr)
-    val slopeForce = calculateSlopeForce(correctedTotalMassKg, run.slopePercentUsed)
-    val efficiency = (1.0f - (correctedLossPercent / 100f)).coerceIn(0.5f, 1.0f)
-
-    // Cálculo da janela válida de aceleração GPS para ancoramento
-    val startGps = if (run.officialStartSpeedKmh > 0f) run.officialStartSpeedKmh else run.startSpeedKmh
-    val maxGps = if (run.officialMaxSpeedKmh > 0f) run.officialMaxSpeedKmh else run.maximumGpsSpeedKmh
-    val gpsDeltaVMps = (maxGps - startGps).coerceAtLeast(0f) / 3.6f
-
-    val validAccelerationSamples = run.samples.filter {
-      it.isValid && it.filteredSpeedKmh >= (startGps - 2f) && it.filteredSpeedKmh <= (maxGps + 1f)
-    }
-    val samplePool = if (validAccelerationSamples.isNotEmpty()) validAccelerationSamples else run.samples.filter { it.isValid }
-
-    val rawSensorAccels = samplePool.map {
-      if (it.rawAccelerationMps2 > 0.001f) it.rawAccelerationMps2
-      else if (it.sensorAccelerationMps2 > 0.001f) it.sensorAccelerationMps2
-      else it.finalAccelerationMps2
-    }
-    val rawAvgG = if (rawSensorAccels.isNotEmpty()) {
-      rawSensorAccels.average().toFloat() / STANDARD_GRAVITY
-    } else if (run.rawAverageLongitudinalG > 0f) run.rawAverageLongitudinalG else 0.18f
-
-    val elapsedSec = if (run.elapsedSeconds > 0.1f) run.elapsedSeconds else 9.01f
-    val sensorDeltaVMps = if (run.sensorDeltaVMps > 0.1f) {
-      run.sensorDeltaVMps
-    } else {
-      rawAvgG * STANDARD_GRAVITY * elapsedSec
-    }
-
-    val normalizationFactor = if (sensorDeltaVMps > 0.1f && gpsDeltaVMps > 0.1f) {
-      (gpsDeltaVMps / sensorDeltaVMps).coerceIn(0.50f, 1.50f)
-    } else 1.0f
-
-    val anchoredAvgG = rawAvgG * normalizationFactor
-
-    val updatedSamples = run.samples.map { sample ->
-      val rawA = if (sample.rawAccelerationMps2 > 0.001f) sample.rawAccelerationMps2
-                 else if (sample.sensorAccelerationMps2 > 0.001f) sample.sensorAccelerationMps2
-                 else sample.finalAccelerationMps2
-      val aMps2 = rawA * normalizationFactor
-      val g = aMps2 / STANDARD_GRAVITY
-      val vMps = sample.filteredSpeedMs
-      val fAero = calculateAerodynamicForce(vMps, correctedCd, correctedFrontalAreaM2, run.airDensityUsed)
-      val fAccel = calculateAccelerationForce(correctedTotalMassKg, kotlin.math.max(0f, aMps2))
-      val fTractive = calculateTotalTractiveForce(fAccel, rollForce, fAero, slopeForce)
-      val wWatts = calculateWheelPowerWatts(fTractive, vMps)
-      val sampleWheelCv = convertWattsToCv(wWatts)
-      val sampleEngineCv = if (efficiency > 0f) (sampleWheelCv / efficiency).coerceAtLeast(0f) else sampleWheelCv
-
-      val sampleRpm = calculateRpmFromSpeed(vMps, tireCalc.circumferenceM, correctedGearRatio, correctedFinalDrive)?.toInt()
-      val sampleEngineTorqueKgfm = if (sampleRpm != null && sampleRpm > 500) {
-        calculateTorqueKgfm(sampleEngineCv, sampleRpm.toFloat()) ?: 0f
-      } else 0f
-      val sampleWheelTorqueKgfm = if (sampleRpm != null && sampleRpm > 500) {
-        calculateTorqueKgfm(sampleWheelCv, sampleRpm.toFloat()) ?: 0f
-      } else 0f
-
-      sample.copy(
-        rawAccelerationMps2 = rawA,
-        anchoredAccelerationMps2 = aMps2,
-        normalizationFactorApplied = normalizationFactor,
-        finalAccelerationMps2 = aMps2,
-        longitudinalG = g,
-        accelerationForceN = fAccel,
-        aerodynamicForceN = fAero,
-        rollingForceN = rollForce,
-        slopeForceN = slopeForce,
-        totalForceN = fTractive,
-        wheelPowerWatts = wWatts,
-        wheelPowerKw = wWatts / 1000f,
-        wheelPowerCv = sampleWheelCv,
-        enginePowerCv = sampleEngineCv,
-        wheelTorqueKgfm = sampleWheelTorqueKgfm,
-        engineTorqueKgfm = sampleEngineTorqueKgfm,
-        wheelTorqueNm = sampleWheelTorqueKgfm * STANDARD_GRAVITY,
-        engineTorqueNm = sampleEngineTorqueKgfm * STANDARD_GRAVITY,
-        engineRpm = sampleRpm
-      )
-    }
-
-    val sampleRpms = updatedSamples.mapNotNull { it.engineRpm }.filter { it > 500 }
-    val sampleRpmSpan = if (sampleRpms.isNotEmpty()) ((sampleRpms.maxOrNull() ?: 0) - (sampleRpms.minOrNull() ?: 0)) else null
-    val isRpmValid = (sampleRpms.size >= 6 && sampleRpmSpan != null && sampleRpmSpan >= 800)
-
-    val peaks = findSustainedPeaks(updatedSamples, isRpmValid = isRpmValid)
-
-    // Reavaliar qualidade com divergência de sensores
-    val qualityEval = classifyRunQuality(
-      speedGainKmh = (maxGps - startGps).coerceAtLeast(0f),
-      validGpsLocationsCount = run.validGpsLocationsCount,
-      elapsedSec = elapsedSec,
-      lastGpsAccuracyMeters = run.gpsAccuracyMeters,
-      avgSyncDiffKmh = run.averageSpeedDifferenceKmh,
-      rejectionRatio = if (run.totalSamples > 0) run.rejectedSamples.toFloat() / run.totalSamples else 0.05f,
-      finishReason = FinishReason.fromCode(run.finishReason),
-      isPhoneStable = true,
-      gearShiftDetected = false,
-      finalGpsSpeedKmh = maxGps,
-      startGpsSpeedKmh = startGps,
-      rpmSpan = sampleRpmSpan,
-      gpsFrozen = run.gpsFrozen,
-      maxIntegratedSpeedKmh = run.maxIntegratedSpeedKmh,
-      maxGpsSpeedKmh = maxGps,
-      sensorDeltaVMps = sensorDeltaVMps,
-      gpsDeltaVMps = gpsDeltaVMps
-    )
-
-    return run.copy(
-      totalVehicleMassKg = correctedTotalMassKg,
-      gearRatioUsed = correctedGearRatio,
-      finalDriveUsed = correctedFinalDrive,
+    val config = baseConfig.copy(
+      curbWeightKg = curbWeight,
+      gearRatio = correctedGearRatio,
+      finalDriveRatio = correctedFinalDrive,
+      tireWidthMm = correctedTireWidthMm,
+      tireAspectRatio = correctedTireAspectRatio,
+      rimInches = correctedRimInches,
       drivetrainLossPercent = correctedLossPercent,
-      cdUsed = correctedCd,
-      frontalAreaUsed = correctedFrontalAreaM2,
-      crrUsed = correctedCrr,
-      gpsDeltaVMps = gpsDeltaVMps,
-      sensorDeltaVMps = sensorDeltaVMps,
-      normalizationFactor = normalizationFactor,
-      rawAverageLongitudinalG = rawAvgG,
-      anchoredAverageLongitudinalG = anchoredAvgG,
-      wheelPowerCv = peaks.peakWheelPowerCv,
-      enginePowerCv = peaks.peakEnginePowerCv,
-      wheelPowerKw = peaks.peakWheelPowerCv * 0.73549875f,
-      enginePowerKw = peaks.peakEnginePowerCv * 0.73549875f,
-      estimatedPowerCv = peaks.peakEnginePowerCv,
-      wheelTorqueKgfm = peaks.wheelTorqueKgfm,
-      engineTorqueKgfm = peaks.engineTorqueKgfm,
-      wheelTorqueNm = peaks.wheelTorqueKgfm * STANDARD_GRAVITY,
-      engineTorqueNm = peaks.engineTorqueKgfm * STANDARD_GRAVITY,
-      estimatedTorqueKgfm = peaks.engineTorqueKgfm,
-      peakPowerRpm = peaks.peakPowerRpm,
-      peakTorqueRpm = peaks.peakTorqueRpm,
-      peakPowerSpeedKmh = peaks.peakPowerSpeedKmh,
-      peakTorqueSpeedKmh = peaks.peakTorqueSpeedKmh,
-      peakLongitudinalG = peaks.peakLongitudinalG,
-      averageLongitudinalG = anchoredAvgG,
-      quality = qualityEval.quality,
-      confidenceLevel = qualityEval.confidenceLevel,
-      estimatedMarginPercent = qualityEval.marginPercent,
-      invalidationReason = qualityEval.invalidationReason,
-      isPreliminary = qualityEval.isPreliminary,
-      samples = updatedSamples
+      cd = correctedCd,
+      frontalAreaM2 = correctedFrontalAreaM2,
+      crr = correctedCrr
     )
+
+    return DynoRecalculationEngine.recalculate(run.samples, config, run).recalculatedRun
   }
 }

@@ -117,39 +117,17 @@ fun AccuracyGuideScreen(
           horizontalAlignment = Alignment.CenterHorizontally,
           modifier = Modifier.fillMaxWidth()
         ) {
-          Surface(
-            modifier = Modifier.size(80.dp),
-            shape = RoundedCornerShape(22.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            tonalElevation = 3.dp,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
-          ) {
-            Box(
-              modifier = Modifier.fillMaxSize(),
-              contentAlignment = Alignment.Center
-            ) {
-              Image(
-                painter = painterResource(id = R.drawable.ic_dyno_logo),
-                contentDescription = "Logo Dyno Lite",
-                modifier = Modifier
-                  .size(68.dp)
-                  .clip(RoundedCornerShape(16.dp)),
-                contentScale = ContentScale.Fit
-              )
-            }
-          }
+          // Logo Oficial DYNO LITE institucional
+          Image(
+            painter = painterResource(id = R.drawable.dyno_horizontal_logo),
+            contentDescription = "Logo DYNO LITE",
+            modifier = Modifier
+              .fillMaxWidth(0.85f)
+              .height(56.dp),
+            contentScale = ContentScale.Fit
+          )
 
           Spacer(modifier = Modifier.height(12.dp))
-
-          Text(
-            text = "DYNO LITE",
-            style = MaterialTheme.typography.titleLarge.copy(
-              fontWeight = FontWeight.Bold,
-              letterSpacing = 1.sp,
-              fontSize = 22.sp
-            ),
-            color = MaterialTheme.colorScheme.onSurface
-          )
 
           Text(
             text = "Descubra o desempenho estimado do seu carro",

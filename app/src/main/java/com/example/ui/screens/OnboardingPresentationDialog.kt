@@ -89,42 +89,21 @@ fun OnboardingPresentationDialog(
         verticalArrangement = Arrangement.spacedBy(16.dp)
       ) {
         // Logo and Header
-        Surface(
-          modifier = Modifier.size(72.dp),
-          shape = RoundedCornerShape(20.dp),
-          color = MaterialTheme.colorScheme.surfaceVariant,
-          tonalElevation = 2.dp,
-          border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
-        ) {
-          Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-          ) {
-            Image(
-              painter = painterResource(id = R.drawable.ic_dyno_logo),
-              contentDescription = "Logo Dyno Lite",
-              modifier = Modifier
-                .size(60.dp)
-                .clip(RoundedCornerShape(14.dp)),
-              contentScale = ContentScale.Fit
-            )
-          }
-        }
+        // Logo Oficial DYNO LITE em versão ampliada na tela de abertura
+        Image(
+          painter = painterResource(id = R.drawable.dyno_horizontal_logo),
+          contentDescription = "Logo DYNO LITE",
+          modifier = Modifier
+            .fillMaxWidth(0.85f)
+            .height(56.dp)
+            .testTag("onboarding_title"),
+          contentScale = ContentScale.Fit
+        )
 
         Column(
           horizontalAlignment = Alignment.CenterHorizontally,
           verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-          Text(
-            text = "DYNO LITE",
-            style = MaterialTheme.typography.titleLarge.copy(
-              fontWeight = FontWeight.Bold,
-              letterSpacing = 1.sp,
-              fontSize = 22.sp
-            ),
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.testTag("onboarding_title")
-          )
           Text(
             text = "Descubra o desempenho estimado do seu carro",
             style = MaterialTheme.typography.bodyMedium.copy(

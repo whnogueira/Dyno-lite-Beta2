@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="360dp"
+    android:height="90dp"
+    android:viewportWidth="360"
+    android:viewportHeight="90">
+
+    <!-- Group: Left Emblem -->
+    <group
+        android:translateX="-5"
+        android:translateY="-9"
+        android:scaleX="0.8"
+        android:scaleY="0.8">
+
+        <!-- Speed streaks on left -->
+        <path
+            android:pathData="M 24,51 L 37,51 L 35,55 L 22,55 Z"
+            android:fillColor="#00E5FF" />
+        <path
+            android:pathData="M 27,58 L 40,58 L 38,62 L 25,62 Z"
+            android:fillColor="#00B0FF" />
+        <path
+            android:pathData="M 31,65 L 44,65 L 42,69 L 29,69 Z"
+            android:fillColor="#1565C0" />
+
+        <!-- Outer D Silhouette -->
+        <path
+            android:pathData="M 36,32 L 60,32 C 77,32 86,42 86,54 C 86,66 77,76 60,76 L 36,76 C 34,76 33,74 34,72 L 37,66 L 47,66 C 56,66 68,61 68,54 C 68,46 56,42 47,42 L 37,42 L 34,36 C 33,34 34,32 36,32 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:startX="36"
+                    android:startY="32"
+                    android:endX="86"
+                    android:endY="76"
+                    android:type="linear">
+                    <item android:color="#00F0FF" android:offset="0.0" />
+                    <item android:color="#0091EA" android:offset="0.5" />
+                    <item android:color="#1565C0" android:offset="1.0" />
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- Inner Dark Gauge Face -->
+        <path
+            android:pathData="M 54,54 m -18,0 a 18,18 0 1,0 36,0 a 18,18 0 1,0 -36,0"
+            android:fillColor="#050E22" />
+
+        <!-- Normal Gauge Arc -->
+        <path
+            android:pathData="M 39,64 A 17,17 0 0,1 54,37"
+            android:strokeWidth="3.2"
+            android:strokeColor="#00E5FF"
+            android:strokeLineCap="round"
+            android:fillColor="#00000000" />
+
+        <!-- Mid Range Arc -->
+        <path
+            android:pathData="M 54,37 A 17,17 0 0,1 66,42"
+            android:strokeWidth="3.2"
+            android:strokeColor="#FF8800"
+            android:strokeLineCap="round"
+            android:fillColor="#00000000" />
+
+        <!-- Redline Zone Arc -->
+        <path
+            android:pathData="M 66,42 A 17,17 0 0,1 70,51"
+            android:strokeWidth="3.2"
+            android:strokeColor="#FF1E42"
+            android:strokeLineCap="round"
+            android:fillColor="#00000000" />
+
+        <!-- Pivot -->
+        <path
+            android:pathData="M 54,54 m -5,0 a 5,5 0 1,0 10,0 a 5,5 0 1,0 -10,0"
+            android:fillColor="#0B1630"
+            android:strokeColor="#FF5500"
+            android:strokeWidth="1.2" />
+
+        <!-- Pointer / Needle pointing into redline -->
+        <path
+            android:pathData="M 54,54 L 68,40"
+            android:strokeWidth="2.8"
+            android:strokeColor="#FF8A3D"
+            android:strokeLineCap="round" />
+
+        <!-- Center Hub Dot -->
+        <path
+            android:pathData="M 54,54 m -2.2,0 a 2.2,2.2 0 1,0 4.4,0 a 2.2,2.2 0 1,0 -4.4,0"
+            android:fillColor="#FF5500" />
+    </group>
+
+    <!-- Word 1: DYNO (Letter D) -->
+    <path
+        android:pathData="M 82,62 L 91,28 L 105,28 C 117,28 124,35 120,47 C 117,59 108,62 97,62 Z M 95,54 L 100,36 L 104,36 C 110,36 113,39 112,45 C 111,51 106,54 101,54 Z"
+        android:strokeColor="#050B18"
+        android:strokeWidth="3"
+        android:fillColor="#FFFFFF" />
+
+    <!-- Letter Y -->
+    <path
+        android:pathData="M 124,28 L 132,45 L 140,28 L 149,28 L 134,51 L 131,62 L 122,62 L 125,51 L 115,28 Z"
+        android:strokeColor="#050B18"
+        android:strokeWidth="3"
+        android:fillColor="#FFFFFF" />
+
+    <!-- Letter N -->
+    <path
+        android:pathData="M 148,62 L 157,28 L 166,28 L 176,49 L 182,28 L 190,28 L 181,62 L 172,62 L 163,41 L 157,62 Z"
+        android:strokeColor="#050B18"
+        android:strokeWidth="3"
+        android:fillColor="#FFFFFF" />
+
+    <!-- Letter O -->
+    <path
+        android:pathData="M 200,63 C 189,63 184,54 187,43 C 190,32 201,27 212,27 C 223,27 228,36 225,47 C 222,58 211,63 200,63 Z M 203,55 C 209,55 214,51 216,45 C 217,39 214,35 208,35 C 202,35 197,39 196,45 C 194,51 197,55 203,55 Z"
+        android:strokeColor="#050B18"
+        android:strokeWidth="3"
+        android:fillColor="#FFFFFF" />
+
+    <!-- Word 2: LITE (Letter L) -->
+    <path
+        android:pathData="M 238,62 L 247,28 L 256,28 L 250,54 L 268,54 L 266,62 Z"
+        android:strokeColor="#050B18"
+        android:strokeWidth="3"
+        android:fillColor="#00D8FF" />
+
+    <!-- Letter I -->
+    <path
+        android:pathData="M 271,62 L 280,28 L 289,28 L 280,62 Z"
+        android:strokeColor="#050B18"
+        android:strokeWidth="3"
+        android:fillColor="#00D8FF" />
+
+    <!-- Letter T -->
+    <path
+        android:pathData="M 288,36 L 290,28 L 322,28 L 320,36 L 309,36 L 302,62 L 293,62 L 300,36 Z"
+        android:strokeColor="#050B18"
+        android:strokeWidth="3"
+        android:fillColor="#00D8FF" />
+
+    <!-- Letter E -->
+    <path
+        android:pathData="M 321,62 L 330,28 L 354,28 L 352,36 L 337,36 L 335,42 L 348,42 L 346,49 L 333,49 L 331,54 L 348,54 L 346,62 Z"
+        android:strokeColor="#050B18"
+        android:strokeWidth="3"
+        android:fillColor="#00D8FF" />
+
+</vector>
