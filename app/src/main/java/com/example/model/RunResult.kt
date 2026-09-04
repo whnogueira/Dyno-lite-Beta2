@@ -9,7 +9,10 @@ enum class FinishReason(val code: String, val displayName: String) {
   TARGET_REACHED("TARGET_REACHED", "Velocidade/RPM alvo atingida"),
   GPS_LOST("GPS_LOST", "Sinal GPS perdido"),
   TIMEOUT("TIMEOUT", "Tempo máximo atingido"),
-  CANCELLED("CANCELLED", "Passagem cancelada");
+  CANCELLED("CANCELLED", "Passagem cancelada"),
+  GEAR_SHIFT("GEAR_SHIFT", "Troca de marcha detectada. A passagem foi encerrada e poderá ser considerada incompleta."),
+  CLUTCH_DISENGAGED("CLUTCH_DISENGAGED", "Acionamento de embreagem detectado"),
+  PREMATURE_TERMINATION("PREMATURE_TERMINATION", "Aceleração interrompida antes da faixa necessária");
 
   companion object {
     fun fromCode(code: String): FinishReason {

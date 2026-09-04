@@ -27,7 +27,7 @@ import org.junit.Test
 class DynoPassValidationTest {
 
   @Test
-  fun testScenario1_SpeedGain6_4Kmh_IsInsufficientData() {
+  fun testScenario1_SpeedGain6_4Kmh_IsIncompleteRun() {
     // 1. Passagem com velocidade máxima 47,4 km/h, ganho 6,4 km/h, 14s, 20 locations, 227 amostras
     val samples = (0 until 227).map { i ->
       val speed = 41.0f + (6.4f * (i / 226f))
@@ -60,10 +60,11 @@ class DynoPassValidationTest {
       isSpeedDecrease = false
     )
 
-    assertEquals("DADOS INSUFICIENTES", eval.quality)
+    assertEquals("PASSAGEM INCOMPLETA", eval.quality)
     assertEquals(25.0f, eval.marginPercent, 0.01f)
     assertFalse(eval.isEligibleForComparison)
     assertTrue(eval.isPreliminary)
+    assertEquals("A aceleração terminou antes da faixa necessária para estimar a potência máxima.", eval.invalidationReason)
 
     // Curva por RPM não deve ser gerada sem ganho mínimo (>= 15 km/h)
     val curveType = VehicleCalculations.evaluateCurveEligibility(
@@ -78,14 +79,14 @@ class DynoPassValidationTest {
   }
 
   @Test
-  fun testScenario2_SpeedGain18Kmh_7Locations_IsRegular() {
-    // 2. Passagem com ganho de 18 km/h e 7 locations
+  fun testScenario2_SpeedGain30Kmh_FewGpsUpdates_IsInsufficientData() {
+    // 2. Passagem com ganho de 30 km/h mas apenas 6 atualizações de GPS (< 8)
     val eval = VehicleCalculations.classifyRunQuality(
-      speedGainKmh = 18.0f,
-      maxSpeedKmh = 78.0f,
+      speedGainKmh = 30.0f,
+      maxSpeedKmh = 90.0f,
       startSpeedKmh = 60.0f,
-      validGpsCount = 7,
-      elapsedSeconds = 6.5f,
+      validGpsCount = 6,
+      elapsedSeconds = 5.5f,
       gpsAccuracy = 4.0f,
       isMountedStable = true,
       hasGearShift = false,
@@ -96,10 +97,10 @@ class DynoPassValidationTest {
       isSpeedDecrease = false
     )
 
-    assertEquals("REGULAR", eval.quality)
-    assertEquals(15.0f, eval.marginPercent, 0.01f)
-    assertTrue(eval.isEligibleForComparison)
-    assertFalse(eval.isPreliminary)
+    assertEquals("DADOS INSUFICIENTES", eval.quality)
+    assertEquals(25.0f, eval.marginPercent, 0.01f)
+    assertFalse(eval.isEligibleForComparison)
+    assertTrue(eval.isPreliminary)
   }
 
   @Test
@@ -128,7 +129,7 @@ class DynoPassValidationTest {
   }
 
   @Test
-  fun testScenario4_GearShiftDetected_IsInvalid() {
+  fun testScenario4_GearShiftDetected_IsIncomplete() {
     // 4. Passagem com troca de marcha detectada
     val eval = VehicleCalculations.classifyRunQuality(
       speedGainKmh = 30.0f,
@@ -146,9 +147,39 @@ class DynoPassValidationTest {
       isSpeedDecrease = false
     )
 
-    assertEquals("INVÁLIDA", eval.quality)
+    assertEquals("PASSAGEM INCOMPLETA", eval.quality)
     assertFalse(eval.isEligibleForComparison)
+    assertTrue(eval.isPreliminary)
     assertTrue(eval.invalidationReason?.contains("Troca de marcha") == true)
+  }
+
+  @Test
+  fun testScenario7_ShortRunExample_IsIncompleteNotDivergent() {
+    // 7. Passagem curta especificada no requisito:
+    // início: 45,0 km/h, máxima: 65,5 km/h, ganho: 20,6 km/h, duração: 7,01s, 7 atualizações GPS, RPM: 3115 a 5067
+    val eval = VehicleCalculations.classifyRunQuality(
+      speedGainKmh = 20.6f,
+      maxSpeedKmh = 65.5f,
+      startSpeedKmh = 45.0f,
+      validGpsCount = 7,
+      elapsedSeconds = 7.01f,
+      gpsAccuracy = 4.0f,
+      isMountedStable = true,
+      hasGearShift = false,
+      hasExcessiveVibration = false,
+      hasBraking = false,
+      hasLossOfGps = false,
+      isReverseMovement = false,
+      isSpeedDecrease = false,
+      rpmSpan = 1952,
+      sensorDeltaVMps = 7.5f,
+      gpsDeltaVMps = 5.72f // Mesmo com divergência aparente de aceleração, prioridade 1 (incompleta) deve prevalecer
+    )
+
+    assertEquals("PASSAGEM INCOMPLETA", eval.quality)
+    assertEquals("A aceleração terminou antes da faixa necessária para estimar a potência máxima.", eval.invalidationReason)
+    assertFalse(eval.isEligibleForComparison)
+    assertTrue(eval.isPreliminary)
   }
 
   @Test

@@ -50,13 +50,13 @@ fun DynoLogoSymbol(
   Box(
     modifier = modifier
       .size(size)
-      .semantics { contentDescription = "Símbolo Dyno Lite" }
+      .semantics { contentDescription = "Símbolo DYNO LITE" }
       .testTag("dyno_logo_symbol"),
     contentAlignment = Alignment.Center
   ) {
     Image(
       painter = painterResource(id = R.drawable.ic_dyno_symbol),
-      contentDescription = "Símbolo Dyno Lite",
+      contentDescription = "Símbolo DYNO LITE",
       modifier = Modifier.size(size),
       contentScale = ContentScale.Fit,
       colorFilter = if (isMonochrome) ColorFilter.tint(monochromeColor) else null
@@ -80,7 +80,7 @@ fun DynoHorizontalLogo(
 ) {
   Image(
     painter = painterResource(id = R.drawable.dyno_horizontal_logo),
-    contentDescription = "DYNO LITE Logo",
+    contentDescription = "DYNO LITE",
     modifier = modifier
       .height(height)
       .aspectRatio(1200f / 340f, matchHeightConstraintsFirst = true)

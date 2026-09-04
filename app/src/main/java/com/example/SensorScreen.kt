@@ -2356,7 +2356,7 @@ private fun DynoRunCard(
                   modifier = Modifier.size(18.dp)
                 )
                 Text(
-                  text = "O teste começa automaticamente ao atingir ${startSpeedTriggerKmh.toInt()} km/h usando o GPS real.",
+                  text = "A medição começa pela velocidade medida pelo GPS ao atingir ${startSpeedTriggerKmh.toInt()} km/h.",
                   style = MaterialTheme.typography.bodySmall.copy(
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium
@@ -2406,7 +2406,7 @@ private fun DynoRunCard(
                   }
 
                   Text(
-                    text = "Acelere suavemente. O teste começará automaticamente com o GPS real ao atingir ${startSpeedTriggerKmh.toInt()} km/h.",
+                    text = "Acelere suavemente. A medição começa pela velocidade medida pelo GPS ao atingir ${startSpeedTriggerKmh.toInt()} km/h.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                   )

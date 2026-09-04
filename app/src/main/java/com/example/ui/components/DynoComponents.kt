@@ -778,7 +778,7 @@ fun DynoTopBar(
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-          DynoHorizontalLogo(height = 24.dp)
+          DynoHorizontalLogo(height = 36.dp)
           if (title.isNotBlank() && !title.equals("DYNO LITE", ignoreCase = true)) {
             Text(
               text = title,

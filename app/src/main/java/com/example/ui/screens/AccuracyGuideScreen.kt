@@ -120,7 +120,7 @@ fun AccuracyGuideScreen(
           // Logo Oficial DYNO LITE institucional
           Image(
             painter = painterResource(id = R.drawable.dyno_horizontal_logo),
-            contentDescription = "Logo DYNO LITE",
+            contentDescription = "DYNO LITE",
             modifier = Modifier
               .fillMaxWidth(0.85f)
               .height(56.dp),
@@ -170,11 +170,22 @@ fun AccuracyGuideScreen(
                 color = MaterialTheme.colorScheme.error
               )
               Text(
-                text = "Prepare o teste antes de movimentar o veículo. Nunca opere o celular enquanto estiver dirigindo. Faça os testes sempre em locais planos, seguros e fechados ao trânsito público.",
-                style = MaterialTheme.typography.bodySmall.copy(
+                text = "Prepare o teste antes de movimentar o veículo.\nNunca mexa no celular dirigindo.",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 13.5.sp,
                   lineHeight = 18.sp
                 ),
                 color = MaterialTheme.colorScheme.onSurface
+              )
+              Text(
+                text = "Não é permitido iniciar configurações que exijam interação com o veículo em movimento.",
+                style = MaterialTheme.typography.bodySmall.copy(
+                  fontSize = 11.5.sp,
+                  lineHeight = 15.sp,
+                  fontWeight = FontWeight.Medium
+                ),
+                color = MaterialTheme.colorScheme.error
               )
             }
           }
@@ -202,7 +213,7 @@ fun AccuracyGuideScreen(
             )
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
               Text(
-                text = "SOBRE OS RESULTADOS",
+                text = "Antes do primeiro teste:",
                 style = MaterialTheme.typography.labelMedium.copy(
                   fontWeight = FontWeight.Bold,
                   letterSpacing = 0.5.sp
@@ -210,7 +221,7 @@ fun AccuracyGuideScreen(
                 color = MaterialTheme.colorScheme.primary
               )
               Text(
-                text = "Os resultados obtidos são estimativas baseadas na aceleração inercial e no GPS. Fatores como peso incorreto, inclinação da via, calibração instável e precisão do GPS podem influenciar a leitura.",
+                text = "Os resultados são estimativas e podem variar conforme o peso informado, a inclinação da pista, a calibração dos sensores e a precisão do GPS.",
                 style = MaterialTheme.typography.bodySmall.copy(
                   lineHeight = 18.sp
                 ),
@@ -235,47 +246,47 @@ fun AccuracyGuideScreen(
           stepNumber = "1",
           title = "Fixação firme do celular",
           icon = Icons.Outlined.PhoneAndroid,
-          description = "Coloque o aparelho em um suporte firme, na posição vertical (retrato), com a tela voltada para o motorista e a traseira apontada para a frente do carro. O suporte não deve vibrar ou soltar."
+          description = "Fixe o celular firmemente em um suporte, na posição indicada pela calibração."
         )
 
         // Step 2: Calibração
         GuideStepCard(
           stepNumber = "2",
-          title = "Calibre o zero com o carro parado",
+          title = "Calibre os sensores",
           icon = Icons.Outlined.Straighten,
-          description = "Com o celular preso no suporte, pare o carro completamente em piso plano e mantenha o motor funcionando em marcha lenta. Toque em 'Calibrar zero no suporte' para neutralizar a vibração e a inclinação."
+          description = "Com o veículo parado e o motor funcionando, calibre os sensores."
         )
 
-        // Step 3: Dados do veículo
+        // Step 3: Configuração do teste
         GuideStepCard(
           stepNumber = "3",
-          title = "Configuração do peso e pneu",
+          title = "Configuração do teste",
           icon = Icons.Outlined.Tune,
-          description = "Na Garagem, confira o peso do carro somando motorista, passageiros, combustível e bagagens. Verifique também as medidas corretas do pneu (ex: 185/65 R15) para máxima precisão."
+          description = "Selecione a marcha, a velocidade de início e confirme o peso total do teste."
         )
 
-        // Step 4: Iniciar com o carro parado
+        // Step 4: Preparar teste
         GuideStepCard(
           stepNumber = "4",
-          title = "Iniciar com o carro parado",
+          title = "Preparar teste com o veículo parado",
           icon = Icons.Outlined.Speed,
-          description = "Toque em 'INICIAR COM O CARRO PARADO'. O sistema entrará em modo preparado aguardando a aceleração. Não mexa mais no celular."
+          description = "Toque em “Preparar teste” ainda com o veículo parado. A medição começará automaticamente quando a velocidade selecionada for cruzada pelo GPS."
         )
 
-        // Step 5: Disparo automático e Aceleração total
+        // Step 5: Aceleração contínua e encerramento
         GuideStepCard(
           stepNumber = "5",
-          title = "Disparo automático na velocidade selecionada",
+          title = "Aceleração contínua e encerramento",
           icon = Icons.Filled.Speed,
-          description = "Engate a marcha do teste (recomendamos 3ª marcha), comece a acelerar suavemente abaixo da velocidade de disparo (40, 50 ou 60 km/h) e, ao cruzar o gatilho em aceleração total (WOT), o Dyno Lite inicia a integração automaticamente com a velocidade real do GPS."
+          description = "Acelere continuamente na mesma marcha. Ao aliviar o acelerador, o GPS confirmará a desaceleração e encerrará a passagem automaticamente."
         )
 
-        // Step 6: Finalização
+        // Step 6: Sem troca de marcha
         GuideStepCard(
           stepNumber = "6",
-          title = "Finalização automática na embreagem",
+          title = "Sem troca de marcha durante a medição",
           icon = Icons.Outlined.CheckCircle,
-          description = "Ao atingir o limite de rotação do motor, pise na embreagem ou tire o pé do acelerador. O Dyno Lite detecta a desaceleração longitudinal e finaliza a medição instantaneamente, gravando os dados."
+          description = "Não troque de marcha durante uma medição de potência. Se houver troca de marcha ou acionamento da embreagem, a passagem poderá ser marcada como incompleta."
         )
 
         Spacer(modifier = Modifier.height(8.dp))

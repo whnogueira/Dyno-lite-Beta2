@@ -758,7 +758,8 @@ fun ResultsScreen(
             // 3. CARTÕES DE POTÊNCIA, TORQUE E FORÇA G (ESTIMADOS)
             if (run.estimatedPowerCv > 0f || run.peakLongitudinalG > 0f) {
               val runSamples = remember(run.id) { runResultRepository.getOrderedRunSamples(run.id) }
-              val isInsufficient = run.quality == "DADOS INSUFICIENTES"
+              val isIncomplete = run.quality == "PASSAGEM INCOMPLETA"
+              val isInsufficient = run.quality == "DADOS INSUFICIENTES" || isIncomplete
 
               Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
@@ -778,12 +779,24 @@ fun ResultsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                       ) {
-                        Text("POTÊNCIA MOTOR", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.5.sp), color = Color(0xFF38BDF8))
-                        Text(if (isInsufficient) "preliminar" else "est.", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = if (isInsufficient) FontWeight.Bold else FontWeight.Normal), color = if (isInsufficient) Color(0xFFF59E0B) else MaterialTheme.colorScheme.onSurfaceVariant)
+                        val powerCardTitle = when {
+                          isIncomplete -> "PICO NESTA FAIXA"
+                          isInsufficient -> "POTÊNCIA (PRELIMINAR)"
+                          else -> "POTÊNCIA MOTOR"
+                        }
+                        val powerBadge = when {
+                          isIncomplete -> "incompleta"
+                          isInsufficient -> "preliminar"
+                          else -> "est."
+                        }
+                        Text(powerCardTitle, style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp), color = Color(0xFF38BDF8))
+                        Text(powerBadge, style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = if (isInsufficient) FontWeight.Bold else FontWeight.Normal), color = if (isInsufficient) Color(0xFFF59E0B) else MaterialTheme.colorScheme.onSurfaceVariant)
                       }
                       val pCv = if (run.enginePowerCv > 0f) run.enginePowerCv else run.estimatedPowerCv
                       Text(String.format(Locale.US, "%.1f cv", pCv), style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace), color = MaterialTheme.colorScheme.onSurface)
-                      if (isInsufficient) {
+                      if (isIncomplete) {
+                        Text("Faixa incompleta", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp, color = Color(0xFFF59E0B)))
+                      } else if (isInsufficient) {
                         Text("Faixa insuficiente", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp, color = Color(0xFFF59E0B)))
                       } else if (run.wheelPowerCv > 0f) {
                         Text(String.format(Locale.US, "Roda: %.1f cv", run.wheelPowerCv), style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -804,8 +817,18 @@ fun ResultsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                       ) {
-                        Text("TORQUE MOTOR", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.5.sp), color = Color(0xFFFB923C))
-                        Text(if (isInsufficient) "preliminar" else "est.", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        val torqueCardTitle = when {
+                          isIncomplete -> "TORQUE NESTA FAIXA"
+                          isInsufficient -> "TORQUE (PRELIMINAR)"
+                          else -> "TORQUE MOTOR"
+                        }
+                        val torqueBadge = when {
+                          isIncomplete -> "incompleta"
+                          isInsufficient -> "preliminar"
+                          else -> "est."
+                        }
+                        Text(torqueCardTitle, style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp), color = Color(0xFFFB923C))
+                        Text(torqueBadge, style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                       }
                       val tKgfm = if (run.engineTorqueKgfm > 0f) run.engineTorqueKgfm else run.estimatedTorqueKgfm
                       val hasValidTorque = !isInsufficient && tKgfm > 0f && (run.peakTorqueRpm ?: 0) > 500
@@ -816,7 +839,7 @@ fun ResultsScreen(
                         }
                       } else {
                         Text("Indisponível", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("RPM não confiável", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if (isIncomplete) "Faixa incompleta" else "RPM não confiável", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                       }
                     }
                   }
@@ -879,6 +902,7 @@ fun ResultsScreen(
                     val marginText = when (run.quality) {
                       "BOA" -> "Estimativa Dyno Lite (margem ±10% com base em peso e arrasto). Não substitui dinamômetro certificado."
                       "REGULAR" -> "Estimativa Dyno Lite (margem ±15% com base em peso e arrasto). Não substitui dinamômetro certificado."
+                      "PASSAGEM INCOMPLETA" -> "Passagem incompleta (acima de ±20%). Pico medido apenas nesta faixa — não representa a potência máxima real."
                       "DADOS INSUFICIENTES" -> "Estimativa preliminar (acima de ±20%). Faixa de aceleração insuficiente para homologação ou comparação."
                       else -> "Passagem não homologada para medição de potência."
                     }

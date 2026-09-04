@@ -396,7 +396,9 @@ object VehicleCalculations {
     maxIntegratedSpeedKmh: Float = maxSpeedKmh,
     maxGpsSpeedKmh: Float = maxSpeedKmh,
     sensorDeltaVMps: Float = 0f,
-    gpsDeltaVMps: Float = 0f
+    gpsDeltaVMps: Float = 0f,
+    syncPairsCount: Int = 10,
+    targetEndSpeedKmh: Float? = null
   ): RunQualityEvaluation {
     val effectiveGpsCount = if (validGpsCount != 10) validGpsCount else validGpsLocationsCount
     val effectiveElapsedSec = if (elapsedSeconds != 5.0f) elapsedSeconds else elapsedSec
@@ -406,7 +408,150 @@ object VehicleCalculations {
     val effectiveFinalSpeed = if (maxSpeedKmh != 50f) maxSpeedKmh else finalGpsSpeedKmh
     val effectiveStartSpeed = if (startSpeedKmh != 40f) startSpeedKmh else startGpsSpeedKmh
 
-    // 0. Detecção de Divergência Acelerômetro vs GPS / GPS Congelado
+    // =========================================================================
+    // 0. ERROS FATAIS / INVÁLIDA (Sinal perdido, frenagem, ré, corrupção)
+    // =========================================================================
+    if (finishReason == FinishReason.CANCELLED || finishReason == FinishReason.GPS_LOST || hasLossOfGps) {
+      return RunQualityEvaluation(
+        quality = "INVÁLIDA",
+        confidenceLevel = "BAIXA",
+        marginPercent = 0f,
+        marginDisplay = "Não homologada",
+        invalidationReason = "Teste cancelado ou sinal GPS perdido.",
+        isPreliminary = false,
+        canCompare = false
+      )
+    }
+    if (hasBraking || isReverseMovement || isSpeedDecrease) {
+      return RunQualityEvaluation(
+        quality = "INVÁLIDA",
+        confidenceLevel = "BAIXA",
+        marginPercent = 0f,
+        marginDisplay = "Não homologada",
+        invalidationReason = "Frenagem, redução de velocidade ou movimento reverso detectado.",
+        isPreliminary = false,
+        canCompare = false
+      )
+    }
+    if (effectiveElapsedSec <= 0.05f) {
+      return RunQualityEvaluation(
+        quality = "INVÁLIDA",
+        confidenceLevel = "BAIXA",
+        marginPercent = 0f,
+        marginDisplay = "Não homologada",
+        invalidationReason = "Duração zero ou dados corrompidos.",
+        isPreliminary = false,
+        canCompare = false
+      )
+    }
+    if (effectiveGpsCount < 4) {
+      return RunQualityEvaluation(
+        quality = "INVÁLIDA",
+        confidenceLevel = "BAIXA",
+        marginPercent = 0f,
+        marginDisplay = "Não homologada",
+        invalidationReason = "Menos de 4 leituras GPS válidas ($effectiveGpsCount < 4).",
+        isPreliminary = false,
+        canCompare = false
+      )
+    }
+    if (effectiveAccuracy > 25f) {
+      return RunQualityEvaluation(
+        quality = "INVÁLIDA",
+        confidenceLevel = "BAIXA",
+        marginPercent = 0f,
+        marginDisplay = "Não homologada",
+        invalidationReason = "Precisão horizontal do GPS degradada (> 25m).",
+        isPreliminary = false,
+        canCompare = false
+      )
+    }
+    if (effectiveFinalSpeed < (effectiveStartSpeed - 1.0f) || speedGainKmh <= 0f) {
+      return RunQualityEvaluation(
+        quality = "INVÁLIDA",
+        confidenceLevel = "BAIXA",
+        marginPercent = 0f,
+        marginDisplay = "Não homologada",
+        invalidationReason = "Velocidade final menor que a inicial.",
+        isPreliminary = false,
+        canCompare = false
+      )
+    }
+    if (gpsFrozen) {
+      return RunQualityEvaluation(
+        quality = "GPS INCONSISTENTE",
+        confidenceLevel = "BAIXA",
+        marginPercent = 25.0f,
+        marginDisplay = "acima de ±20%",
+        invalidationReason = "GPS congelado durante a aceleração. Potência preliminar — GPS não acompanhou toda a aceleração.",
+        isPreliminary = true,
+        canCompare = false
+      )
+    }
+
+    // =========================================================================
+    // 1. PRIORIDADE 1: PASSAGEM INCOMPLETA
+    // - ganho de velocidade insuficiente (< 25.0 km/h para estimar potência máxima)
+    // - faixa de RPM insuficiente (< 800 RPM)
+    // - aceleração interrompida
+    // - troca de marcha
+    // - término antes da faixa configurada
+    // =========================================================================
+    val isIncompleteGearShift = effectiveGearShift || finishReason == FinishReason.GEAR_SHIFT
+    val isPrematureSpeedGain = speedGainKmh < 25.0f
+    val isInsufficientRpmSpan = rpmSpan != null && rpmSpan < 800
+    val isInterrupted = finishReason == FinishReason.CLUTCH_DISENGAGED || finishReason == FinishReason.PREMATURE_TERMINATION
+    val isBeforeTargetSpeed = targetEndSpeedKmh != null && effectiveFinalSpeed < (targetEndSpeedKmh - 2.0f)
+
+    if (isIncompleteGearShift || isPrematureSpeedGain || isInsufficientRpmSpan || isInterrupted || isBeforeTargetSpeed) {
+      val incompleteReason = when {
+        isIncompleteGearShift -> "Troca de marcha detectada. A passagem foi encerrada e poderá ser considerada incompleta."
+        isBeforeTargetSpeed -> "A aceleração terminou antes da faixa necessária para estimar a potência máxima."
+        isPrematureSpeedGain -> "A aceleração terminou antes da faixa necessária para estimar a potência máxima."
+        isInsufficientRpmSpan -> "Faixa de RPM insuficiente ($rpmSpan RPM < 800 RPM)."
+        isInterrupted -> "Aceleração interrompida antes da conclusão da faixa."
+        else -> "A aceleração terminou antes da faixa necessária para estimar a potência máxima."
+      }
+      return RunQualityEvaluation(
+        quality = "PASSAGEM INCOMPLETA",
+        confidenceLevel = "BAIXA",
+        marginPercent = 25.0f,
+        marginDisplay = "acima de ±20%",
+        invalidationReason = incompleteReason,
+        isPreliminary = true,
+        canCompare = false
+      )
+    }
+
+    // =========================================================================
+    // 2. PRIORIDADE 2: DADOS INSUFICIENTES
+    // - menos de 8 atualizações GPS válidas
+    // - duração insuficiente (< 3.0s)
+    // - poucos pares sincronizados GPS × sensor (< 4)
+    // =========================================================================
+    if (effectiveGpsCount < 8 || effectiveElapsedSec < 3.0f || syncPairsCount < 4) {
+      val reasonDesc = when {
+        effectiveGpsCount < 8 -> "Menos de 8 atualizações GPS válidas ($effectiveGpsCount < 8)."
+        effectiveElapsedSec < 3.0f -> "Duração da passagem insuficiente (${String.format(java.util.Locale.US, "%.2f", effectiveElapsedSec)}s < 3.00s)."
+        syncPairsCount < 4 -> "Poucos pares sincronizados GPS × sensores ($syncPairsCount < 4)."
+        else -> "Dados insuficientes para cálculo preciso."
+      }
+      return RunQualityEvaluation(
+        quality = "DADOS INSUFICIENTES",
+        confidenceLevel = "BAIXA",
+        marginPercent = 25.0f,
+        marginDisplay = "acima de ±20%",
+        invalidationReason = reasonDesc,
+        isPreliminary = true,
+        canCompare = false
+      )
+    }
+
+    // =========================================================================
+    // 3. PRIORIDADE 3: GPS/SENSOR DIVERGENTE
+    // - somente avaliar quando houver dados suficientes (>= 8 GPS e >= 4 pares)
+    // - não usar essa classificação apenas porque a passagem foi curta
+    // =========================================================================
     val effectiveGpsDeltaV = if (gpsDeltaVMps > 0.1f) gpsDeltaVMps else ((maxGpsSpeedKmh - startSpeedKmh).coerceAtLeast(0f) / 3.6f)
     if (sensorDeltaVMps > 0.5f && effectiveGpsDeltaV > 0.5f) {
       val deltaVDivergence = kotlin.math.abs(sensorDeltaVMps - effectiveGpsDeltaV) / effectiveGpsDeltaV
@@ -433,121 +578,12 @@ object VehicleCalculations {
       }
     }
 
-    val diffSpeed = kotlin.math.abs(maxGpsSpeedKmh - maxIntegratedSpeedKmh)
-    if (gpsFrozen || (diffSpeed > 10.0f && gpsFrozen)) {
-      return RunQualityEvaluation(
-        quality = "GPS INCONSISTENTE",
-        confidenceLevel = "BAIXA",
-        marginPercent = 25.0f,
-        marginDisplay = "acima de ±20%",
-        invalidationReason = "GPS congelado durante a aceleração. Potência preliminar — GPS não acompanhou toda a aceleração.",
-        isPreliminary = true,
-        canCompare = false
-      )
-    }
-
-    // 1. Condições de INVÁLIDA
-    if (finishReason == FinishReason.CANCELLED || finishReason == FinishReason.GPS_LOST || hasLossOfGps) {
-      return RunQualityEvaluation(
-        quality = "INVÁLIDA",
-        confidenceLevel = "BAIXA",
-        marginPercent = 0f,
-        marginDisplay = "Não homologada",
-        invalidationReason = "Teste cancelado ou sinal GPS perdido.",
-        isPreliminary = false,
-        canCompare = false
-      )
-    }
-    if (hasBraking || isReverseMovement || isSpeedDecrease) {
-      return RunQualityEvaluation(
-        quality = "INVÁLIDA",
-        confidenceLevel = "BAIXA",
-        marginPercent = 0f,
-        marginDisplay = "Não homologada",
-        invalidationReason = "Frenagem, redução de velocidade ou movimento reverso detectado.",
-        isPreliminary = false,
-        canCompare = false
-      )
-    }
-    if (effectiveGpsCount < 4) {
-      return RunQualityEvaluation(
-        quality = "INVÁLIDA",
-        confidenceLevel = "BAIXA",
-        marginPercent = 0f,
-        marginDisplay = "Não homologada",
-        invalidationReason = "Menos de 4 leituras GPS válidas ($effectiveGpsCount < 4).",
-        isPreliminary = false,
-        canCompare = false
-      )
-    }
-    if (effectiveElapsedSec <= 0.05f) {
-      return RunQualityEvaluation(
-        quality = "INVÁLIDA",
-        confidenceLevel = "BAIXA",
-        marginPercent = 0f,
-        marginDisplay = "Não homologada",
-        invalidationReason = "Duração zero ou dados corrompidos.",
-        isPreliminary = false,
-        canCompare = false
-      )
-    }
-    if (effectiveFinalSpeed < (effectiveStartSpeed - 1.0f) || speedGainKmh <= 0f) {
-      return RunQualityEvaluation(
-        quality = "INVÁLIDA",
-        confidenceLevel = "BAIXA",
-        marginPercent = 0f,
-        marginDisplay = "Não homologada",
-        invalidationReason = "Velocidade final menor que a inicial.",
-        isPreliminary = false,
-        canCompare = false
-      )
-    }
-    if (effectiveGearShift) {
-      return RunQualityEvaluation(
-        quality = "INVÁLIDA",
-        confidenceLevel = "BAIXA",
-        marginPercent = 0f,
-        marginDisplay = "Não homologada",
-        invalidationReason = "Troca de marcha detectada durante a medição.",
-        isPreliminary = false,
-        canCompare = false
-      )
-    }
-    if (effectiveAccuracy > 25f) {
-      return RunQualityEvaluation(
-        quality = "INVÁLIDA",
-        confidenceLevel = "BAIXA",
-        marginPercent = 0f,
-        marginDisplay = "Não homologada",
-        invalidationReason = "Precisão horizontal do GPS degradada (> 25m).",
-        isPreliminary = false,
-        canCompare = false
-      )
-    }
-
-    // 2. Condições de DADOS INSUFICIENTES (ex: ganho de 6,4 km/h ou 14,9 km/h)
-    if (speedGainKmh < 15.0f || effectiveElapsedSec < 3.0f || effectiveGpsCount < 6 || (rpmSpan != null && rpmSpan < 800)) {
-      val reasonDesc = when {
-        speedGainKmh < 15.0f -> "Ganho de velocidade GPS insuficiente (${String.format(java.util.Locale.US, "%.1f", speedGainKmh)} km/h < 15.0 km/h)."
-        effectiveElapsedSec < 3.0f -> "Duração da passagem insuficiente (${String.format(java.util.Locale.US, "%.2f", effectiveElapsedSec)}s < 3.00s)."
-        effectiveGpsCount < 6 -> "Poucas leituras de GPS válidas ($effectiveGpsCount < 6)."
-        rpmSpan != null && rpmSpan < 800 -> "Faixa de RPM insuficiente ($rpmSpan RPM < 800 RPM)."
-        else -> "Faixa de aceleração insuficiente."
-      }
-      return RunQualityEvaluation(
-        quality = "DADOS INSUFICIENTES",
-        confidenceLevel = "BAIXA",
-        marginPercent = 25.0f,
-        marginDisplay = "acima de ±20%",
-        invalidationReason = reasonDesc,
-        isPreliminary = true,
-        canCompare = false
-      )
-    }
-
-    // 3. Condições de BOA
+    // =========================================================================
+    // 4. PRIORIDADE 4: REGULAR ou BOA
+    // - somente quando a janela for suficiente
+    // =========================================================================
     val isGpsGood = effectiveAccuracy <= 10.0f && avgSyncDiffKmh <= 8.0f && rejectionRatio <= 0.20f
-    if (speedGainKmh >= 20.0f && effectiveGpsCount >= 8 && effectiveElapsedSec in 3.0f..25.0f && isGpsGood && effectiveStable) {
+    if (speedGainKmh >= 25.0f && effectiveGpsCount >= 10 && effectiveElapsedSec in 3.0f..25.0f && isGpsGood && effectiveStable) {
       return RunQualityEvaluation(
         quality = "BOA",
         confidenceLevel = "ALTA",
@@ -557,18 +593,17 @@ object VehicleCalculations {
         isPreliminary = false,
         canCompare = true
       )
+    } else {
+      return RunQualityEvaluation(
+        quality = "REGULAR",
+        confidenceLevel = "MEDIA",
+        marginPercent = 15.0f,
+        marginDisplay = "±15%",
+        invalidationReason = null,
+        isPreliminary = false,
+        canCompare = true
+      )
     }
-
-    // 4. Caso contrário: REGULAR (ganho entre 15.0 e 19.9 km/h ou dados utilizáveis)
-    return RunQualityEvaluation(
-      quality = "REGULAR",
-      confidenceLevel = "MEDIA",
-      marginPercent = 15.0f,
-      marginDisplay = "±15%",
-      invalidationReason = null,
-      isPreliminary = false,
-      canCompare = true
-    )
   }
 
   fun findSustainedPeaks(

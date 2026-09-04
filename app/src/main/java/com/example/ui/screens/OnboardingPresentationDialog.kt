@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -48,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -92,7 +94,7 @@ fun OnboardingPresentationDialog(
         // Logo Oficial DYNO LITE em versão ampliada na tela de abertura
         Image(
           painter = painterResource(id = R.drawable.dyno_horizontal_logo),
-          contentDescription = "Logo DYNO LITE",
+          contentDescription = "DYNO LITE",
           modifier = Modifier
             .fillMaxWidth(0.85f)
             .height(56.dp)
@@ -115,47 +117,61 @@ fun OnboardingPresentationDialog(
           )
         }
 
-        // Safety Warning Box
+        // Safety Warning Box - Aviso de segurança em destaque
         Surface(
           shape = RoundedCornerShape(14.dp),
           color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
-          border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.6f)),
+          modifier = Modifier.fillMaxWidth()
         ) {
           Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
           ) {
             Icon(
               imageVector = Icons.Outlined.Security,
               contentDescription = null,
               tint = MaterialTheme.colorScheme.error,
-              modifier = Modifier.size(22.dp)
+              modifier = Modifier.size(24.dp)
             )
-            Text(
-              text = "Prepare o teste antes de movimentar o veículo. Nunca mexa no celular dirigindo.",
-              style = MaterialTheme.typography.bodySmall.copy(
-                fontWeight = FontWeight.SemiBold,
-                lineHeight = 16.sp
-              ),
-              color = MaterialTheme.colorScheme.onSurface
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+              Text(
+                text = "Prepare o teste antes de movimentar o veículo.\nNunca mexa no celular dirigindo.",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 13.5.sp,
+                  lineHeight = 18.sp
+                ),
+                color = MaterialTheme.colorScheme.onSurface
+              )
+              Text(
+                text = "Não é permitido iniciar configurações que exijam interação com o veículo em movimento.",
+                style = MaterialTheme.typography.bodySmall.copy(
+                  fontSize = 11.5.sp,
+                  lineHeight = 15.sp,
+                  fontWeight = FontWeight.Medium
+                ),
+                color = MaterialTheme.colorScheme.error
+              )
+            }
           }
         }
 
-        // Disclaimer Box
+        // Disclaimer Box - Texto Introdutório
         Surface(
           shape = RoundedCornerShape(14.dp),
           color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+          modifier = Modifier.fillMaxWidth()
         ) {
           Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
           ) {
             Row(
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(6.dp)
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
               Icon(
                 imageVector = Icons.Outlined.Info,
@@ -165,48 +181,52 @@ fun OnboardingPresentationDialog(
               )
               Text(
                 text = "Antes do primeiro teste:",
-                style = MaterialTheme.typography.labelMedium.copy(
+                style = MaterialTheme.typography.labelLarge.copy(
                   fontWeight = FontWeight.Bold,
-                  fontSize = 13.sp
+                  fontSize = 14.sp
                 ),
                 color = MaterialTheme.colorScheme.primary
               )
             }
             Text(
-              text = "Os resultados são estimativas e podem variar com peso, inclinação da pista, calibração e precisão do GPS.",
+              text = "Os resultados são estimativas e podem variar conforme o peso informado, a inclinação da pista, a calibração dos sensores e a precisão do GPS.",
               style = MaterialTheme.typography.bodySmall.copy(
-                fontSize = 12.sp,
-                lineHeight = 16.sp
+                fontSize = 12.5.sp,
+                lineHeight = 17.sp
               ),
               color = MaterialTheme.colorScheme.onSurfaceVariant
             )
           }
         }
 
-        // Checklist of essentials
+        // Checklist de instruções corrigidas (1 a 6)
         Column(
           modifier = Modifier.fillMaxWidth(),
-          verticalArrangement = Arrangement.spacedBy(8.dp)
+          verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
           QuickPointRow(
             number = "1",
-            text = "Fixe o celular firmemente no suporte vertical (tela para você, traseira para a frente)."
+            text = "Fixe o celular firmemente em um suporte, na posição indicada pela calibração."
           )
           QuickPointRow(
             number = "2",
-            text = "Calibre o zero no suporte com o carro parado e motor ligado."
+            text = "Com o veículo parado e o motor funcionando, calibre os sensores."
           )
           QuickPointRow(
             number = "3",
-            text = "Inicie o procedimento com o carro parado."
+            text = "Selecione a marcha, a velocidade de início e confirme o peso total do teste."
           )
           QuickPointRow(
             number = "4",
-            text = "O teste começa automaticamente na velocidade selecionada (40, 50 ou 60 km/h) pelo GPS real."
+            text = "Toque em “Preparar teste” ainda com o veículo parado. A medição começará automaticamente quando a velocidade selecionada for cruzada pelo GPS."
           )
           QuickPointRow(
             number = "5",
-            text = "Ao desacelerar ou pisar na embreagem, o teste finaliza e salva a passagem."
+            text = "Acelere continuamente na mesma marcha. Ao aliviar o acelerador, o GPS confirmará a desaceleração e encerrará a passagem automaticamente."
+          )
+          QuickPointRow(
+            number = "6",
+            text = "Não troque de marcha durante uma medição de potência. Se houver troca de marcha ou acionamento da embreagem, a passagem poderá ser marcada como incompleta."
           )
         }
 
@@ -215,28 +235,46 @@ fun OnboardingPresentationDialog(
           color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
         )
 
-        // Don't show again checkbox
-        Row(
+        // Don't show again checkbox com área de toque mínima de 48dp, borda visível e ciano
+        Surface(
           modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
             .clickable { dontShowAgain = !dontShowAgain }
-            .padding(vertical = 4.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(8.dp)
+            .testTag("row_dont_show_again"),
+          shape = RoundedCornerShape(12.dp),
+          color = if (dontShowAgain) Color(0xFF00E5FF).copy(alpha = 0.08f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+          border = BorderStroke(1.dp, if (dontShowAgain) Color(0xFF00E5FF) else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
         ) {
-          Checkbox(
-            checked = dontShowAgain,
-            onCheckedChange = { dontShowAgain = it },
-            colors = CheckboxDefaults.colors(
-              checkedColor = MaterialTheme.colorScheme.primary
-            ),
-            modifier = Modifier.testTag("checkbox_dont_show_again")
-          )
-          Text(
-            text = "Não mostrar novamente na inicialização",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface
-          )
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .defaultMinSize(minHeight = 48.dp)
+              .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+          ) {
+            Checkbox(
+              checked = dontShowAgain,
+              onCheckedChange = { dontShowAgain = it },
+              colors = CheckboxDefaults.colors(
+                checkedColor = Color(0xFF00E5FF),
+                uncheckedColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                checkmarkColor = Color(0xFF0B141A)
+              ),
+              modifier = Modifier
+                .size(24.dp)
+                .testTag("checkbox_dont_show_again")
+            )
+            Text(
+              text = "Não mostrar novamente na inicialização",
+              style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 13.sp,
+                fontWeight = if (dontShowAgain) FontWeight.SemiBold else FontWeight.Normal
+              ),
+              color = MaterialTheme.colorScheme.onSurface
+            )
+          }
         }
 
         // Action Buttons
