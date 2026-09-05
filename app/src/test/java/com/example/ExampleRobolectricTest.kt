@@ -90,4 +90,59 @@ class ExampleRobolectricTest {
     val validForGol = results.filter { it.vehicleName == "Gol 1.6 AP" && it.quality != "INVÁLIDA" }
     assertTrue(validForGol.size >= 2)
   }
+
+  @Test
+  fun `test simulator open crash reproduction`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val tuningRepo = com.example.data.TuningBuildRepository(context)
+    val builds = tuningRepo.getSavedBuilds()
+    assertNotNull(builds)
+    assertTrue(builds.isNotEmpty())
+    val active = tuningRepo.getActiveBuild()
+    assertNotNull(active)
+  }
+
+  @Test
+  fun `test simulator view model empty state and vehicle selection`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val vehicleRepo = com.example.data.VehicleRepository(context)
+    val simRepo = com.example.data.SimulationRepository(context)
+    val tuningRepo = com.example.data.TuningBuildRepository(context)
+
+    vehicleRepo.getVehicles().forEach { vehicleRepo.deleteVehicle(it.id) }
+
+    val vm = com.example.ui.screens.SimulatorViewModel(vehicleRepo, simRepo, tuningRepo)
+    val state = vm.uiState.value
+
+    assertEquals(false, state.isLoading)
+
+    // Add a vehicle to vehicle repo and select it
+    val testVehicle = com.example.model.VehicleProfile(
+      id = "test-veh-1",
+      manufacturer = "Chevrolet",
+      model = "Vectra 2.0 8V",
+      year = 1998,
+      factoryPowerCv = 110.0f,
+      factoryTorqueKgf = 17.3f,
+      curbWeightKg = 1250.0f,
+      drivetrain = "FWD"
+    )
+    vehicleRepo.saveVehicle(testVehicle)
+
+    vm.loadInitialData()
+    val updatedState = vm.uiState.value
+    assertNotNull(updatedState.selectedVehicle)
+    assertEquals("Vectra 2.0 8V", updatedState.selectedVehicle?.model)
+    assertEquals(110.0f, updatedState.configuration.enginePowerCv)
+
+    // Test simulation calculation
+    val simSuccess = vm.validateAndSimulate()
+    assertTrue(simSuccess)
+    assertNotNull(vm.uiState.value.result)
+
+    // Test turbo mode toggle
+    vm.setAspirationTurbo(true, 0.8f)
+    assertTrue(vm.uiState.value.configuration.isTurboSimulated)
+    assertEquals(0.8f, vm.uiState.value.configuration.turboBoostBar)
+  }
 }

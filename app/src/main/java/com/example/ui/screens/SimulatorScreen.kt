@@ -111,7 +111,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.max
 import kotlin.math.min
+import android.util.Log
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.RunResultRepository
+import com.example.data.SimulationRepository
 import com.example.data.TuningBuildRepository
 import com.example.data.VehicleRepository
 import com.example.model.*
@@ -130,14 +134,21 @@ val SimAmberHighlight = Color(0xFFF59E0B)
 fun SimulatorScreen(
   initialRunId: String? = null,
   onNavigateToRunDetails: ((String) -> Unit)? = null,
+  onNavigateToGarage: (() -> Unit)? = null,
+  onNavigateToWizard: (() -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
   val tuningRepo = remember { TuningBuildRepository(context) }
   val vehicleRepo = remember { VehicleRepository(context) }
+  val simRepo = remember { SimulationRepository(context) }
   val runRepo = remember { RunResultRepository(context) }
 
-  val allVehicles = remember { vehicleRepo.getVehicles() }
+  val viewModel: SimulatorViewModel = viewModel(
+    factory = SimulatorViewModelFactory(vehicleRepo, simRepo, tuningRepo)
+  )
+  val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
   val allRuns = remember { runRepo.getResults() }
 
   var savedBuilds by remember { mutableStateOf(tuningRepo.getSavedBuilds()) }
@@ -149,10 +160,37 @@ fun SimulatorScreen(
   var showVehicleSetupModal by remember { mutableStateOf(false) }
   var showSaveProjectDialog by remember { mutableStateOf(false) }
   var showProjectSwitcherDialog by remember { mutableStateOf(false) }
-  var showBudgetModal by remember { mutableStateOf(false) }
+  var showSelectVehicleDialog by remember { mutableStateOf(false) }
+  var simulationErrorMessage by remember { mutableStateOf<String?>(null) }
 
   var projectNameInput by remember { mutableStateOf(currentBuild.projectName) }
   var selectedCategory by remember { mutableStateOf(TuningCategory.MOTOR) }
+
+  // Sincroniza com o veículo selecionado do ViewModel
+  LaunchedEffect(uiState.selectedVehicle) {
+    uiState.selectedVehicle?.let { veh ->
+      val displacementNumber = veh.displacement.filter { it.isDigit() }.toIntOrNull() ?: currentBuild.displacementCc
+      currentBuild = currentBuild.copy(
+        vehicleName = "${veh.manufacturer} ${veh.model}",
+        displacementCc = displacementNumber,
+        factoryEnginePowerCv = (veh.factoryPowerCv ?: 100f).coerceAtLeast(20f),
+        factoryEngineTorqueKgfm = (veh.factoryTorqueKgf ?: 15f).coerceAtLeast(3f),
+        factoryPeakPowerRpm = 5600,
+        factoryPeakTorqueRpm = 3800,
+        factoryRedlineRpm = 6500,
+        baseVehicleCurbWeightKg = veh.curbWeightKg.coerceAtLeast(400f),
+        baseDrivetrain = when (veh.drivetrain.trim().uppercase()) {
+          "TRAÇÃO TRASEIRA", "RWD" -> DrivetrainType.RWD
+          "TRAÇÃO INTEGRAL", "AWD", "4X4" -> DrivetrainType.AWD
+          else -> DrivetrainType.FWD
+        },
+        finalDriveRatio = (veh.finalDriveRatio ?: 3.94f).coerceAtLeast(1.0f),
+        tireWidthMm = veh.tireWidthMm,
+        tireAspectRatio = veh.tireAspectRatio,
+        rimInches = veh.wheelDiameterInches
+      )
+    }
+  }
 
   // Se veio de um teste real inicial, adapta
   LaunchedEffect(initialRunId) {
@@ -173,17 +211,137 @@ fun SimulatorScreen(
     }
   }
 
-  // Cálculo da Preparação em Tempo Real
+  // Cálculo da Preparação em Tempo Real com proteção contra falha
   val tuningResult = remember(currentBuild) {
-    GarageTuningEngine.calculateTuningBuild(currentBuild)
+    try {
+      GarageTuningEngine.calculateTuningBuild(currentBuild)
+    } catch (e: Exception) {
+      Log.e("SimulatorScreen", "Error calculating tuning build", e)
+      simulationErrorMessage = "Não foi possível calcular esta configuração. Revise os dados informados."
+      GarageTuningEngine.calculateTuningBuild(GarageTuningEngine.createDefaultVectraBuild())
+    }
   }
 
-  // Simulação de Aceleração Dinâmica
+  // Simulação de Aceleração Dinâmica com proteção contra falha
   val dynoTestResult = remember(tuningResult) {
-    GarageTuningEngine.runDynoTrackSimulation(tuningResult)
+    try {
+      GarageTuningEngine.runDynoTrackSimulation(tuningResult)
+    } catch (e: Exception) {
+      Log.e("SimulatorScreen", "Error running track simulation", e)
+      simulationErrorMessage = "Não foi possível calcular esta configuração. Revise os dados informados."
+      GarageTuningEngine.runDynoTrackSimulation(
+        GarageTuningEngine.calculateTuningBuild(GarageTuningEngine.createDefaultVectraBuild())
+      )
+    }
   }
 
   val scrollState = rememberScrollState()
+
+  if (uiState.isLoading) {
+    Box(
+      modifier = modifier
+        .fillMaxSize()
+        .background(DynoBackground),
+      contentAlignment = Alignment.Center
+    ) {
+      CircularProgressIndicator(color = DynoBluePrimary)
+    }
+    return
+  }
+
+  if (uiState.selectedVehicle == null) {
+    Box(
+      modifier = modifier
+        .fillMaxSize()
+        .background(DynoBackground),
+      contentAlignment = Alignment.Center
+    ) {
+      Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier.padding(24.dp)
+      ) {
+        Icon(
+          Icons.Default.DirectionsCar,
+          contentDescription = null,
+          tint = DynoTextMuted,
+          modifier = Modifier.size(64.dp)
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+          text = "Nenhum veículo selecionado.",
+          style = MaterialTheme.typography.titleMedium,
+          color = DynoTextPrimary,
+          fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+          text = "Para usar o simulador, cadastre ou selecione um veículo da Garagem.",
+          style = MaterialTheme.typography.bodyMedium,
+          color = DynoTextSecondary,
+          textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        DynoPrimaryButton(
+          text = "CADASTRAR OU SELECIONAR VEÍCULO",
+          onClick = {
+            if (uiState.allVehicles.isNotEmpty()) {
+              showSelectVehicleDialog = true
+            } else {
+              onNavigateToWizard?.invoke() ?: onNavigateToGarage?.invoke()
+            }
+          },
+          icon = Icons.Default.Add,
+          testTag = "btn_register_or_select_vehicle"
+        )
+      }
+
+      if (showSelectVehicleDialog) {
+        AlertDialog(
+          onDismissRequest = { showSelectVehicleDialog = false },
+          title = { Text("Selecionar Veículo") },
+          text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+              uiState.allVehicles.forEach { veh ->
+                Row(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                      viewModel.selectVehicle(veh)
+                      showSelectVehicleDialog = false
+                    }
+                    .padding(vertical = 10.dp),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = SimPurpleLight)
+                  Spacer(modifier = Modifier.width(10.dp))
+                  Column {
+                    Text("${veh.manufacturer} ${veh.model}", fontWeight = FontWeight.Bold, color = DynoTextPrimary)
+                    Text("${veh.year} • ${veh.factoryPowerCv?.toInt() ?: 100} cv", fontSize = 11.sp, color = DynoTextSecondary)
+                  }
+                }
+                HorizontalDivider(color = DynoDivider)
+              }
+            }
+          },
+          confirmButton = {
+            TextButton(onClick = {
+              showSelectVehicleDialog = false
+              onNavigateToWizard?.invoke() ?: onNavigateToGarage?.invoke()
+            }) {
+              Text("Cadastrar Novo", color = SimPurpleLight)
+            }
+          },
+          dismissButton = {
+            TextButton(onClick = { showSelectVehicleDialog = false }) {
+              Text("Fechar")
+            }
+          }
+        )
+      }
+    }
+    return
+  }
 
   Box(
     modifier = modifier
@@ -196,6 +354,40 @@ fun SimulatorScreen(
         .verticalScroll(scrollState)
         .padding(horizontal = 14.dp, vertical = 10.dp)
     ) {
+      if (simulationErrorMessage != null || uiState.errorMessage != null) {
+        val err = simulationErrorMessage ?: uiState.errorMessage ?: ""
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 10.dp),
+          color = DynoErrorRed.copy(alpha = 0.15f),
+          shape = RoundedCornerShape(8.dp),
+          border = BorderStroke(1.dp, DynoErrorRed.copy(alpha = 0.6f))
+        ) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Icon(Icons.Filled.Warning, contentDescription = null, tint = DynoErrorRed, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+              text = err,
+              color = DynoErrorRed,
+              fontSize = 12.sp,
+              modifier = Modifier.weight(1f)
+            )
+            IconButton(
+              onClick = { simulationErrorMessage = null },
+              modifier = Modifier.size(20.dp)
+            ) {
+              Icon(Icons.Filled.Close, contentDescription = "Fechar", tint = DynoErrorRed, modifier = Modifier.size(14.dp))
+            }
+          }
+        }
+      }
+
       // -----------------------------------------------------------------------------------
       // 1. CABEÇALHO DA GARAGEM & SELETOR DE PROJETOS
       // -----------------------------------------------------------------------------------
@@ -251,6 +443,12 @@ fun SimulatorScreen(
                     modifier = Modifier.size(20.dp).testTag("edit_vehicle_specs_button")
                   ) {
                     Icon(Icons.Filled.Edit, contentDescription = "Editar", tint = DynoTextMuted, modifier = Modifier.size(13.dp))
+                  }
+                  IconButton(
+                    onClick = { showSelectVehicleDialog = true },
+                    modifier = Modifier.size(20.dp).testTag("select_vehicle_button")
+                  ) {
+                    Icon(Icons.Filled.DirectionsCar, contentDescription = "Trocar Veículo", tint = SimPurpleLight, modifier = Modifier.size(13.dp))
                   }
                 }
               }
@@ -367,9 +565,22 @@ fun SimulatorScreen(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
       ) {
-        // Testar Configuração (Abre o Dinamômetro Virtual)
+        // Simular Configuração (Abre o Dinamômetro Virtual)
         Button(
-          onClick = { showDynoModal = true },
+          onClick = {
+            if (currentBuild.baseVehicleCurbWeightKg <= 0f ||
+              currentBuild.factoryEnginePowerCv <= 0f ||
+              currentBuild.factoryEngineTorqueKgfm <= 0f ||
+              currentBuild.finalDriveRatio <= 0f ||
+              currentBuild.gearRatios.isEmpty() ||
+              currentBuild.gearRatios.any { it <= 0f }
+            ) {
+              simulationErrorMessage = "Não foi possível calcular esta configuração. Revise os dados informados."
+            } else {
+              simulationErrorMessage = null
+              showDynoModal = true
+            }
+          },
           colors = ButtonDefaults.buttonColors(
             containerColor = SimPurplePrimary,
             contentColor = Color.White
@@ -380,7 +591,7 @@ fun SimulatorScreen(
         ) {
           Icon(Icons.Filled.Speed, contentDescription = null, modifier = Modifier.size(18.dp))
           Spacer(modifier = Modifier.width(6.dp))
-          Text("Testar Dyno", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+          Text("SIMULAR", fontWeight = FontWeight.Bold, fontSize = 13.sp)
         }
 
         // Comparar com Original
@@ -430,6 +641,48 @@ fun SimulatorScreen(
       }
 
       Spacer(modifier = Modifier.height(10.dp))
+
+      // Seletor Rápido: Aspirado ou Turbo
+      Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text("Tipo de Aspiração:", fontSize = 12.sp, color = DynoTextMuted, fontWeight = FontWeight.Bold)
+        val isAspirado = currentBuild.aspiration == AspirationType.ASPIRADO
+        FilterChip(
+          selected = isAspirado,
+          onClick = {
+            currentBuild = currentBuild.copy(
+              aspiration = AspirationType.ASPIRADO,
+              turboBoostBar = 0.0f
+            )
+          },
+          label = { Text("Aspirado", fontSize = 12.sp) },
+          colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = SimPurplePrimary,
+            selectedLabelColor = Color.White
+          ),
+          modifier = Modifier.testTag("chip_aspirado")
+        )
+        FilterChip(
+          selected = !isAspirado,
+          onClick = {
+            currentBuild = currentBuild.copy(
+              aspiration = AspirationType.TURBO_MEDIO,
+              turboBoostBar = if (currentBuild.turboBoostBar > 0f) currentBuild.turboBoostBar else 0.8f
+            )
+          },
+          label = { Text("Turbo", fontSize = 12.sp) },
+          colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = SimPurplePrimary,
+            selectedLabelColor = Color.White
+          ),
+          modifier = Modifier.testTag("chip_turbo")
+        )
+      }
+
+      Spacer(modifier = Modifier.height(6.dp))
 
       // -----------------------------------------------------------------------------------
       // 4. PRESETS RÁPIDOS DE PROJETO (Seção 3)
@@ -817,6 +1070,57 @@ fun SimulatorScreen(
       },
       dismissButton = {
         TextButton(onClick = { showProjectSwitcherDialog = false }) { Text("Fechar") }
+      }
+    )
+  }
+
+  if (showSelectVehicleDialog) {
+    AlertDialog(
+      onDismissRequest = { showSelectVehicleDialog = false },
+      title = { Text("Selecionar Veículo da Garagem") },
+      text = {
+        Column(modifier = Modifier.fillMaxWidth()) {
+          uiState.allVehicles.forEach { veh ->
+            val isSelected = uiState.selectedVehicle?.id == veh.id
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                  viewModel.selectVehicle(veh)
+                  showSelectVehicleDialog = false
+                }
+                .padding(vertical = 10.dp),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = if (isSelected) SimPurpleLight else DynoTextMuted)
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                  Text("${veh.manufacturer} ${veh.model}", fontWeight = FontWeight.Bold, color = if (isSelected) SimPurpleLight else DynoTextPrimary)
+                  Text("${veh.year} • ${veh.factoryPowerCv?.toInt() ?: 100} cv", fontSize = 11.sp, color = DynoTextSecondary)
+                }
+              }
+              if (isSelected) {
+                Icon(Icons.Filled.Check, contentDescription = null, tint = SimPurpleLight)
+              }
+            }
+            HorizontalDivider(color = DynoDivider)
+          }
+        }
+      },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            showSelectVehicleDialog = false
+            onNavigateToWizard?.invoke() ?: onNavigateToGarage?.invoke()
+          }
+        ) {
+          Text("Cadastrar Novo", color = SimPurpleLight)
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showSelectVehicleDialog = false }) { Text("Fechar") }
       }
     )
   }

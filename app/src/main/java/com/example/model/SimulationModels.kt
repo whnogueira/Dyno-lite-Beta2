@@ -114,7 +114,14 @@ data class SimulationConfig(
 
   val estimatedWheelTorqueKgfm: Float
     get() = engineTorqueKgfm * (1f - (drivetrainLossPercent / 100f).coerceIn(0f, 0.40f))
+
+  companion object {
+    fun default(): SimulationConfig = SimulationConfig()
+  }
 }
+
+typealias SimulationConfiguration = SimulationConfig
+typealias Vehicle = VehicleProfile
 
 data class GearSpeedEntry(
   val gearIndex: Int,

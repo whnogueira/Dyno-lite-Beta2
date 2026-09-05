@@ -19,7 +19,8 @@ class TuningBuildRepository(context: Context) {
     val jsonStr = prefs.getString(KEY_TUNING_BUILDS_JSON, null)
     if (jsonStr.isNullOrEmpty()) {
       val defaultBuild = GarageTuningEngine.createDefaultVectraBuild()
-      saveBuild(defaultBuild)
+      saveAll(listOf(defaultBuild))
+      setActiveBuildId(defaultBuild.id)
       return listOf(defaultBuild)
     }
 
@@ -37,7 +38,8 @@ class TuningBuildRepository(context: Context) {
     if (list.isEmpty()) {
       val defaultBuild = GarageTuningEngine.createDefaultVectraBuild()
       list.add(defaultBuild)
-      saveBuild(defaultBuild)
+      saveAll(list)
+      setActiveBuildId(defaultBuild.id)
     }
 
     return list
@@ -50,7 +52,7 @@ class TuningBuildRepository(context: Context) {
   fun getActiveBuild(): TuningBuild {
     val activeId = prefs.getString(KEY_ACTIVE_BUILD_ID, null)
     val builds = getSavedBuilds()
-    return builds.firstOrNull { it.id == activeId } ?: builds.first()
+    return builds.firstOrNull { it.id == activeId } ?: builds.firstOrNull() ?: GarageTuningEngine.createDefaultVectraBuild()
   }
 
   fun setActiveBuildId(id: String) {
@@ -84,7 +86,7 @@ class TuningBuildRepository(context: Context) {
     val removed = current.removeAll { it.id == id }
     if (removed && current.isNotEmpty()) {
       saveAll(current)
-      setActiveBuildId(current.first().id)
+      current.firstOrNull()?.id?.let { setActiveBuildId(it) }
     }
   }
 

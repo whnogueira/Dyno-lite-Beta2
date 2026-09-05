@@ -271,6 +271,13 @@ fun DynoLiteApp() {
               initialRunId = simulatorInitialRunId,
               onNavigateToRunDetails = {
                 selectedTab = DynoTab.RESULTS
+              },
+              onNavigateToGarage = {
+                selectedTab = DynoTab.GARAGE
+              },
+              onNavigateToWizard = {
+                vehicleToEdit = null
+                currentDestination = AppDestination.VEHICLE_WIZARD
               }
             )
           }
